@@ -424,9 +424,85 @@ def init_db() -> None:
     );
     """)
 
+    # 18. Usuários do Sistema & Permissões
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        name TEXT NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        role TEXT DEFAULT 'admin', -- admin, financeiro, vendas, fiscal, operador
+        active INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (company_id) REFERENCES companies(id)
+    );
+    """)
+
+    # 19. Auditoria de Alterações
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS audit_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        user_id INTEGER,
+        action TEXT NOT NULL, -- create, update, delete, pay, cancel, approve
+        entity TEXT NOT NULL, -- financial_entries, sales, invoices, etc.
+        entity_id INTEGER,
+        old_data TEXT,
+        new_data TEXT,
+        ip_address TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
     conn.commit()
+    migrate_db(conn)
+
+    # Seed Admin User se não existir
+    admin_exists = cur.execute("SELECT id FROM users WHERE email = 'admin@cortex.com.br'").fetchone()
+    if not admin_exists:
+        try:
+            import bcrypt
+            pwd_hash = bcrypt.hashpw(b"admin123", bcrypt.gensalt()).decode()
+        except Exception:
+            import hashlib
+            pwd_hash = hashlib.sha256("admin123".encode()).hexdigest()
+
+        cur.execute("""
+            INSERT INTO users (company_id, name, email, password_hash, role)
+            VALUES (1, 'Administrador Cortex', 'admin@cortex.com.br', ?, 'admin')
+        """, (pwd_hash,))
+        conn.commit()
+
     seed_initial_data(conn)
     conn.close()
+
+
+def migrate_db(conn: sqlite3.Connection) -> None:
+    """Migração automática para suporte multiempresa (company_id em todas as tabelas)."""
+    cur = conn.cursor()
+    tables = [
+        "financial_entries",
+        "products",
+        "contacts",
+        "categories",
+        "cost_centers",
+        "sales",
+        "crm_deals",
+        "service_orders",
+        "recurring_contracts",
+        "invoices",
+        "ofx_transactions",
+        "xml_purchases",
+    ]
+    for tbl in tables:
+        try:
+            cols = [c["name"] for c in cur.execute(f"PRAGMA table_info({tbl})").fetchall()]
+            if "company_id" not in cols:
+                cur.execute(f"ALTER TABLE {tbl} ADD COLUMN company_id INTEGER DEFAULT 1")
+        except Exception:
+            pass
+    conn.commit()
 
 
 def recalculate_bank_balances(conn: sqlite3.Connection) -> None:

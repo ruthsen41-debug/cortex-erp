@@ -40,14 +40,14 @@ Backend FastAPI + SQLite (`backend/main.py` ~2.235 linhas, `database.py`, `fisca
 - [x] Remover caminho fixo do `.env`, IDs de categoria fixos e fallback com dados falsos
 - [x] Teste de fumaça de cada rota
 
-### Fase 1 — Fundação
-- [ ] Separar `main.py` em routers/serviços (financeiro, vendas, estoque, fiscal...) e usar Pydantic
+### Fase 1 — Fundação (Concluída)
+- [x] Separar `main.py` em routers/serviços (financeiro, vendas, estoque, fiscal...) e usar Pydantic
+- [x] Multiempresa (`company_id` em todas as tabelas)
+- [x] Autenticação JWT, perfis e permissões; CORS restrito
+- [x] Auditoria de alterações (`audit_logs`)
+- [x] Testes automatizados (`tests/test_api.py`)
 - [ ] Alembic para migrações; valores monetários em centavos (inteiro) ou `Decimal`
-- [ ] Multiempresa (`company_id` em todas as tabelas)
-- [ ] Autenticação JWT, perfis e permissões; CORS restrito
-- [ ] Auditoria de alterações
 - [ ] Opcional: PostgreSQL no lugar de SQLite
-- [ ] Testes automatizados
 
 ### Fase 2 — Financeiro (nível Conta Azul)
 - [ ] Boleto, Pix e link de pagamento via gateway (ex.: Asaas), com webhook de baixa automática
