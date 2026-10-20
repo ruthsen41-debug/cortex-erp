@@ -402,3 +402,212 @@ def ai_natural_language_launch(req: AiLaunchRequest, current_user: Dict[str, Any
         "due_date": due_d.isoformat(),
         "already_paid": already_paid,
     }
+
+
+# ==============================================================================
+# IMPORTAÇÃO & EXPORTAÇÃO DE PLANILHAS (EXCEL / CSV)
+# ==============================================================================
+@router.get("/export-csv")
+def export_financial_csv(type: Optional[str] = None, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Exporta lançamentos financeiros em CSV compatível com Excel (ponto e vírgula e UTF-8 BOM)."""
+    from fastapi import Response
+    import csv
+    import io
+
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    sql = """
+        SELECT e.id, e.type, e.description, c.name as contact, cat.name as category,
+               b.name as bank_account, e.due_date, e.competence_date, e.amount,
+               e.paid_amount, e.status, e.payment_method
+        FROM financial_entries e
+        LEFT JOIN contacts c ON c.id = e.contact_id
+        LEFT JOIN categories cat ON cat.id = e.category_id
+        LEFT JOIN bank_accounts b ON b.id = e.bank_account_id
+        WHERE e.status != 'cancelado' AND e.company_id = ?
+    """
+    params = [company_id]
+    if type:
+        sql += " AND e.type = ?"
+        params.append(type)
+    sql += " ORDER BY e.due_date DESC"
+    rows = rows_to_dicts(conn.execute(sql, params).fetchall())
+    conn.close()
+
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=";", quoting=csv.QUOTE_MINIMAL)
+    writer.writerow(["ID", "Tipo", "Descricao", "Contato", "Categoria", "Conta_Bancaria", "Vencimento", "Competencia", "Valor", "Valor_Pago", "Status", "Forma_Pagamento"])
+
+    for r in rows:
+        writer.writerow([
+            r["id"],
+            r["type"].upper(),
+            r["description"],
+            r.get("contact") or "",
+            r.get("category") or "",
+            r.get("bank_account") or "",
+            r["due_date"],
+            r.get("competence_date") or "",
+            f"{float(r['amount']):.2f}".replace(".", ","),
+            f"{float(r.get('paid_amount') or 0):.2f}".replace(".", ","),
+            r["status"].upper(),
+            r.get("payment_method") or "",
+        ])
+
+    csv_data = "\ufeff" + output.getvalue()
+    filename = f"cortex_financeiro_{type or 'geral'}_{date.today().strftime('%Y%m%d')}.csv"
+    return Response(
+        content=csv_data.encode("utf-8-sig"),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/export-excel")
+def export_financial_excel(type: Optional[str] = None, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Exporta lançamentos financeiros em planilha Excel (.xlsx) com openpyxl."""
+    from fastapi import Response
+    import io
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    sql = """
+        SELECT e.id, e.type, e.description, c.name as contact, cat.name as category,
+               b.name as bank_account, e.due_date, e.amount, e.paid_amount, e.status, e.payment_method
+        FROM financial_entries e
+        LEFT JOIN contacts c ON c.id = e.contact_id
+        LEFT JOIN categories cat ON cat.id = e.category_id
+        LEFT JOIN bank_accounts b ON b.id = e.bank_account_id
+        WHERE e.status != 'cancelado' AND e.company_id = ?
+    """
+    params = [company_id]
+    if type:
+        sql += " AND e.type = ?"
+        params.append(type)
+    sql += " ORDER BY e.due_date DESC"
+    rows = rows_to_dicts(conn.execute(sql, params).fetchall())
+    conn.close()
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Financeiro Cortex"
+
+    headers = ["ID", "Tipo", "Descrição", "Cliente/Fornecedor", "Categoria", "Conta Bancária", "Vencimento", "Valor Total (R$)", "Valor Pago (R$)", "Status", "Forma Pagto"]
+    ws.append(headers)
+
+    header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
+
+    for col in range(1, len(headers) + 1):
+        cell = ws.cell(row=1, column=col)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    for r in rows:
+        ws.append([
+            r["id"],
+            r["type"].capitalize(),
+            r["description"],
+            r.get("contact") or "-",
+            r.get("category") or "Geral",
+            r.get("bank_account") or "-",
+            r["due_date"],
+            float(r["amount"]),
+            float(r.get("paid_amount") or 0.0),
+            r["status"].upper(),
+            r.get("payment_method") or "Pix",
+        ])
+
+    for col in ws.columns:
+        max_len = max(len(str(cell.value or "")) for cell in col)
+        col_letter = openpyxl.utils.get_column_letter(col[0].column)
+        ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    filename = f"cortex_financeiro_{type or 'geral'}_{date.today().strftime('%Y%m%d')}.xlsx"
+
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/import-spreadsheet")
+async def import_financial_spreadsheet(req: Request, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Importa lançamentos financeiros a partir de um arquivo CSV ou Excel."""
+    import csv
+    import io
+    import openpyxl
+
+    form = await req.form()
+    file = form.get("file")
+    if not file or not hasattr(file, "read"):
+        raise HTTPException(status_code=400, detail="Envie um arquivo CSV ou XLSX válido.")
+
+    filename = getattr(file, "filename", "").lower()
+    content = await file.read()
+    company_id = current_user.get("company_id", 1)
+
+    imported_count = 0
+    records = []
+
+    if filename.endswith(".xlsx") or filename.endswith(".xls"):
+        wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+        ws = wb.active
+        rows = list(ws.iter_rows(values_only=True))
+        if len(rows) > 1:
+            for r in rows[1:]:
+                if not r or len(r) < 3 or not r[1]:
+                    continue
+                # Espera colunas: [Tipo, Descrição, Valor, Vencimento]
+                records.append({
+                    "type": str(r[0]).strip().lower() if str(r[0]).strip().lower() in ("receita", "despesa") else "despesa",
+                    "description": str(r[1]).strip(),
+                    "amount": float(r[2] or 0.0),
+                    "due_date": str(r[3])[:10] if r[3] else date.today().isoformat(),
+                })
+    else:
+        # CSV
+        text = content.decode("utf-8-sig", errors="ignore")
+        delimiter = ";" if ";" in text else ","
+        reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+        rows = list(reader)
+        if len(rows) > 1:
+            for r in rows[1:]:
+                if not r or len(r) < 3 or not r[1]:
+                    continue
+                try:
+                    amt_str = str(r[2]).replace(".", "").replace(",", ".") if "," in str(r[2]) else str(r[2])
+                    amt = float(amt_str)
+                except Exception:
+                    amt = 100.0
+
+                records.append({
+                    "type": str(r[0]).strip().lower() if str(r[0]).strip().lower() in ("receita", "despesa") else "despesa",
+                    "description": str(r[1]).strip(),
+                    "amount": amt,
+                    "due_date": str(r[3]).strip()[:10] if len(r) > 3 and r[3] else date.today().isoformat(),
+                })
+
+    conn = get_conn()
+    cur = conn.cursor()
+    for rec in records:
+        if rec["amount"] <= 0:
+            continue
+        cur.execute("""
+            INSERT INTO financial_entries (company_id, type, description, amount, due_date, competence_date, category_id, cost_center_id, bank_account_id, payment_method, status)
+            VALUES (?, ?, ?, ?, ?, ?, 1, 1, 1, 'Boleto', 'pendente')
+        """, (company_id, rec["type"], rec["description"], rec["amount"], rec["due_date"], date.today().isoformat()))
+        imported_count += 1
+
+    conn.commit()
+    log_audit(conn, action="import_spreadsheet", entity="financial_entries", new_data={"imported_count": imported_count}, user_id=current_user.get("id"))
+    conn.close()
+
+    return {"status": "ok", "imported_count": imported_count, "message": f"{imported_count} lançamentos importados com sucesso da planilha!"}

@@ -116,6 +116,76 @@ def test_reports_dre():
     assert len(data["lines"]) > 5
 
 
+def test_payment_gateway_and_webhook():
+    token = get_auth_token()
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 1. Cria lançamento para teste
+    ent_res = client.post("/api/financial", json={
+        "type": "receita",
+        "description": "Receita Teste Gateway",
+        "amount": 350.00,
+        "due_date": "2026-10-30",
+    }, headers=headers)
+    eid = ent_res.json()["created_ids"][0]
+
+    # 2. Gera cobrança Pix no gateway
+    charge_res = client.post(f"/api/payments/charge/{eid}", json={"billing_type": "PIX"}, headers=headers)
+    assert charge_res.status_code == 200
+    charge = charge_res.json()["charge"]
+    assert charge["status"] == "PENDING"
+    assert len(charge["pix_qr_code_b64"]) > 50
+
+    # 3. Simula Webhook de Confirmação de Pagamento
+    wh_res = client.post("/api/payments/webhook", json={
+        "event": "PAYMENT_RECEIVED",
+        "payment": {"id": charge["gateway_id"], "value": 350.00},
+    })
+    assert wh_res.status_code == 200
+    assert wh_res.json()["status"] == "success"
+
+    # 4. Verifica que título foi baixado
+    chk_res = client.get("/api/financial?type=receita", headers=headers)
+    item = next(x for x in chk_res.json() if x["id"] == eid)
+    assert item["status"] == "pago"
+
+
+def test_collection_rules_and_notice():
+    token = get_auth_token()
+    headers = {"Authorization": f"Bearer {token}"}
+
+    rules_res = client.get("/api/collection/rules", headers=headers)
+    assert rules_res.status_code == 200
+    assert len(rules_res.json()) >= 4
+
+    notice_res = client.post("/api/collection/send/1", json={"channel": "whatsapp"}, headers=headers)
+    assert notice_res.status_code == 200
+    assert "whatsapp_url" in notice_res.json()
+
+
+def test_cash_flow_statement():
+    token = get_auth_token()
+    headers = {"Authorization": f"Bearer {token}"}
+    res = client.get("/api/reports/cash-flow", headers=headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert "timeline" in data
+    assert len(data["timeline"]) > 20
+
+
+def test_spreadsheet_exports():
+    token = get_auth_token()
+    headers = {"Authorization": f"Bearer {token}"}
+
+    csv_res = client.get("/api/financial/export-csv", headers=headers)
+    assert csv_res.status_code == 200
+    assert "text/csv" in csv_res.headers.get("content-type", "")
+
+    excel_res = client.get("/api/financial/export-excel", headers=headers)
+    assert excel_res.status_code == 200
+    assert "openxmlformats" in excel_res.headers.get("content-type", "")
+
+
 def test_audit_logs():
     conn = get_conn()
     cur = conn.cursor()
@@ -131,5 +201,9 @@ if __name__ == "__main__":
     test_ai_launch()
     test_crm_and_conversion()
     test_reports_dre()
+    test_payment_gateway_and_webhook()
+    test_collection_rules_and_notice()
+    test_cash_flow_statement()
+    test_spreadsheet_exports()
     test_audit_logs()
-    print("TODOS OS 7 TESTES AUTOMATIZADOS PASSARAM COM SUCESSO!")
+    print("TODOS OS 11 TESTES AUTOMATIZADOS (FASES 0, 1 E 2) PASSARAM COM SUCESSO!")

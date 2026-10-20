@@ -455,8 +455,79 @@ def init_db() -> None:
     );
     """)
 
+    # 20. Cobranças de Gateway (Asaas / Pix / Boleto / Cartão)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS payment_charges (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        entry_id INTEGER NOT NULL,
+        gateway TEXT DEFAULT 'asaas', -- asaas, local_mock
+        gateway_id TEXT UNIQUE,
+        billing_type TEXT NOT NULL, -- PIX, BOLETO, CREDIT_CARD
+        status TEXT DEFAULT 'PENDING', -- PENDING, RECEIVED, CONFIRMED, OVERDUE, REFUNDED
+        value REAL NOT NULL,
+        net_value REAL,
+        due_date TEXT NOT NULL,
+        payment_date TEXT,
+        pix_copy_paste TEXT,
+        pix_qr_code_b64 TEXT,
+        bank_slip_url TEXT,
+        invoice_url TEXT,
+        customer_id TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (entry_id) REFERENCES financial_entries(id)
+    );
+    """)
+
+    # 21. Régua de Cobrança Automática
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS collection_rules (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        name TEXT NOT NULL,
+        trigger_days INTEGER NOT NULL, -- ex: -3 (3 dias antes), 0 (no dia), 3 (3 dias depois), 10 (10 dias depois)
+        channel TEXT NOT NULL, -- whatsapp, email, ambos
+        message_template TEXT NOT NULL,
+        active INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    # 22. Histórico de Notificações / Envios de Cobrança
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS collection_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        entry_id INTEGER NOT NULL,
+        contact_id INTEGER,
+        channel TEXT NOT NULL,
+        recipient TEXT NOT NULL,
+        message_sent TEXT NOT NULL,
+        status TEXT DEFAULT 'enviado',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (entry_id) REFERENCES financial_entries(id)
+    );
+    """)
+
     conn.commit()
     migrate_db(conn)
+
+    # Seed Regras de Cobrança Padrão se não existirem
+    rules_count = cur.execute("SELECT COUNT(*) FROM collection_rules").fetchone()[0]
+    if rules_count == 0:
+        default_rules = [
+            ("Lembrete Preventivo (D-3)", -3, "whatsapp", "Olá {cliente}! Lembramos que seu título no valor de {valor} vencerá em {vencimento}. Link de pagamento: {link_pagamento}"),
+            ("Vencimento Hoje (D-0)", 0, "ambos", "Olá {cliente}! Seu título no valor de {valor} vence hoje ({vencimento}). Pague via Pix ou Boleto: {link_pagamento}"),
+            ("Atraso Amigável (D+3)", 3, "whatsapp", "Olá {cliente}! Não identificamos o pagamento do título de {valor} vencido em {vencimento}. Evite juros pagando aqui: {link_pagamento}"),
+            ("Cobrança Formal (D+10)", 10, "ambos", "Aviso de Cobrança: Prezado(a) {cliente}, solicitamos a regularização do título de {valor} vencido em {vencimento}: {link_pagamento}"),
+        ]
+        for r in default_rules:
+            cur.execute("""
+                INSERT INTO collection_rules (company_id, name, trigger_days, channel, message_template, active)
+                VALUES (1, ?, ?, ?, ?, 1)
+            """, r)
+        conn.commit()
 
     # Seed Admin User se não existir
     admin_exists = cur.execute("SELECT id FROM users WHERE email = 'admin@cortex.com.br'").fetchone()
@@ -767,6 +838,21 @@ def seed_initial_data(conn: sqlite3.Connection) -> None:
             'Substituição do Nobreak por modelo Senoidal Puro 1500VA e revisão completa da fonte redundante e RAID.',
             'Eng. Willian', 'em_execucao', 'alta', 1190.00, 440.00, 0.00, 1630.00, 90, ?, 0)
     """, (os_items,))
+
+    # 12. Regras Padrão de Cobrança (Régua Conta Azul)
+    rules_count = cur.execute("SELECT COUNT(*) FROM collection_rules").fetchone()[0]
+    if rules_count == 0:
+        default_rules = [
+            ("Lembrete Preventivo (D-3)", -3, "whatsapp", "Olá {cliente}! Lembramos que seu título no valor de {valor} vencerá em {vencimento}. Link de pagamento: {link_pagamento}"),
+            ("Vencimento Hoje (D-0)", 0, "ambos", "Olá {cliente}! Seu título no valor de {valor} vence hoje ({vencimento}). Pague via Pix ou Boleto: {link_pagamento}"),
+            ("Atraso Amigável (D+3)", 3, "whatsapp", "Olá {cliente}! Não identificamos o pagamento do título de {valor} vencido em {vencimento}. Evite juros pagando aqui: {link_pagamento}"),
+            ("Cobrança Formal (D+10)", 10, "ambos", "Aviso de Cobrança: Prezado(a) {cliente}, solicitamos a regularização do título de {valor} vencido em {vencimento}: {link_pagamento}"),
+        ]
+        for r in default_rules:
+            cur.execute("""
+                INSERT INTO collection_rules (name, trigger_days, channel, message_template, active)
+                VALUES (?, ?, ?, ?, 1)
+            """, r)
 
     recalculate_bank_balances(conn)
     conn.commit()

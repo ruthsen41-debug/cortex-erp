@@ -366,6 +366,14 @@ async function renderFinancial(container, type) {
           </span>
         </td>
         <td class="py-3 px-4 text-right space-x-1">
+          ${isRec && e.status !== 'pago' ? `
+            <button onclick="openChargeModal(${e.id})" class="bg-indigo-600 hover:bg-indigo-700 text-white px-2 py-1 rounded-lg font-semibold text-[11px] transition" title="Gerar Cobrança Pix / Boleto Asaas">
+              Pix/Boleto
+            </button>
+            <button onclick="sendWhatsAppCollection(${e.id})" class="bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-1 rounded-lg font-semibold text-[11px] transition" title="Cobrar cliente no WhatsApp">
+              WhatsApp
+            </button>
+          ` : ''}
           ${e.status !== 'pago' ? `
             <button onclick="openPayModal(${e.id}, '${e.type}', ${e.amount - e.paid_amount})" class="bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 rounded-lg font-semibold text-[11px] transition">
               ${isRec ? 'Receber' : 'Pagar'}
@@ -391,9 +399,17 @@ async function renderFinancial(container, type) {
           </h2>
           <p class="text-xs text-slate-400">Gerenciamento completo de lançamentos, parcelamentos e baixas</p>
         </div>
-        <button onclick="openFinancialModal('${type}')" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-1.5 shadow-sm transition">
-          <i data-lucide="plus-circle" class="w-4 h-4"></i> ${isRec ? 'Nova Receita' : 'Nova Despesa'}
-        </button>
+        <div class="flex gap-2">
+          <a href="/api/financial/export-excel?type=${type}" download class="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition">
+            <i data-lucide="file-spreadsheet" class="w-4 h-4"></i> Excel
+          </a>
+          <a href="/api/financial/export-csv?type=${type}" download class="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition">
+            <i data-lucide="download" class="w-4 h-4"></i> CSV
+          </a>
+          <button onclick="openFinancialModal('${type}')" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-1.5 shadow-sm transition">
+            <i data-lucide="plus-circle" class="w-4 h-4"></i> ${isRec ? 'Nova Receita' : 'Nova Despesa'}
+          </button>
+        </div>
       </div>
 
       <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
@@ -547,6 +563,82 @@ async function submitFinancial(e, type) {
     }
   } catch (err) {
     showToast('Falha na comunicação com o backend.', 'error');
+  }
+}
+
+// Gateway de Cobrança (Pix / Boleto / Asaas)
+async function openChargeModal(entryId) {
+  showToast('Consultando/Gerando cobrança no gateway...', 'info');
+  try {
+    const res = await fetch(`/api/payments/charge/${entryId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ billing_type: 'PIX' }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(`Erro na cobrança: ${data.detail || 'Falha'}`, 'error');
+      return;
+    }
+    const ch = data.charge;
+    const qrImg = ch.pix_qr_code_b64 ? `<img src="data:image/png;base64,${ch.pix_qr_code_b64}" class="w-48 h-48 mx-auto my-3 border p-2 rounded-xl bg-white shadow-sm" />` : '';
+
+    const html = `
+      <div class="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-800">
+        <h3 class="font-bold text-base text-slate-900 dark:text-slate-100 flex items-center gap-2">
+          <i data-lucide="qr-code" class="w-5 h-5 text-indigo-500"></i> Cobrança Digital (Gateway Asaas / Pix)
+        </h3>
+        <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+
+      <div class="mt-4 text-center space-y-3">
+        <div class="text-xs text-slate-400">ID da Cobrança: <span class="font-mono font-bold">${ch.gateway_id}</span></div>
+        <div class="text-2xl font-extrabold text-emerald-600">${formatCurrency(ch.value)}</div>
+        <div class="text-xs font-semibold">Vencimento: ${formatDate(ch.due_date)}</div>
+
+        ${qrImg}
+
+        <div class="bg-slate-100 dark:bg-slate-800 p-2.5 rounded-xl font-mono text-[10px] break-all border border-slate-200 dark:border-slate-700 select-all" id="pixCopyStr">
+          ${ch.pix_copy_paste || 'Código Pix Indisponível'}
+        </div>
+
+        <div class="flex justify-center gap-2 pt-2">
+          <button onclick="navigator.clipboard.writeText(document.getElementById('pixCopyStr').innerText);showToast('Chave Pix Copia e Cola copiada!', 'success')" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 transition">
+            <i data-lucide="copy" class="w-4 h-4"></i> Copiar Pix
+          </button>
+          <a href="${ch.bank_slip_url || '#'}" target="_blank" class="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 transition">
+            <i data-lucide="file-text" class="w-4 h-4"></i> Imprimir Boleto
+          </a>
+          <a href="${ch.invoice_url || '#'}" target="_blank" class="bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 font-bold text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 transition">
+            <i data-lucide="external-link" class="w-4 h-4"></i> Fatura Online
+          </a>
+        </div>
+      </div>
+    `;
+    openModal(html);
+  } catch (e) {
+    showToast('Falha na comunicação com gateway.', 'error');
+  }
+}
+
+// Régua de Cobrança WhatsApp
+async function sendWhatsAppCollection(entryId) {
+  showToast('Gerando mensagem de cobrança...', 'info');
+  try {
+    const res = await fetch(`/api/collection/send/${entryId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channel: 'whatsapp' }),
+    });
+    const data = await res.json();
+    if (res.ok && data.whatsapp_url) {
+      window.open(data.whatsapp_url, '_blank');
+      showToast('Janela do WhatsApp aberta com a mensagem formatada!', 'success');
+    } else {
+      showToast(`Erro ao gerar cobrança: ${data.detail || 'Falha'}`, 'error');
+    }
+  } catch (e) {
+    showToast('Falha ao acionar régua de cobrança.', 'error');
   }
 }
 

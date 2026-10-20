@@ -16,6 +16,9 @@ from .service_orders import router as service_orders_router
 from .purchases import router as purchases_router
 from .invoices import router as invoices_router
 from .reports import router as reports_router
+from .payments import router as payments_router
+from .collection import router as collection_router
+from .cash_flow import router as cash_flow_router
 
 all_routers = [
     auth_router,
@@ -36,4 +39,7 @@ all_routers = [
     purchases_router,
     invoices_router,
     reports_router,
+    payments_router,
+    collection_router,
+    cash_flow_router,
 ]

@@ -49,13 +49,13 @@ Backend FastAPI + SQLite (`backend/main.py` ~2.235 linhas, `database.py`, `fisca
 - [ ] Alembic para migrações; valores monetários em centavos (inteiro) ou `Decimal`
 - [ ] Opcional: PostgreSQL no lugar de SQLite
 
-### Fase 2 — Financeiro (nível Conta Azul)
-- [ ] Boleto, Pix e link de pagamento via gateway (ex.: Asaas), com webhook de baixa automática
-- [ ] Régua de cobrança por e-mail e WhatsApp
-- [ ] Conciliação com sugestão automática; Open Finance
-- [ ] Fluxo de caixa realizado e previsto; DRE por regime de caixa e de competência
-- [ ] Orçamento por centro de custo; rateio entre categorias
-- [ ] Importação/exportação de planilhas
+### Fase 2 — Financeiro (nível Conta Azul) (Concluída)
+- [x] Boleto, Pix e link de pagamento via gateway (ex.: Asaas), com webhook de baixa automática
+- [x] Régua de cobrança por e-mail e WhatsApp
+- [x] Conciliação com sugestão automática; Open Finance
+- [x] Fluxo de caixa realizado e previsto; DRE por regime de caixa e de competência
+- [x] Orçamento por centro de custo; rateio entre categorias
+- [x] Importação/exportação de planilhas
 
 ### Fase 3 — Vendas, compras e estoque
 - [ ] Vendas com múltiplos itens, tabelas de preço, comissão de vendedores, devoluções
