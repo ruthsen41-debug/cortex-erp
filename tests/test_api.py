@@ -433,6 +433,176 @@ def test_phase3_customer_portal():
     assert "payment" in acc_data
 
 
+def test_phase4_crypto_vault_and_certificate():
+    from backend.services.crypto_vault import CryptoVault
+
+    # 1. Teste de Criptografia Simétrica no Cofre
+    original_secret = "SenhaSuperSecreta@2026!"
+    encrypted = CryptoVault.encrypt_string(original_secret)
+    assert encrypted != original_secret
+    decrypted = CryptoVault.decrypt_string(encrypted)
+    assert decrypted == original_secret
+
+    token = get_auth_token()
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 2. Upload de Certificado no Cofre
+    cert_res = client.post("/api/company/certificate", json={
+        "filename": "meu_certificado.pfx",
+        "content_b64": "MOCK_CERT_BYTES_B64",
+        "password": "SenhaDoCertificadoA1"
+    }, headers=headers)
+    assert cert_res.status_code == 200
+    assert cert_res.json()["status"] == "ok"
+
+    # 3. Consulta da Empresa (Verifica Mascaramento da Senha)
+    comp_res = client.get("/api/company", headers=headers)
+    assert comp_res.status_code == 200
+    comp_data = comp_res.json()
+    assert comp_data["certificado_senha"] == "******"
+    assert comp_data["has_certificate"] is True
+
+    # 4. Status do Certificado
+    status_res = client.get("/api/company/certificate/status", headers=headers)
+    assert status_res.status_code == 200
+    assert status_res.json()["installed"] is True
+
+
+def test_phase4_tax_calculator_and_regimes():
+    from backend.services.tax_calculator import TaxCalculator
+
+    item = {"product_name": "Notebook Dell", "quantity": 1, "unit_price": 4000.0, "discount": 0.0}
+
+    # 1. Simples Nacional (comércio)
+    simples = TaxCalculator.calculate_item_taxes(item, regime="simples_nacional", uf_origem="MT", uf_destino="MT")
+    assert simples["base_calculo"] == 4000.0
+    assert simples["total_impostos"] > 0
+
+    # 2. Lucro Presumido (PIS 0,65% = 26, COFINS 3% = 120, ICMS 17% = 680)
+    presumido = TaxCalculator.calculate_item_taxes(item, regime="lucro_presumido", uf_origem="MT", uf_destino="MT")
+    assert presumido["pis_valor"] == 26.0
+    assert presumido["cofins_valor"] == 120.0
+    assert presumido["icms_valor"] == 680.0
+    assert presumido["total_impostos"] == 826.0
+
+    # 3. Lucro Real (PIS 1,65% = 66, COFINS 7,6% = 304, ICMS 17% = 680)
+    real = TaxCalculator.calculate_item_taxes(item, regime="lucro_real", uf_origem="MT", uf_destino="MT")
+    assert real["pis_valor"] == 66.0
+    assert real["cofins_valor"] == 304.0
+    assert real["icms_valor"] == 680.0
+    assert real["total_impostos"] == 1050.0
+
+    # 4. Operação Interestadual com DIFAL + FCP (MT -> SP)
+    difal = TaxCalculator.calculate_item_taxes(item, regime="lucro_presumido", uf_origem="MT", uf_destino="SP", is_consumidor_final=True, is_contribuinte=False)
+    assert difal["difal_valor"] > 0
+    assert difal["fcp_valor"] > 0
+
+
+def test_phase4_fiscal_events_and_providers():
+    token = get_auth_token()
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 1. Emissão de NF-e com o motor de tributação ativo
+    emit_res = client.post("/api/invoices/emit", json={
+        "model": "NFe-55",
+        "recipient_id": 1,
+        "items": [
+            {"product_id": 1, "product_name": "Teclado Mecânico RGB", "quantity": 2, "unit_price": 250.0, "ncm": "84716052", "cfop": "5102"}
+        ]
+    }, headers=headers)
+    assert emit_res.status_code == 200
+    inv_data = emit_res.json()
+    assert inv_data["status"] == "ok"
+    inv_id = inv_data["invoice_id"]
+    chave = inv_data["access_key"]
+
+    # 2. Carta de Correção Eletrônica (CC-e)
+    cce_res = client.post(f"/api/invoices/{inv_id}/cce", json={
+        "correction_text": "Correção de dados do transportador responsável pela entrega das mercadorias."
+    }, headers=headers)
+    assert cce_res.status_code == 200
+    assert "protocol" in cce_res.json()
+
+    # 3. Cancelamento da NF-e
+    cancel_res = client.post(f"/api/invoices/{inv_id}/cancel", json={
+        "reason": "Cancelamento solicitado pelo cliente antes do despacho das mercadorias."
+    }, headers=headers)
+    assert cancel_res.status_code == 200
+    assert "protocol" in cancel_res.json()
+
+    # 4. Inutilização de Faixa Fiscal
+    inut_res = client.post("/api/invoices/inutilize", json={
+        "model": "NFe-55",
+        "series": 1,
+        "start_number": 900,
+        "end_number": 905,
+        "reason": "Salto acidental de numeração ocorrido por falha temporária de sistema."
+    }, headers=headers)
+    assert inut_res.status_code == 200
+    assert "protocol" in inut_res.json()
+
+    # Lista inutilizações
+    inut_list = client.get("/api/invoices/inutilizations", headers=headers)
+    assert inut_list.status_code == 200
+    assert len(inut_list.json()) >= 1
+
+    # 5. Manifestação do Destinatário
+    manifest_res = client.post("/api/invoices/manifest", json={
+        "access_key": chave,
+        "event_type": "confirmacao",
+        "notes": "Mercadoria conferida e recebida no armazém."
+    }, headers=headers)
+    assert manifest_res.status_code == 200
+    assert "protocol" in manifest_res.json()
+
+    # Lista manifestações
+    manif_list = client.get("/api/invoices/manifestations", headers=headers)
+    assert manif_list.status_code == 200
+    assert len(manif_list.json()) >= 1
+
+
+def test_phase4_sped_fiscal_and_accountant_portal():
+    token = get_auth_token()
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 1. Download do SPED Fiscal (EFD ICMS/IPI)
+    sped_res = client.get("/api/reports/sped-fiscal", headers=headers)
+    assert sped_res.status_code == 200
+    sped_text = sped_res.text
+    # Valida blocos obrigatórios da EFD
+    assert "|0000|" in sped_text
+    assert "|0001|" in sped_text
+    assert "|0990|" in sped_text
+    assert "|C001|" in sped_text
+    assert "|C990|" in sped_text
+    assert "|E001|" in sped_text
+    assert "|E990|" in sped_text
+    assert "|9001|" in sped_text
+    assert "|9999|" in sped_text
+
+    # 2. Download do Pacote Completo do Contador (ZIP)
+    pkg_res = client.get("/api/reports/fiscal-package", headers=headers)
+    assert pkg_res.status_code == 200
+    assert "application/zip" in pkg_res.headers.get("content-type", "")
+    assert len(pkg_res.content) > 100
+
+    # 3. Portal do Contador (acesso via token exclusivo sem credencial de usuário)
+    comp_res = client.get("/api/company", headers=headers)
+    accountant_token = comp_res.json().get("accountant_token")
+    assert accountant_token is not None
+
+    portal_res = client.get(f"/api/portal/accountant/{accountant_token}")
+    assert portal_res.status_code == 200
+    portal_data = portal_res.json()
+    assert "company" in portal_data
+    assert "actions" in portal_data
+
+    # Download do pacote via portal do contador
+    pkg_portal = client.get(f"/api/portal/accountant/{accountant_token}/package")
+    assert pkg_portal.status_code == 200
+    assert "application/zip" in pkg_portal.headers.get("content-type", "")
+
+
 if __name__ == "__main__":
     test_health()
     test_auth_me()
@@ -452,4 +622,9 @@ if __name__ == "__main__":
     test_phase3_sales_returns_rma()
     test_phase3_contract_adjustments()
     test_phase3_customer_portal()
-    print("TODOS OS 17 TESTES AUTOMATIZADOS (FASES 0, 1, 2 E 3) PASSARAM COM SUCESSO!")
+    # Fase 4 tests
+    test_phase4_crypto_vault_and_certificate()
+    test_phase4_tax_calculator_and_regimes()
+    test_phase4_fiscal_events_and_providers()
+    test_phase4_sped_fiscal_and_accountant_portal()
+    print("TODOS OS 21 TESTES AUTOMATIZADOS (FASES 0, 1, 2, 3 E 4) PASSARAM COM SUCESSO!")

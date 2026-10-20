@@ -645,6 +645,35 @@ def init_db() -> None:
     );
     """)
 
+    # 30. Inutilização de Numeração Fiscal (SEFAZ)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS fiscal_inutilizations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        model TEXT NOT NULL, -- NFe-55, NFCe-65
+        series INTEGER NOT NULL,
+        start_number INTEGER NOT NULL,
+        end_number INTEGER NOT NULL,
+        protocol TEXT DEFAULT '',
+        reason TEXT NOT NULL,
+        status TEXT DEFAULT 'homologado',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    # 31. Manifestação do Destinatário (NF-e de Entrada / Fornecedor)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS fiscal_manifestations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        access_key TEXT NOT NULL,
+        event_type TEXT NOT NULL, -- ciencia, confirmacao, desconhecimento, nao_realizada
+        protocol TEXT DEFAULT '',
+        notes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
     conn.commit()
     migrate_db(conn)
 
@@ -766,6 +795,31 @@ def migrate_db(conn: sqlite3.Connection) -> None:
             cur.execute("ALTER TABLE recurring_contracts ADD COLUMN last_adjusted_at TEXT")
         if "adjustment_percent" not in contract_cols:
             cur.execute("ALTER TABLE recurring_contracts ADD COLUMN adjustment_percent REAL DEFAULT 0.0")
+    except Exception:
+        pass
+
+    # Colunas da Fase 4
+    try:
+        inv_cols = [c["name"] for c in cur.execute("PRAGMA table_info(invoices)").fetchall()]
+        if "cce_protocol" not in inv_cols:
+            cur.execute("ALTER TABLE invoices ADD COLUMN cce_protocol TEXT DEFAULT ''")
+        if "cancel_protocol" not in inv_cols:
+            cur.execute("ALTER TABLE invoices ADD COLUMN cancel_protocol TEXT DEFAULT ''")
+    except Exception:
+        pass
+
+    try:
+        comp_cols = [c["name"] for c in cur.execute("PRAGMA table_info(companies)").fetchall()]
+        if "accountant_token" not in comp_cols:
+            cur.execute("ALTER TABLE companies ADD COLUMN accountant_token TEXT")
+        if "accountant_email" not in comp_cols:
+            cur.execute("ALTER TABLE companies ADD COLUMN accountant_email TEXT DEFAULT ''")
+
+        # Seed accountant token if empty
+        row = cur.execute("SELECT accountant_token FROM companies WHERE id = 1").fetchone()
+        if row and not row["accountant_token"]:
+            import secrets
+            cur.execute("UPDATE companies SET accountant_token = ? WHERE id = 1", (secrets.token_urlsafe(16),))
     except Exception:
         pass
 

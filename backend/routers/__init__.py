@@ -24,6 +24,7 @@ from .warehouses import router as warehouses_router
 from .purchase_orders import router as purchase_orders_router
 from .returns import router as returns_router
 from .portal import router as portal_router
+from .accountant import router as accountant_router
 
 all_routers = [
     auth_router,
@@ -52,4 +53,5 @@ all_routers = [
     purchase_orders_router,
     returns_router,
     portal_router,
+    accountant_router,
 ]

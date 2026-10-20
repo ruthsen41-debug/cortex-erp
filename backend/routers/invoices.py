@@ -1,4 +1,5 @@
 import io
+import re
 import json
 import random
 import zipfile
@@ -13,12 +14,16 @@ try:
     from ..utils import rows_to_dicts
     from ..schemas.invoices import InvoiceEmitRequest, InvoiceCancelRequest, InvoiceCceRequest
     from ..fiscal_engine import gerar_chave_acesso_sefaz, validar_dados_fiscais, gerar_xml_nfe_400, gerar_html_danfe
+    from ..services.fiscal_provider import FiscalProviderFactory
+    from ..services.tax_calculator import TaxCalculator
 except ImportError:
     from database import get_conn
     from auth import get_current_user, log_audit
     from utils import rows_to_dicts
     from schemas.invoices import InvoiceEmitRequest, InvoiceCancelRequest, InvoiceCceRequest
     from fiscal_engine import gerar_chave_acesso_sefaz, validar_dados_fiscais, gerar_xml_nfe_400, gerar_html_danfe
+    from services.fiscal_provider import FiscalProviderFactory
+    from services.tax_calculator import TaxCalculator
 
 router = APIRouter(prefix="/api/invoices", tags=["Emissor Fiscal"])
 
@@ -105,35 +110,61 @@ async def emit_invoice(req: Request, current_user: Dict[str, Any] = Depends(get_
         serie=serie,
         numero_nf=numero,
     )
-    protocolo = f"151{datetime.now().strftime('%y%m%d%H%M')}{random.randint(10,99)}"
-    total_pis = round(total_products * 0.0065, 2)
-    total_cofins = round(total_products * 0.03, 2)
-    total_iss = round(total_products * 0.03, 2) if model_str == "NFSe" else 0.0
+    # Cálculo avançado de impostos pelo TaxCalculator
+    regime = company.get("regime_tributario", "simples_nacional")
+    uf_origem = company.get("uf", "MT")
+    uf_dest = contact.get("state", "MT")
+
+    total_icms = 0.0
+    total_pis = 0.0
+    total_cofins = 0.0
+    total_iss = 0.0
+
+    for it in sale_items:
+        taxes = TaxCalculator.calculate_item_taxes(
+            it,
+            regime=regime,
+            uf_origem=uf_origem,
+            uf_destino=uf_dest,
+            is_consumidor_final=True,
+            is_contribuinte=False,
+        )
+        total_icms += taxes["icms_valor"]
+        total_pis += taxes["pis_valor"]
+        total_cofins += taxes["cofins_valor"]
+        total_iss += taxes["iss_valor"]
 
     inv_meta = {
         "model": model_str,
         "series": serie,
         "number": numero,
         "access_key": chave,
-        "protocol": protocolo,
+        "protocol": "",
         "nature_operation": nature_op,
         "total_products": total_products,
         "total_discounts": total_discounts,
         "total_shipping": total_shipping,
-        "total_pis": total_pis,
-        "total_cofins": total_cofins,
-        "total_iss": total_iss,
+        "total_icms": round(total_icms, 2),
+        "total_pis": round(total_pis, 2),
+        "total_cofins": round(total_cofins, 2),
+        "total_iss": round(total_iss, 2),
         "total_invoice": total_invoice,
     }
-    xml_str = gerar_xml_nfe_400(company, contact, sale_items, inv_meta)
+
+    # Processa pelo motor / provedor fiscal configurado (SEFAZ Direto, Focus NFe, PlugNotas, Nuvem Fiscal)
+    provider = FiscalProviderFactory.get_provider(company)
+    provider_res = await provider.emit_invoice(company, contact, sale_items, inv_meta)
+
+    protocolo = provider_res.get("protocol") or f"151{datetime.now().strftime('%y%m%d%H%M')}{random.randint(10,99)}"
+    xml_str = provider_res.get("xml_content") or gerar_xml_nfe_400(company, contact, sale_items, inv_meta)
 
     cur.execute("""
         INSERT INTO invoices (
             model, series, number, access_key, protocol, status, environment,
             nature_operation, sale_id, contact_id, recipient_name, recipient_doc,
             recipient_uf, total_products, total_discounts, total_shipping,
-            total_pis, total_cofins, total_iss, total_invoice, items_json, xml_content
-        ) VALUES (?, ?, ?, ?, ?, 'autorizada', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            total_icms, total_pis, total_cofins, total_iss, total_invoice, items_json, xml_content
+        ) VALUES (?, ?, ?, ?, ?, 'autorizada', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         model_str,
         serie,
@@ -150,9 +181,10 @@ async def emit_invoice(req: Request, current_user: Dict[str, Any] = Depends(get_
         total_products,
         total_discounts,
         total_shipping,
-        total_pis,
-        total_cofins,
-        total_iss,
+        round(total_icms, 2),
+        round(total_pis, 2),
+        round(total_cofins, 2),
+        round(total_iss, 2),
         total_invoice,
         json.dumps(sale_items, ensure_ascii=False),
         xml_str,
@@ -162,7 +194,7 @@ async def emit_invoice(req: Request, current_user: Dict[str, Any] = Depends(get_
         cur.execute("UPDATE sales SET invoice_id = ? WHERE id = ?", (inv_id, sale_id))
 
     conn.commit()
-    log_audit(conn, action="emit_invoice", entity="invoices", entity_id=inv_id, new_data={"number": numero, "chave": chave}, user_id=current_user.get("id"))
+    log_audit(conn, action="emit_invoice", entity="invoices", entity_id=inv_id, new_data={"number": numero, "chave": chave, "provider": company.get("motor_fiscal", "sefaz_direct")}, user_id=current_user.get("id"))
     conn.close()
 
     return {
@@ -171,6 +203,7 @@ async def emit_invoice(req: Request, current_user: Dict[str, Any] = Depends(get_
         "number": numero,
         "access_key": chave,
         "protocol": protocolo,
+        "provider": provider_res.get("provider", "sefaz_direct"),
         "message": f"{model_str} Nº {numero} autorizada com sucesso!",
     }
 
@@ -229,12 +262,25 @@ async def emit_carta_correcao(invoice_id: int, req: Request, current_user: Dict[
     texto = (data.get("correction_text") or "").strip()
     if len(texto) < 15:
         raise HTTPException(status_code=400, detail="A SEFAZ exige no mínimo 15 caracteres na Carta de Correção (CC-e).")
+
     conn = get_conn()
-    conn.execute("UPDATE invoices SET correction_letter = ? WHERE id = ?", (texto, invoice_id))
+    cur = conn.cursor()
+    company_id = current_user.get("company_id", 1)
+    company = dict(cur.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone())
+    inv = cur.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
+    if not inv:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Nota Fiscal não encontrada.")
+
+    provider = FiscalProviderFactory.get_provider(company)
+    res = await provider.emit_cce(company, dict(inv), texto)
+    protocol = res.get("cce_protocol") or f"136{datetime.now().strftime('%y%m%d%H%M')}{random.randint(10,99)}"
+
+    cur.execute("UPDATE invoices SET correction_letter = ?, cce_protocol = ? WHERE id = ?", (texto, protocol, invoice_id))
     conn.commit()
-    log_audit(conn, action="cce", entity="invoices", entity_id=invoice_id, new_data={"text": texto}, user_id=current_user.get("id"))
+    log_audit(conn, action="cce", entity="invoices", entity_id=invoice_id, new_data={"text": texto, "protocol": protocol}, user_id=current_user.get("id"))
     conn.close()
-    return {"status": "ok", "message": "Carta de Correção Eletrônica (CC-e) averbada na nota fiscal!"}
+    return {"status": "ok", "protocol": protocol, "message": f"Carta de Correção Eletrônica (CC-e) averbada sob protocolo {protocol}!"}
 
 
 @router.post("/{invoice_id}/cancel")
@@ -243,9 +289,127 @@ async def cancel_invoice(invoice_id: int, req: Request, current_user: Dict[str, 
     reason = (data.get("reason") or "").strip()
     if len(reason) < 15:
         raise HTTPException(status_code=400, detail="A justificativa de cancelamento na SEFAZ deve conter pelo menos 15 caracteres.")
+
     conn = get_conn()
-    conn.execute("UPDATE invoices SET status = 'cancelada', cancel_reason = ? WHERE id = ?", (reason, invoice_id))
+    cur = conn.cursor()
+    company_id = current_user.get("company_id", 1)
+    company = dict(cur.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone())
+    inv = cur.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
+    if not inv:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Nota Fiscal não encontrada.")
+
+    provider = FiscalProviderFactory.get_provider(company)
+    res = await provider.cancel_invoice(company, dict(inv), reason)
+    protocol = res.get("cancel_protocol") or f"135{datetime.now().strftime('%y%m%d%H%M')}{random.randint(10,99)}"
+
+    cur.execute("UPDATE invoices SET status = 'cancelada', cancel_reason = ?, cancel_protocol = ? WHERE id = ?", (reason, protocol, invoice_id))
     conn.commit()
-    log_audit(conn, action="cancel_invoice", entity="invoices", entity_id=invoice_id, new_data={"reason": reason}, user_id=current_user.get("id"))
+    log_audit(conn, action="cancel_invoice", entity="invoices", entity_id=invoice_id, new_data={"reason": reason, "protocol": protocol}, user_id=current_user.get("id"))
     conn.close()
-    return {"status": "ok", "message": "Nota Fiscal cancelada e evento registrado."}
+    return {"status": "ok", "protocol": protocol, "message": f"Nota Fiscal cancelada sob protocolo {protocol}."}
+
+
+@router.post("/inutilize")
+async def inutilize_numbers(req: Request, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Inutilização de numeração fiscal na SEFAZ (ex: salto de numeração por quebra de sequência)."""
+    data = await req.json()
+    model = data.get("model", "NFe-55")
+    series = int(data.get("series", 1))
+    start_n = int(data.get("start_number", 1))
+    end_n = int(data.get("end_number", start_n))
+    reason = (data.get("reason") or "").strip()
+
+    if len(reason) < 15:
+        raise HTTPException(status_code=400, detail="A justificativa de inutilização deve ter no mínimo 15 caracteres.")
+
+    conn = get_conn()
+    cur = conn.cursor()
+    company_id = current_user.get("company_id", 1)
+    company = dict(cur.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone())
+
+    provider = FiscalProviderFactory.get_provider(company)
+    res = await provider.inutilize(company, model, series, start_n, end_n, reason)
+    protocol = res.get("protocol") or f"102{datetime.now().strftime('%y%m%d%H%M')}{random.randint(10,99)}"
+
+    cur.execute("""
+        INSERT INTO fiscal_inutilizations (company_id, model, series, start_number, end_number, protocol, reason, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'homologado')
+    """, (company_id, model, series, start_n, end_n, protocol, reason))
+    inut_id = cur.lastrowid
+    conn.commit()
+    log_audit(conn, action="inutilize", entity="fiscal_inutilizations", entity_id=inut_id, new_data={"range": f"{start_n}-{end_n}", "protocol": protocol}, user_id=current_user.get("id"))
+    conn.close()
+
+    return {
+        "status": "ok",
+        "inutilization_id": inut_id,
+        "protocol": protocol,
+        "message": f"Inutilização da numeração {start_n} a {end_n} homologada pela SEFAZ sob protocolo {protocol}."
+    }
+
+
+@router.get("/inutilizations")
+def list_inutilizations(current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    rows = rows_to_dicts(conn.execute("SELECT * FROM fiscal_inutilizations WHERE company_id = ? ORDER BY id DESC", (company_id,)).fetchall())
+    conn.close()
+    return rows
+
+
+@router.post("/manifest")
+async def manifest_invoice(req: Request, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """
+    Manifestação do Destinatário na SEFAZ Nacional:
+    - 'ciencia': Ciência da Emissão
+    - 'confirmacao': Confirmação da Operação
+    - 'desconhecimento': Desconhecimento da Operação
+    - 'nao_realizada': Operação não Realizada
+    """
+    data = await req.json()
+    access_key = re.sub(r"\D", "", data.get("access_key", ""))
+    event_type = data.get("event_type", "confirmacao")
+    notes = data.get("notes", "")
+
+    if len(access_key) != 44:
+        raise HTTPException(status_code=400, detail="Chave de acesso deve conter exatamente 44 dígitos numéricos.")
+
+    valid_events = ["ciencia", "confirmacao", "desconhecimento", "nao_realizada"]
+    if event_type not in valid_events:
+        raise HTTPException(status_code=400, detail=f"Tipo de evento inválido. Opções válidas: {', '.join(valid_events)}")
+
+    conn = get_conn()
+    cur = conn.cursor()
+    company_id = current_user.get("company_id", 1)
+    company = dict(cur.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone())
+
+    provider = FiscalProviderFactory.get_provider(company)
+    res = await provider.manifest(company, access_key, event_type)
+    protocol = res.get("protocol") or f"135{datetime.now().strftime('%y%m%d%H%M')}{random.randint(10,99)}"
+
+    cur.execute("""
+        INSERT INTO fiscal_manifestations (company_id, access_key, event_type, protocol, notes)
+        VALUES (?, ?, ?, ?, ?)
+    """, (company_id, access_key, event_type, protocol, notes))
+    m_id = cur.lastrowid
+    conn.commit()
+    log_audit(conn, action="manifest", entity="fiscal_manifestations", entity_id=m_id, new_data={"access_key": access_key, "event": event_type, "protocol": protocol}, user_id=current_user.get("id"))
+    conn.close()
+
+    return {
+        "status": "ok",
+        "manifestation_id": m_id,
+        "protocol": protocol,
+        "event_type": event_type,
+        "message": f"Manifestação '{event_type}' vinculada à chave {access_key} homologada pela SEFAZ."
+    }
+
+
+@router.get("/manifestations")
+def list_manifestations(current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    rows = rows_to_dicts(conn.execute("SELECT * FROM fiscal_manifestations WHERE company_id = ? ORDER BY id DESC", (company_id,)).fetchall())
+    conn.close()
+    return rows

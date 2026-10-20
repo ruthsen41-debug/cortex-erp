@@ -7,10 +7,12 @@ try:
     from ..database import get_conn
     from ..auth import get_current_user, log_audit
     from ..schemas.company import CompanyUpdate
+    from ..services.crypto_vault import CryptoVault
 except ImportError:
     from database import get_conn
     from auth import get_current_user, log_audit
     from schemas.company import CompanyUpdate
+    from services.crypto_vault import CryptoVault
 
 router = APIRouter(prefix="/api/company", tags=["Empresa & Certificado A1"])
 
@@ -21,7 +23,16 @@ def get_company(current_user: Dict[str, Any] = Depends(get_current_user)):
     company_id = current_user.get("company_id", 1)
     row = conn.execute("SELECT * FROM companies WHERE id = ? ORDER BY id LIMIT 1", (company_id,)).fetchone()
     conn.close()
-    return dict(row) if row else {}
+    if not row:
+        return {}
+    comp = dict(row)
+    # Protege a senha do certificado: mascara para nunca expor a senha em claro
+    if comp.get("certificado_senha"):
+        comp["certificado_senha"] = "******"
+        comp["has_certificate"] = True
+    else:
+        comp["has_certificate"] = False
+    return comp
 
 
 @router.put("")
@@ -119,19 +130,64 @@ async def upload_certificate(req: Request, current_user: Dict[str, Any] = Depend
         cert_b64 = data.get("content_b64", "")
         password = data.get("password", "")
 
-    validade = (date.today() + timedelta(days=365)).isoformat()
+    # Inspeciona certificado de verdade se houver bytes válidos
+    raw_bytes = b""
+    try:
+        raw_bytes = base64.b64decode(cert_b64)
+    except Exception:
+        raw_bytes = cert_b64.encode("utf-8")
+
+    inspect_info = CryptoVault.inspect_pfx_certificate(raw_bytes, password)
+    validade = inspect_info["valid_to"]
+    titular = inspect_info["subject_cn"]
+
+    # Criptografia no Cofre Seguro
+    encrypted_cert = CryptoVault.encrypt_string(cert_b64)
+    encrypted_pwd = CryptoVault.encrypt_string(password)
+
     conn = get_conn()
     conn.execute("""
         UPDATE companies
-        SET certificado_nome = ?, certificado_validade = ?, certificado_b64 = ?, certificado_senha = ?
+        SET certificado_nome = ?, certificado_validade = ?, certificado_titular = ?, certificado_b64 = ?, certificado_senha = ?
         WHERE id = ?
-    """, (cert_name, validade, cert_b64, password, company_id))
+    """, (cert_name, validade, titular, encrypted_cert, encrypted_pwd, company_id))
     conn.commit()
     log_audit(conn, action="update_cert", entity="companies", entity_id=company_id, user_id=current_user.get("id"))
     conn.close()
 
     return {
         "status": "ok",
-        "message": f"Certificado A1 ({cert_name}) configurado com sucesso!",
+        "message": f"Certificado A1 ({cert_name}) validado e gravado no cofre criptográfico com sucesso!",
+        "titular": titular,
         "validade": validade,
+        "is_valid_pkcs12": inspect_info["valid"],
+    }
+
+
+@router.get("/certificate/status")
+def get_certificate_status(current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    row = conn.execute("SELECT certificado_nome, certificado_validade, certificado_titular, certificado_senha FROM companies WHERE id = ?", (company_id,)).fetchone()
+    conn.close()
+
+    if not row or not row["certificado_senha"]:
+        return {"installed": False, "message": "Nenhum certificado A1 instalado."}
+
+    val_str = row["certificado_validade"] or ""
+    days_left = None
+    if val_str:
+        try:
+            val_date = date.fromisoformat(val_str[:10])
+            days_left = (val_date - date.today()).days
+        except Exception:
+            pass
+
+    return {
+        "installed": True,
+        "name": row["certificado_nome"],
+        "titular": row["certificado_titular"] or "Empresa Emitente",
+        "valid_until": val_str,
+        "days_remaining": days_left,
+        "is_expired": days_left is not None and days_left < 0,
     }

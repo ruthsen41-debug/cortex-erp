@@ -63,11 +63,11 @@ Backend FastAPI + SQLite (`backend/main.py` ~2.235 linhas, `database.py`, `fisca
 - [x] Contratos recorrentes com reajuste automático
 - [x] Portal do cliente (orçamento e boleto online)
 
-### Fase 4 — Fiscal real
-- [ ] Integrar provedor homologado (Focus NFe, PlugNotas, Nuvem Fiscal) para NF-e, NFC-e e NFS-e (incluindo NFS-e nacional)
-- [ ] Eventos fiscais: cancelamento, CC-e, inutilização; manifestação do destinatário
-- [ ] Certificado armazenado criptografado (cofre/KMS)
-- [ ] Impostos por regime (Simples, Presumido, Real); SPED e pacote do contador; portal do contador
+### Fase 4 — Fiscal real (Concluída)
+- [x] Integrar provedor homologado (Focus NFe, PlugNotas, Nuvem Fiscal) para NF-e, NFC-e e NFS-e (incluindo NFS-e nacional)
+- [x] Eventos fiscais: cancelamento, CC-e, inutilização; manifestação do destinatário
+- [x] Certificado armazenado criptografado (cofre/KMS)
+- [x] Impostos por regime (Simples, Presumido, Real); SPED e pacote do contador; portal do contador
 
 ### Fase 5 — Produto
 - [ ] Interface em React/Vue, responsiva, PWA
