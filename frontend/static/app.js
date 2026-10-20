@@ -1113,6 +1113,11 @@ async function renderSales(container) {
           </span>
         </td>
         <td class="py-3 px-4 text-right space-x-1">
+          ${s.token_access ? `
+            <button onclick="copyPortalLink('${s.token_access}')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-2.5 py-1 rounded-lg font-semibold text-[11px] transition" title="Copiar link do portal do cliente">
+              Link Portal
+            </button>
+          ` : ''}
           ${s.status === 'orcamento' ? `
             <button onclick="approveSale(${s.id})" class="bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 rounded-lg font-semibold text-[11px] transition">
               Aprovar Venda
@@ -1276,6 +1281,19 @@ async function approveSale(saleId) {
     }
   } catch (e) {
     showToast('Erro na requisição.', 'error');
+  }
+}
+
+function copyPortalLink(token) {
+  const url = `${window.location.origin}/api/portal/quote/${token}`;
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(url).then(() => {
+      showToast('Link do Portal do Cliente copiado com sucesso!', 'success');
+    }).catch(() => {
+      prompt('Copie o link do portal abaixo:', url);
+    });
+  } else {
+    prompt('Copie o link do portal abaixo:', url);
   }
 }
 

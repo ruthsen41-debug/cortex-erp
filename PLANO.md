@@ -57,11 +57,11 @@ Backend FastAPI + SQLite (`backend/main.py` ~2.235 linhas, `database.py`, `fisca
 - [x] Orçamento por centro de custo; rateio entre categorias
 - [x] Importação/exportação de planilhas
 
-### Fase 3 — Vendas, compras e estoque
-- [ ] Vendas com múltiplos itens, tabelas de preço, comissão de vendedores, devoluções
-- [ ] Pedidos de compra, múltiplos depósitos, inventário, lotes e variações
-- [ ] Contratos recorrentes com reajuste automático
-- [ ] Portal do cliente (orçamento e boleto online)
+### Fase 3 — Vendas, compras e estoque (Concluída)
+- [x] Vendas com múltiplos itens, tabelas de preço, comissão de vendedores, devoluções
+- [x] Pedidos de compra, múltiplos depósitos, inventário, lotes e variações
+- [x] Contratos recorrentes com reajuste automático
+- [x] Portal do cliente (orçamento e boleto online)
 
 ### Fase 4 — Fiscal real
 - [ ] Integrar provedor homologado (Focus NFe, PlugNotas, Nuvem Fiscal) para NF-e, NFC-e e NFS-e (incluindo NFS-e nacional)

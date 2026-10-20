@@ -12,6 +12,9 @@ class SaleItemCreate(BaseModel):
 class SaleCreate(BaseModel):
     type: Optional[str] = "venda"  # venda, orcamento, pdv
     contact_id: Optional[int] = None
+    seller_id: Optional[int] = None
+    price_table_id: Optional[int] = None
+    valid_until: Optional[str] = None
     payment_method: Optional[str] = "Pix"
     installments: Optional[int] = 1
     discount: Optional[float] = 0.0

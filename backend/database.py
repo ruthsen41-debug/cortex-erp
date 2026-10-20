@@ -510,6 +510,141 @@ def init_db() -> None:
     );
     """)
 
+    # 23. Tabelas de Preço
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS price_tables (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        name TEXT NOT NULL,
+        discount_percent REAL DEFAULT 0.0,
+        markup_percent REAL DEFAULT 0.0,
+        active INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    # 24. Vendedores & Regras de Comissionamento
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS sellers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        name TEXT NOT NULL,
+        email TEXT DEFAULT '',
+        phone TEXT DEFAULT '',
+        commission_percent REAL DEFAULT 5.0,
+        active INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    # 25. Múltiplos Depósitos / Armazéns
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS warehouses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        name TEXT NOT NULL,
+        code TEXT NOT NULL,
+        location TEXT DEFAULT '',
+        is_default INTEGER DEFAULT 0,
+        active INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    # 26. Lotes e Validades de Produtos
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS product_batches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        product_id INTEGER NOT NULL,
+        warehouse_id INTEGER DEFAULT 1,
+        batch_number TEXT NOT NULL,
+        expiry_date TEXT,
+        manufacturing_date TEXT,
+        quantity REAL DEFAULT 0.0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (product_id) REFERENCES products(id)
+    );
+    """)
+
+    # 27. Variações de Produto (Grade / Tamanho / Cor / Voltagem)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS product_variants (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        product_id INTEGER NOT NULL,
+        variant_name TEXT NOT NULL, -- Ex: Tamanho G, Cor Azul, 220V
+        sku TEXT NOT NULL,
+        additional_price REAL DEFAULT 0.0,
+        stock_qty REAL DEFAULT 0.0,
+        active INTEGER DEFAULT 1,
+        FOREIGN KEY (product_id) REFERENCES products(id)
+    );
+    """)
+
+    # 28. Pedidos de Compra (Suprimentos)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS purchase_orders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        order_number INTEGER NOT NULL,
+        supplier_id INTEGER NOT NULL,
+        status TEXT DEFAULT 'rascunho', -- rascunho, enviado, aprovado, recebido, cancelado
+        expected_delivery_date TEXT,
+        subtotal REAL DEFAULT 0.0,
+        discount_amount REAL DEFAULT 0.0,
+        shipping_amount REAL DEFAULT 0.0,
+        total_amount REAL NOT NULL,
+        payment_terms TEXT DEFAULT 'Boleto 30 dias',
+        notes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        received_at TEXT,
+        FOREIGN KEY (supplier_id) REFERENCES contacts(id)
+    );
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS purchase_order_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER NOT NULL,
+        product_id INTEGER NOT NULL,
+        quantity REAL NOT NULL,
+        unit_price REAL NOT NULL,
+        discount REAL DEFAULT 0.0,
+        total_price REAL NOT NULL,
+        FOREIGN KEY (order_id) REFERENCES purchase_orders(id),
+        FOREIGN KEY (product_id) REFERENCES products(id)
+    );
+    """)
+
+    # 29. Devoluções de Venda & Trocas (RMA)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS sales_returns (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        sale_id INTEGER NOT NULL,
+        reason TEXT NOT NULL,
+        total_returned REAL NOT NULL,
+        refund_method TEXT DEFAULT 'credito', -- credito, estorno_financeiro
+        status TEXT DEFAULT 'concluido',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (sale_id) REFERENCES sales(id)
+    );
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS sales_return_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        return_id INTEGER NOT NULL,
+        product_id INTEGER NOT NULL,
+        quantity REAL NOT NULL,
+        unit_price REAL NOT NULL,
+        return_to_stock INTEGER DEFAULT 1,
+        FOREIGN KEY (return_id) REFERENCES sales_returns(id),
+        FOREIGN KEY (product_id) REFERENCES products(id)
+    );
+    """)
+
     conn.commit()
     migrate_db(conn)
 
@@ -527,6 +662,34 @@ def init_db() -> None:
                 INSERT INTO collection_rules (company_id, name, trigger_days, channel, message_template, active)
                 VALUES (1, ?, ?, ?, ?, 1)
             """, r)
+        conn.commit()
+
+    # Seed Almoxarifado Central se não existir
+    wh_count = cur.execute("SELECT COUNT(*) FROM warehouses").fetchone()[0]
+    if wh_count == 0:
+        cur.execute("""
+            INSERT INTO warehouses (company_id, name, code, location, is_default, active)
+            VALUES (1, 'Depósito Central', 'CENTRAL', 'Matriz', 1, 1)
+        """)
+        conn.commit()
+
+    # Seed Tabelas de Preço Padrão se não existirem
+    pt_count = cur.execute("SELECT COUNT(*) FROM price_tables").fetchone()[0]
+    if pt_count == 0:
+        cur.execute("""
+            INSERT INTO price_tables (company_id, name, discount_percent, markup_percent, active)
+            VALUES (1, 'Tabela Padrão (Varejo)', 0.0, 0.0, 1),
+                   (1, 'Tabela Atacado (10% Desc.)', 10.0, 0.0, 1)
+        """)
+        conn.commit()
+
+    # Seed Vendedor Padrão se não existir
+    sel_count = cur.execute("SELECT COUNT(*) FROM sellers").fetchone()[0]
+    if sel_count == 0:
+        cur.execute("""
+            INSERT INTO sellers (company_id, name, email, phone, commission_percent, active)
+            VALUES (1, 'Consultor Comercial', 'vendas@cortex.com.br', '(11) 99999-8888', 5.0, 1)
+        """)
         conn.commit()
 
     # Seed Admin User se não existir
@@ -573,6 +736,39 @@ def migrate_db(conn: sqlite3.Connection) -> None:
                 cur.execute(f"ALTER TABLE {tbl} ADD COLUMN company_id INTEGER DEFAULT 1")
         except Exception:
             pass
+
+    # Colunas da Fase 3
+    try:
+        sales_cols = [c["name"] for c in cur.execute("PRAGMA table_info(sales)").fetchall()]
+        if "seller_id" not in sales_cols:
+            cur.execute("ALTER TABLE sales ADD COLUMN seller_id INTEGER")
+        if "commission_amount" not in sales_cols:
+            cur.execute("ALTER TABLE sales ADD COLUMN commission_amount REAL DEFAULT 0.0")
+        if "price_table_id" not in sales_cols:
+            cur.execute("ALTER TABLE sales ADD COLUMN price_table_id INTEGER")
+        if "token_access" not in sales_cols:
+            cur.execute("ALTER TABLE sales ADD COLUMN token_access TEXT")
+    except Exception:
+        pass
+
+    try:
+        prod_cols = [c["name"] for c in cur.execute("PRAGMA table_info(products)").fetchall()]
+        if "warehouse_id" not in prod_cols:
+            cur.execute("ALTER TABLE products ADD COLUMN warehouse_id INTEGER DEFAULT 1")
+    except Exception:
+        pass
+
+    try:
+        contract_cols = [c["name"] for c in cur.execute("PRAGMA table_info(recurring_contracts)").fetchall()]
+        if "inflation_index" not in contract_cols:
+            cur.execute("ALTER TABLE recurring_contracts ADD COLUMN inflation_index TEXT DEFAULT 'IPCA'")
+        if "last_adjusted_at" not in contract_cols:
+            cur.execute("ALTER TABLE recurring_contracts ADD COLUMN last_adjusted_at TEXT")
+        if "adjustment_percent" not in contract_cols:
+            cur.execute("ALTER TABLE recurring_contracts ADD COLUMN adjustment_percent REAL DEFAULT 0.0")
+    except Exception:
+        pass
+
     conn.commit()
 
 

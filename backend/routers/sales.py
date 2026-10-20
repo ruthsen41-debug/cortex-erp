@@ -1,3 +1,4 @@
+import secrets
 from datetime import date, timedelta
 from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.responses import HTMLResponse
@@ -20,11 +21,14 @@ router = APIRouter(prefix="/api/sales", tags=["Vendas & Orçamentos"])
 def _process_sale_billing(conn, sale_id: int, immediate_paid: bool = False, company_id: int = 1):
     """Dá baixa automática no estoque dos produtos vendidos e gera as parcelas no Contas a Receber."""
     cur = conn.cursor()
-    sale = cur.execute("""
+    row = cur.execute("""
         SELECT s.*, c.name as contact_name
         FROM sales s LEFT JOIN contacts c ON c.id = s.contact_id
         WHERE s.id = ?
     """, (sale_id,)).fetchone()
+    if not row:
+        return
+    sale = dict(row)
     items = rows_to_dicts(cur.execute("SELECT * FROM sale_items WHERE sale_id = ?", (sale_id,)).fetchall())
 
     # 1. Baixa estoque de produtos físicos
@@ -119,38 +123,79 @@ async def create_sale(req: Request, current_user: Dict[str, Any] = Depends(get_c
     s_type = data.get("type") or data.get("sale_type") or "venda"
     status = "faturada" if s_type == "pdv" else ("aprovada" if s_type == "venda" else "orcamento")
     contact_id = data.get("contact_id")
-    seller = current_user.get("name", "Vendedor")
     pay_method = data.get("payment_method", "Pix")
     installments = int(data.get("installments") or 1)
     notes = data.get("notes", "")
+    valid_until = data.get("valid_until", (date.today() + timedelta(days=15)).isoformat())
+
+    # Vendedor e comissão
+    seller_id = data.get("seller_id")
+    seller_name = current_user.get("name", "Vendedor")
+    commission_percent = 0.0
+    if seller_id:
+        seller_row = cur.execute("SELECT name, commission_percent FROM sellers WHERE id = ?", (seller_id,)).fetchone()
+        if seller_row:
+            seller_name = seller_row["name"]
+            commission_percent = float(seller_row["commission_percent"] or 0.0)
+
+    # Tabela de preço
+    price_table_id = data.get("price_table_id")
+    pt_discount = 0.0
+    pt_markup = 0.0
+    if price_table_id:
+        pt_row = cur.execute("SELECT discount_percent, markup_percent FROM price_tables WHERE id = ?", (price_table_id,)).fetchone()
+        if pt_row:
+            pt_discount = float(pt_row["discount_percent"] or 0.0)
+            pt_markup = float(pt_row["markup_percent"] or 0.0)
 
     next_num = (cur.execute("SELECT MAX(number) FROM sales").fetchone()[0] or 1000) + 1
     items = data.get("items", [])
 
     calc_subtotal = 0.0
+    processed_items = []
     for it in items:
         qty = float(it.get("quantity") or 1.0)
         u_p = float(it.get("unit_price") or 0.0)
-        calc_subtotal += (qty * u_p)
+
+        # Aplica ajuste de tabela de preço se especificada
+        if pt_discount > 0:
+            u_p = round(u_p * (1.0 - (pt_discount / 100.0)), 2)
+        elif pt_markup > 0:
+            u_p = round(u_p * (1.0 + (pt_markup / 100.0)), 2)
+
+        sub = round(qty * u_p, 2)
+        calc_subtotal += sub
+        processed_items.append({
+            "product_id": it.get("product_id"),
+            "product_name": it.get("name") or it.get("product_name") or "Produto",
+            "quantity": qty,
+            "unit_price": u_p,
+            "total_price": sub
+        })
 
     total = float(data.get("total_amount") if data.get("total_amount") is not None else calc_subtotal)
+    commission_amount = round(total * (commission_percent / 100.0), 2)
+    token_access = secrets.token_urlsafe(16)
 
     cur.execute("""
-        INSERT INTO sales (number, sale_type, status, contact_id, seller_name, sale_date, subtotal, total_amount, payment_method, installments, bank_account_id, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
-    """, (next_num, s_type, status, contact_id, seller, date.today().isoformat(), calc_subtotal, total, pay_method, installments, notes))
+        INSERT INTO sales (
+            company_id, number, sale_type, status, contact_id, seller_name, seller_id,
+            commission_amount, price_table_id, token_access, sale_date, valid_until,
+            subtotal, total_amount, payment_method, installments, bank_account_id, notes
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+    """, (
+        company_id, next_num, s_type, status, contact_id, seller_name, seller_id,
+        commission_amount, price_table_id, token_access, date.today().isoformat(), valid_until,
+        calc_subtotal, total, pay_method, installments, notes
+    ))
     sale_id = cur.lastrowid
 
-    for it in items:
-        pid = it.get("product_id")
-        pname = it.get("name") or "Produto"
-        qty = float(it.get("quantity") or 1.0)
-        up = float(it.get("unit_price") or 0.0)
-        sub = qty * up
+    for it in processed_items:
         cur.execute("""
             INSERT INTO sale_items (sale_id, product_id, product_name, sku, unit, quantity, unit_price, discount, total_price)
             VALUES (?, ?, ?, 'PRD', 'UN', ?, ?, 0.0, ?)
-        """, (sale_id, pid, pname, qty, up, sub))
+        """, (sale_id, it["product_id"], it["product_name"], it["quantity"], it["unit_price"], it["total_price"]))
 
     conn.commit()
 
@@ -159,9 +204,16 @@ async def create_sale(req: Request, current_user: Dict[str, Any] = Depends(get_c
     elif s_type == "venda":
         _process_sale_billing(conn, sale_id, immediate_paid=False, company_id=company_id)
 
-    log_audit(conn, action="create_sale", entity="sales", entity_id=sale_id, new_data={"number": next_num, "total": total}, user_id=current_user.get("id"))
+    log_audit(conn, action="create_sale", entity="sales", entity_id=sale_id, new_data={"number": next_num, "total": total, "commission": commission_amount}, user_id=current_user.get("id"))
     conn.close()
-    return {"status": "ok", "id": sale_id, "number": next_num}
+    return {
+        "status": "ok",
+        "id": sale_id,
+        "number": next_num,
+        "total_amount": total,
+        "commission_amount": commission_amount,
+        "token_access": token_access
+    }
 
 
 @router.post("/{sale_id}/approve")
