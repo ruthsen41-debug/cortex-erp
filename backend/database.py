@@ -674,6 +674,60 @@ def init_db() -> None:
     );
     """)
 
+    # 32. Chaves de API para Integrações Externas (E-commerce / Marketplaces)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS api_keys (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        name TEXT NOT NULL,
+        api_key TEXT UNIQUE NOT NULL,
+        active INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    # 33. Inscrições em Webhooks Externos
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS webhook_subscriptions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        target_url TEXT NOT NULL,
+        secret TEXT DEFAULT '',
+        events TEXT DEFAULT 'all', -- all ou lista separada por vírgula
+        active INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    # 34. Histórico de Disparos de Webhooks
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS webhook_deliveries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        subscription_id INTEGER,
+        event_name TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        response_status INTEGER DEFAULT 0,
+        success INTEGER DEFAULT 0,
+        delivered_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    # 35. Notificações do Sistema
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS notifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        user_id INTEGER,
+        title TEXT NOT NULL,
+        message TEXT NOT NULL,
+        type TEXT DEFAULT 'info', -- info, warning, success, alert
+        is_read INTEGER DEFAULT 0,
+        link TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
     conn.commit()
     migrate_db(conn)
 
@@ -735,6 +789,24 @@ def init_db() -> None:
             INSERT INTO users (company_id, name, email, password_hash, role)
             VALUES (1, 'Administrador Cortex', 'admin@cortex.com.br', ?, 'admin')
         """, (pwd_hash,))
+        conn.commit()
+
+    # Seed Chave de API Padrão se não existir
+    key_count = cur.execute("SELECT COUNT(*) FROM api_keys").fetchone()[0]
+    if key_count == 0:
+        cur.execute("""
+            INSERT INTO api_keys (company_id, name, api_key, active)
+            VALUES (1, 'Chave Integração E-commerce / Marketplaces', 'ctx_live_7a8b9c0d1e2f3a4b5c6d', 1)
+        """)
+        conn.commit()
+
+    # Seed Notificação de Boas-Vindas se não existir
+    notif_count = cur.execute("SELECT COUNT(*) FROM notifications").fetchone()[0]
+    if notif_count == 0:
+        cur.execute("""
+            INSERT INTO notifications (company_id, title, message, type, is_read, link)
+            VALUES (1, 'Bem-vindo ao Cortex ERP Pro+!', 'Sistema pronto e integrado para automação financeira, comercial e fiscal.', 'success', 0, '')
+        """)
         conn.commit()
 
     seed_initial_data(conn)

@@ -1,0 +1,23 @@
+version: "3.9"
+
+services:
+  cortex-erp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cortex_erp_app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - SECRET_KEY=cortex-erp-enterprise-secret-key-prod-2026
+      - ASAAS_ENVIRONMENT=sandbox
+      - ASAAS_API_KEY=
+    volumes:
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

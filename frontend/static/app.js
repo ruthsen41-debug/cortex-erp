@@ -2381,6 +2381,69 @@ async function uploadCertificate() {
   }
 }
 
+// Central de Notificações
+async function refreshNotificationBadge() {
+  try {
+    const res = await fetch('/api/notifications?unread_only=true');
+    if (res.ok) {
+      const data = await res.json();
+      const badge = document.getElementById('notif-badge');
+      if (badge) {
+        badge.innerText = data.unread_count || 0;
+        badge.style.display = data.unread_count > 0 ? 'flex' : 'none';
+      }
+    }
+  } catch (e) {}
+}
+
+async function openNotificationsModal() {
+  try {
+    const res = await fetch('/api/notifications');
+    const data = await res.json();
+    const list = data.notifications || [];
+
+    const itemsHtml = list.length ? list.map(n => `
+      <div class="p-3 rounded-xl border border-slate-200 dark:border-slate-800 ${n.is_read ? 'bg-slate-50/50 dark:bg-slate-800/30' : 'bg-blue-50/50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800'} flex items-start justify-between gap-3">
+        <div>
+          <div class="font-bold text-xs ${n.is_read ? 'text-slate-700 dark:text-slate-300' : 'text-blue-600 dark:text-blue-400'}">${n.title}</div>
+          <div class="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">${n.message}</div>
+          <div class="text-[9px] text-slate-400 mt-1">${formatDate(n.created_at)}</div>
+        </div>
+        ${!n.is_read ? `<button onclick="markNotificationRead(${n.id})" class="text-[10px] text-blue-600 hover:underline shrink-0">Marcar lida</button>` : ''}
+      </div>
+    `).join('') : '<div class="py-8 text-center text-slate-400 text-xs">Nenhuma notificação encontrada.</div>';
+
+    openModal(`
+      <div class="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-800">
+        <h3 class="font-bold text-base text-slate-900 dark:text-slate-100 flex items-center gap-2">
+          <i data-lucide="bell" class="w-5 h-5 text-blue-500"></i> Central de Notificações
+        </h3>
+        <div class="flex items-center gap-2">
+          <button onclick="markAllNotificationsRead()" class="text-xs text-blue-600 hover:underline font-semibold">Marcar todas como lidas</button>
+          <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+        </div>
+      </div>
+      <div class="mt-4 space-y-2 max-h-[60vh] overflow-y-auto">
+        ${itemsHtml}
+      </div>
+    `);
+  } catch (e) {
+    showToast('Erro ao carregar notificações.', 'error');
+  }
+}
+
+async function markNotificationRead(id) {
+  await fetch(`/api/notifications/${id}/read`, { method: 'POST' });
+  refreshNotificationBadge();
+  openNotificationsModal();
+}
+
+async function markAllNotificationsRead() {
+  await fetch('/api/notifications/mark-all-read', { method: 'POST' });
+  refreshNotificationBadge();
+  openNotificationsModal();
+}
+
 // Initial Boot
 document.addEventListener('DOMContentLoaded', () => {
   const theme = localStorage.getItem('cortex_theme');
@@ -2388,4 +2451,6 @@ document.addEventListener('DOMContentLoaded', () => {
     document.documentElement.classList.add('dark');
   }
   switchTab('dashboard');
+  refreshNotificationBadge();
+  setInterval(refreshNotificationBadge, 30000);
 });

@@ -25,6 +25,10 @@ from .purchase_orders import router as purchase_orders_router
 from .returns import router as returns_router
 from .portal import router as portal_router
 from .accountant import router as accountant_router
+from .public_api import router as public_api_router
+from .webhooks import router as webhooks_router
+from .notifications import router as notifications_router
+from .system import router as system_router
 
 all_routers = [
     auth_router,
@@ -54,4 +58,8 @@ all_routers = [
     returns_router,
     portal_router,
     accountant_router,
+    public_api_router,
+    webhooks_router,
+    notifications_router,
+    system_router,
 ]

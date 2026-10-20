@@ -603,6 +603,137 @@ def test_phase4_sped_fiscal_and_accountant_portal():
     assert "application/zip" in pkg_portal.headers.get("content-type", "")
 
 
+def test_phase5_public_api_and_ecommerce():
+    api_headers = {"X-API-Key": "ctx_live_7a8b9c0d1e2f3a4b5c6d"}
+
+    # 1. Consulta de Catálogo via API Pública v1
+    cat_res = client.get("/api/v1/products", headers=api_headers)
+    assert cat_res.status_code == 200
+    cat_data = cat_res.json()
+    assert "products" in cat_data
+    assert cat_data["total"] > 0
+
+    # 2. Criação de Pedido de Venda via E-commerce
+    order_payload = {
+        "customer": {
+            "name": "Maria Silva E-commerce",
+            "document": "33445566778",
+            "email": "maria@loja.com.br",
+            "phone": "65988881234",
+            "city": "Cuiabá",
+            "state": "MT"
+        },
+        "shipping_amount": 25.0,
+        "items": [
+            {"product_id": 1, "quantity": 2.0, "unit_price": 100.0}
+        ],
+        "payment_method": "Cartão de Crédito",
+        "notes": "Pedido via Shopify #1042"
+    }
+    order_res = client.post("/api/v1/orders", json=order_payload, headers=api_headers)
+    assert order_res.status_code == 200
+    order_data = order_res.json()
+    assert order_data["status"] == "ok"
+    order_id = order_data["order_id"]
+    # 2 x 100 + 25 = 225
+    assert order_data["total_amount"] == 225.0
+
+    # 3. Consulta de Status do Pedido via API v1
+    status_res = client.get(f"/api/v1/orders/{order_id}", headers=api_headers)
+    assert status_res.status_code == 200
+    assert status_res.json()["status"] == "faturada"
+
+    # 4. Sincronização em Lote de Estoque por SKU
+    sync_res = client.post("/api/v1/inventory/sync", json=[
+        {"sku": "PRD-01", "stock": 42.0}
+    ], headers=api_headers)
+    assert sync_res.status_code == 200
+    assert sync_res.json()["status"] == "ok"
+
+
+def test_phase5_webhooks_management_and_dispatch():
+    token = get_auth_token()
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 1. Cria Subscrição de Webhook
+    sub_res = client.post("/api/webhooks", json={
+        "target_url": "https://webhook.site/cortex-test",
+        "events": "order.created,inventory.updated",
+        "secret": "whsec_test_secret_123"
+    }, headers=headers)
+    assert sub_res.status_code == 200
+    sub_id = sub_res.json()["id"]
+
+    # 2. Lista Webhooks
+    list_res = client.get("/api/webhooks", headers=headers)
+    assert list_res.status_code == 200
+    assert any(w["id"] == sub_id for w in list_res.json())
+
+    # 3. Disparo de Teste (Ping)
+    test_res = client.post("/api/webhooks/test", headers=headers)
+    assert test_res.status_code == 200
+
+    # 4. Histórico de Entregas
+    deliv_res = client.get("/api/webhooks/deliveries", headers=headers)
+    assert deliv_res.status_code == 200
+
+    # 5. Remoção
+    del_res = client.delete(f"/api/webhooks/{sub_id}", headers=headers)
+    assert del_res.status_code == 200
+
+
+def test_phase5_notifications_center():
+    token = get_auth_token()
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 1. Cria Notificação
+    create_res = client.post("/api/notifications", json={
+        "title": "Alerta de Estoque Mínimo",
+        "message": "O produto Teclado Mecânico atingiu 3 unidades no estoque.",
+        "type": "warning",
+        "link": "/inventory"
+    }, headers=headers)
+    assert create_res.status_code == 200
+    notif_id = create_res.json()["id"]
+
+    # 2. Lista Notificações
+    list_res = client.get("/api/notifications", headers=headers)
+    assert list_res.status_code == 200
+    assert list_res.json()["unread_count"] >= 1
+
+    # 3. Marca como Lida
+    read_res = client.post(f"/api/notifications/{notif_id}/read", headers=headers)
+    assert read_res.status_code == 200
+
+    # 4. Marca Todas como Lidas
+    all_res = client.post("/api/notifications/mark-all-read", headers=headers)
+    assert all_res.status_code == 200
+
+
+def test_phase5_system_metrics_backup_and_logs():
+    token = get_auth_token()
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 1. Métricas do Sistema
+    metric_res = client.get("/api/system/metrics", headers=headers)
+    assert metric_res.status_code == 200
+    metrics = metric_res.json()
+    assert metrics["status"] == "healthy"
+    assert metrics["database"]["size_mb"] >= 0
+    assert metrics["database"]["counts"]["products"] > 0
+
+    # 2. Download do Backup Quente do Banco (SQLite VACUUM/Backup)
+    backup_res = client.get("/api/system/backup", headers=headers)
+    assert backup_res.status_code == 200
+    assert "application/x-sqlite3" in backup_res.headers.get("content-type", "")
+    assert len(backup_res.content) > 1000
+
+    # 3. Consulta de Logs de Auditoria
+    logs_res = client.get("/api/system/logs?limit=10", headers=headers)
+    assert logs_res.status_code == 200
+    assert len(logs_res.json()) > 0
+
+
 if __name__ == "__main__":
     test_health()
     test_auth_me()
@@ -627,4 +758,9 @@ if __name__ == "__main__":
     test_phase4_tax_calculator_and_regimes()
     test_phase4_fiscal_events_and_providers()
     test_phase4_sped_fiscal_and_accountant_portal()
-    print("TODOS OS 21 TESTES AUTOMATIZADOS (FASES 0, 1, 2, 3 E 4) PASSARAM COM SUCESSO!")
+    # Fase 5 tests
+    test_phase5_public_api_and_ecommerce()
+    test_phase5_webhooks_management_and_dispatch()
+    test_phase5_notifications_center()
+    test_phase5_system_metrics_backup_and_logs()
+    print("TODOS OS 25 TESTES AUTOMATIZADOS (FASES 0, 1, 2, 3, 4 E 5) PASSARAM COM SUCESSO!")

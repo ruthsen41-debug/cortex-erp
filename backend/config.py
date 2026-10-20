@@ -7,6 +7,7 @@ BACKEND_DIR = BASE_DIR / "backend"
 FRONTEND_DIR = BASE_DIR / "frontend"
 STATIC_DIR = FRONTEND_DIR / "static"
 DATA_DIR = BASE_DIR / "data"
+DB_PATH = DATA_DIR / "cortex_erp.db"
 
 # Carrega .env do projeto ou cortex_ai (Gemini)
 load_dotenv(BASE_DIR / ".env")

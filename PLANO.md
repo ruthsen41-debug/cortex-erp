@@ -69,11 +69,11 @@ Backend FastAPI + SQLite (`backend/main.py` ~2.235 linhas, `database.py`, `fisca
 - [x] Certificado armazenado criptografado (cofre/KMS)
 - [x] Impostos por regime (Simples, Presumido, Real); SPED e pacote do contador; portal do contador
 
-### Fase 5 — Produto
-- [ ] Interface em React/Vue, responsiva, PWA
-- [ ] API pública e webhooks; integrações com marketplaces e e-commerce
-- [ ] Notificações, backup, logs
-- [ ] Docker, CI e monitoramento
+### Fase 5 — Produto (Concluída)
+- [x] Interface em React/Vue, responsiva, PWA
+- [x] API pública e webhooks; integrações com marketplaces e e-commerce
+- [x] Notificações, backup, logs
+- [x] Docker, CI e monitoramento
 
 ## 4. Custos estimados (grosseiros)
 
