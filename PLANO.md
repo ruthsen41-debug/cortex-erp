@@ -33,12 +33,12 @@ Backend FastAPI + SQLite (`backend/main.py` ~2.235 linhas, `database.py`, `fisca
 
 ## 3. Fases
 
-### Fase 0 — Estabilizar
-- [ ] `git init` e `requirements.txt`
-- [ ] Corrigir o erro de SQL (`certificado_ titular`)
-- [ ] Criar `frontend/static/app.js` ligado às rotas existentes
-- [ ] Remover caminho fixo do `.env`, IDs de categoria fixos e fallback com dados falsos
-- [ ] Teste de fumaça de cada rota
+### Fase 0 — Estabilizar (Concluída)
+- [x] `git init` e `requirements.txt`
+- [x] Corrigir o erro de SQL (`certificado_ titular`)
+- [x] Criar `frontend/static/app.js` ligado às rotas existentes
+- [x] Remover caminho fixo do `.env`, IDs de categoria fixos e fallback com dados falsos
+- [x] Teste de fumaça de cada rota
 
 ### Fase 1 — Fundação
 - [ ] Separar `main.py` em routers/serviços (financeiro, vendas, estoque, fiscal...) e usar Pydantic

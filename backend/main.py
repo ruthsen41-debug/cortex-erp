@@ -16,24 +16,37 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
-from .database import get_conn, init_db, recalculate_bank_balances
-from .fiscal_engine import (
-    gerar_chave_acesso_sefaz,
-    validar_dados_fiscais,
-    gerar_xml_nfe_400,
-    gerar_html_danfe,
-    gerar_xml_compra_exemplo,
-    parse_nfe_compra_xml,
-    gerar_ofx_exemplo,
-    parse_ofx_content,
-)
+try:
+    from .database import get_conn, init_db, recalculate_bank_balances
+    from .fiscal_engine import (
+        gerar_chave_acesso_sefaz,
+        validar_dados_fiscais,
+        gerar_xml_nfe_400,
+        gerar_html_danfe,
+        gerar_xml_compra_exemplo,
+        parse_nfe_compra_xml,
+        gerar_ofx_exemplo,
+        parse_ofx_content,
+    )
+except ImportError:
+    from database import get_conn, init_db, recalculate_bank_balances
+    from fiscal_engine import (
+        gerar_chave_acesso_sefaz,
+        validar_dados_fiscais,
+        gerar_xml_nfe_400,
+        gerar_html_danfe,
+        gerar_xml_compra_exemplo,
+        parse_nfe_compra_xml,
+        gerar_ofx_exemplo,
+        parse_ofx_content,
+    )
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
 
 # Tenta carregar variáveis de ambiente locais ou do cortex_ai para usar a chave Gemini no CFO Virtual
 load_dotenv(BASE_DIR / ".env")
-cortex_ai_env = Path(r"C:\Users\USUARIO\cortex_ai\.env")
+cortex_ai_env = Path.home() / "cortex_ai" / ".env"
 if cortex_ai_env.exists():
     load_dotenv(cortex_ai_env, override=False)
 
@@ -330,11 +343,14 @@ async def transfer_between_accounts(req: Request):
     to_acc = cur.execute("SELECT name FROM bank_accounts WHERE id = ?", (to_id,)).fetchone()
     uid = f"TRF-{uuid.uuid4().hex[:6].upper()}"
 
+    trf_cat = cur.execute("SELECT id FROM categories WHERE dre_group = 'transferencia' OR code = '9.01' LIMIT 1").fetchone()
+    trf_cat_id = trf_cat["id"] if trf_cat else 18
+
     # Cria saída na conta origem
     cur.execute("""
         INSERT INTO financial_entries (type, description, category_id, bank_account_id, payment_method, competence_date, due_date, amount, paid_amount, status, group_uid, origin_type)
-        VALUES ('despesa', ?, 18, ?, 'Transferência/TED', ?, ?, ?, ?, 'pago', ?, 'transferencia')
-    """, (f"[Transf. Enviada -> {to_acc['name']}] {desc}", from_id, transfer_date, transfer_date, amount, amount, uid))
+        VALUES ('despesa', ?, ?, ?, 'Transferência/TED', ?, ?, ?, ?, 'pago', ?, 'transferencia')
+    """, (f"[Transf. Enviada -> {to_acc['name']}] {desc}", trf_cat_id, from_id, transfer_date, transfer_date, amount, amount, uid))
     out_id = cur.lastrowid
     cur.execute("""
         INSERT INTO financial_payments (entry_id, bank_account_id, payment_date, principal_paid, total_cash_flow, payment_method, notes)
@@ -344,8 +360,8 @@ async def transfer_between_accounts(req: Request):
     # Cria entrada na conta destino
     cur.execute("""
         INSERT INTO financial_entries (type, description, category_id, bank_account_id, payment_method, competence_date, due_date, amount, paid_amount, status, group_uid, origin_type)
-        VALUES ('receita', ?, 18, ?, 'Transferência/TED', ?, ?, ?, ?, 'pago', ?, 'transferencia')
-    """, (f"[Transf. Recebida <- {from_acc['name']}] {desc}", to_id, transfer_date, transfer_date, amount, amount, uid))
+        VALUES ('receita', ?, ?, ?, 'Transferência/TED', ?, ?, ?, ?, 'pago', ?, 'transferencia')
+    """, (f"[Transf. Recebida <- {from_acc['name']}] {desc}", trf_cat_id, to_id, transfer_date, transfer_date, amount, amount, uid))
     in_id = cur.lastrowid
     cur.execute("""
         INSERT INTO financial_payments (entry_id, bank_account_id, payment_date, principal_paid, total_cash_flow, payment_method, notes)
@@ -497,22 +513,14 @@ async def lookup_cnpj(cnpj: str):
                     "phone": d.get("ddd_telefone_1", ""),
                     "email": d.get("email", "") or "",
                 }
-    except Exception:
-        pass
-    # Fallback determinístico caso esteja offline
-    return {
-        "name": f"EMPRESA CONSULTADA CNPJ {clean[:8]} LTDA",
-        "trade_name": f"Grupo Empresarial {clean[:4]}",
-        "cep": "78200-000",
-        "street": "Avenida Sete de Setembro",
-        "number": "1000",
-        "complement": "Sala 01",
-        "neighborhood": "Centro",
-        "city": "Cáceres",
-        "state": "MT",
-        "phone": "(65) 3223-0000",
-        "email": "contato@empresa.com.br",
-    }
+            elif r.status_code == 404:
+                raise HTTPException(status_code=404, detail="CNPJ não encontrado na Receita Federal.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Erro ao consultar serviço da BrasilAPI: {str(e)}")
+
+    raise HTTPException(status_code=404, detail="CNPJ não encontrado.")
 
 
 @app.get("/api/lookup/cep/{cep}")
@@ -531,17 +539,15 @@ async def lookup_cep(cep: str):
                         "neighborhood": d.get("bairro", ""),
                         "city": d.get("localidade", ""),
                         "state": d.get("uf", ""),
-                        "ibge_code": d.get("ibge", "5102504"),
+                        "ibge_code": d.get("ibge", ""),
                     }
-    except Exception:
-        pass
-    return {
-        "street": "Avenida Brasil",
-        "neighborhood": "Centro",
-        "city": "Cáceres",
-        "state": "MT",
-        "ibge_code": "5102504",
-    }
+                raise HTTPException(status_code=404, detail="CEP não encontrado.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Erro ao consultar serviço ViaCEP: {str(e)}")
+
+    raise HTTPException(status_code=404, detail="CEP não encontrado.")
 
 
 # ==============================================================================
@@ -769,10 +775,29 @@ async def create_financial_entry(req: Request):
     data = await req.json()
     e_type = data.get("type", "despesa")
     description = data.get("description", "Lançamento Financeiro").strip()
+    conn = get_conn()
+    cur = conn.cursor()
+
     contact_id = int(data["contact_id"]) if data.get("contact_id") else None
-    category_id = int(data["category_id"]) if data.get("category_id") else (1 if e_type == "receita" else 11)
-    cost_center_id = int(data["cost_center_id"]) if data.get("cost_center_id") else 1
-    bank_account_id = int(data["bank_account_id"]) if data.get("bank_account_id") else 1
+
+    if data.get("category_id"):
+        category_id = int(data["category_id"])
+    else:
+        cat = cur.execute("SELECT id FROM categories WHERE type = ? ORDER BY code ASC LIMIT 1", (e_type,)).fetchone()
+        category_id = cat["id"] if cat else (1 if e_type == "receita" else 11)
+
+    if data.get("cost_center_id"):
+        cost_center_id = int(data["cost_center_id"])
+    else:
+        cc = cur.execute("SELECT id FROM cost_centers WHERE active = 1 ORDER BY id ASC LIMIT 1").fetchone()
+        cost_center_id = cc["id"] if cc else 1
+
+    if data.get("bank_account_id"):
+        bank_account_id = int(data["bank_account_id"])
+    else:
+        ba = cur.execute("SELECT id FROM bank_accounts WHERE active = 1 ORDER BY id ASC LIMIT 1").fetchone()
+        bank_account_id = ba["id"] if ba else 1
+
     payment_method = data.get("payment_method", "Pix")
     competence_date = data.get("competence_date") or date.today().isoformat()
     first_due_str = data.get("due_date") or date.today().isoformat()
@@ -784,8 +809,6 @@ async def create_financial_entry(req: Request):
     doc_num = data.get("document_number", "")
     notes = data.get("notes", "")
 
-    conn = get_conn()
-    cur = conn.cursor()
     group_uid = f"FIN-{uuid.uuid4().hex[:8].upper()}"
 
     # Se parcelado, divide o valor ou repete se for recorrente mensal
@@ -2224,8 +2247,9 @@ def get_dre_report(regime: str = "competencia"):
 # ==============================================================================
 # SERVE INTERFACE FRONT-END SPA
 # ==============================================================================
-if FRONTEND_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
+STATIC_DIR = FRONTEND_DIR / "static"
+STATIC_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 @app.get("/", response_class=HTMLResponse)

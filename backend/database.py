@@ -57,7 +57,7 @@ def init_db() -> None:
         csc_token TEXT DEFAULT 'CORTEX-ERP-CSC-HOMOLOGACAO',
         certificado_nome TEXT DEFAULT '',
         certificado_validade TEXT DEFAULT '',
-        certificado_ titular TEXT DEFAULT '',
+        certificado_titular TEXT DEFAULT '',
         certificado_b64 TEXT DEFAULT '',
         certificado_senha TEXT DEFAULT '',
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
