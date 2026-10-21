@@ -1,14 +1,14 @@
 from datetime import date
 from fastapi import APIRouter, HTTPException, Depends
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any
 
 try:
-    from ..database import get_conn
+    from ..database import get_conn, begin_write
     from ..auth import get_current_user, log_audit
     from ..utils import rows_to_dicts
     from ..schemas.phase3 import ReturnCreate
 except ImportError:
-    from database import get_conn
+    from database import get_conn, begin_write
     from auth import get_current_user, log_audit
     from utils import rows_to_dicts
     from schemas.phase3 import ReturnCreate
@@ -43,6 +43,7 @@ def list_sales_returns(current_user: Dict[str, Any] = Depends(get_current_user))
 @router.post("")
 def create_sales_return(data: ReturnCreate, current_user: Dict[str, Any] = Depends(get_current_user)):
     conn = get_conn()
+    begin_write(conn)
     cur = conn.cursor()
     company_id = current_user.get("company_id", 1)
 
@@ -67,7 +68,7 @@ def create_sales_return(data: ReturnCreate, current_user: Dict[str, Any] = Depen
         """, (ret_id, it.product_id, it.quantity, it.unit_price, it.return_to_stock))
 
         if it.return_to_stock:
-            prod = cur.execute("SELECT stock_qty, average_cost, cost_price FROM products WHERE id = ?", (it.product_id,)).fetchone()
+            prod = cur.execute("SELECT stock_qty, average_cost, cost_price FROM products WHERE id = ? AND company_id = ?", (it.product_id, company_id)).fetchone()
             if prod:
                 old_qty = float(prod["stock_qty"] or 0.0)
                 new_qty = old_qty + float(it.quantity)
@@ -103,7 +104,7 @@ def create_sales_return(data: ReturnCreate, current_user: Dict[str, Any] = Depen
         fin_entry_id = cur.lastrowid
 
     conn.commit()
-    log_audit(conn, action="create_return", entity="sales_returns", entity_id=ret_id, new_data=data.dict(), user_id=current_user.get("id"))
+    log_audit(conn, action="create_return", entity="sales_returns", entity_id=ret_id, new_data=data.model_dump(), user_id=current_user.get("id"))
     conn.close()
 
     return {

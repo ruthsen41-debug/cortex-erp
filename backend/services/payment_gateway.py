@@ -3,17 +3,17 @@ import os
 import re
 import base64
 import uuid
-from datetime import datetime, date
-from typing import Optional, Dict, Any
+from datetime import date
+from typing import Dict, Any
 
 import httpx
 import qrcode
 
 try:
-    from ..database import get_conn, recalculate_bank_balances
+    from ..database import get_conn, begin_write, recalculate_bank_balances
     from ..auth import log_audit
 except ImportError:
-    from database import get_conn, recalculate_bank_balances
+    from database import get_conn, begin_write, recalculate_bank_balances
     from auth import log_audit
 
 ASAAS_API_KEY = os.getenv("ASAAS_API_KEY", "").strip()
@@ -35,6 +35,55 @@ def generate_qr_code_base64(data: str) -> str:
     buffer = io.BytesIO()
     img.save(buffer, format="PNG")
     return base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+
+
+
+def crc16_ccitt(data: str) -> str:
+    """Calcula o checksum CRC16-CCITT (polinômio 0x1021, valor inicial 0xFFFF) padrão Pix Banco Central."""
+    crc = 0xFFFF
+    for b in data.encode("utf-8"):
+        crc ^= (b << 8)
+        for _ in range(8):
+            if crc & 0x8000:
+                crc = ((crc << 1) ^ 0x1021) & 0xFFFF
+            else:
+                crc = (crc << 1) & 0xFFFF
+    return f"{crc:04X}"
+
+
+def build_tlv(tag: str, value: str) -> str:
+    """Monta campo no formato TLV (Tag-Length-Value) EMV padrão BR Code / Pix."""
+    return f"{tag}{len(value):02d}{value}"
+
+
+def generate_pix_brcode(
+    pix_key: str,
+    merchant_name: str,
+    merchant_city: str,
+    amount: float,
+    txid: str = "***",
+    description: str = "",
+) -> str:
+    """Gera a string Pix Copia-e-Cola (BR Code EMV) em total conformidade com o Banco Central do Brasil."""
+    p00 = build_tlv("00", "01")
+    mai_gui = build_tlv("00", "br.gov.bcb.pix")
+    mai_key = build_tlv("01", pix_key)
+    mai_desc = build_tlv("02", description[:40]) if description else ""
+    p26 = build_tlv("26", mai_gui + mai_key + mai_desc)
+    p52 = build_tlv("52", "0000")
+    p53 = build_tlv("53", "986")
+    p54 = build_tlv("54", f"{amount:.2f}")
+    p58 = build_tlv("58", "BR")
+    clean_name = re.sub(r"[^A-Za-z0-9 ]", "", merchant_name)[:25] or "CORTEX ERP"
+    p59 = build_tlv("59", clean_name.strip())
+    clean_city = re.sub(r"[^A-Za-z0-9 ]", "", merchant_city)[:15] or "BRASILIA"
+    p60 = build_tlv("60", clean_city.strip())
+    clean_txid = re.sub(r"[^A-Za-z0-9]", "", txid)[:25] or "***"
+    p62 = build_tlv("62", build_tlv("05", clean_txid))
+    payload = p00 + p26 + p52 + p53 + p54 + p58 + p59 + p60 + p62 + "6304"
+    crc = crc16_ccitt(payload)
+    return payload + crc
 
 
 class PaymentGatewayService:
@@ -127,9 +176,22 @@ class PaymentGatewayService:
             except Exception as e:
                 print(f"[Asaas Warning] Falha na chamada da API Asaas, usando motor integrado local: {e}")
 
-        # Fallback Integrado: Simulador de Alta Fidelidade com QR Code Dinâmico Real
+        # Fallback Integrado: Simulador de Alta Fidelidade com QR Code Dinâmico Real (BR Code EMV / CRC16-CCITT)
         gw_id = f"pay_{uuid.uuid4().hex[:12]}"
-        pix_code = f"00020126580014br.gov.bcb.pix0136{uuid.uuid4()}52040000530398654{amount:.2f}5802BR5910CORTEX_ERP6007CACERES62070503***6304"
+        comp_row = cur.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone()
+        comp_dict = dict(comp_row) if comp_row else {}
+        pix_key = comp_dict.get("chave_pix") or comp_dict.get("cnpj") or "financeiro@empresa.com.br"
+        comp_name = comp_dict.get("nome_fantasia") or comp_dict.get("razao_social") or "CORTEX ERP"
+        comp_city = comp_dict.get("cidade") or "CUIABA"
+
+        pix_code = generate_pix_brcode(
+            pix_key=pix_key,
+            merchant_name=comp_name,
+            merchant_city=comp_city,
+            amount=amount,
+            txid=gw_id[:25],
+            description=f"Fat #{entry_id}",
+        )
         pix_qr_b64 = generate_qr_code_base64(pix_code)
         invoice_url = f"/api/payments/receipt/{gw_id}"
         bank_slip_url = f"/api/payments/bank-slip/{gw_id}"
@@ -165,6 +227,7 @@ class PaymentGatewayService:
             return {"status": "ignored", "reason": "Sem ID da cobrança"}
 
         conn = get_conn()
+        begin_write(conn)
         cur = conn.cursor()
         charge = cur.execute("SELECT * FROM payment_charges WHERE gateway_id = ?", (gateway_id,)).fetchone()
         if not charge:
@@ -179,6 +242,9 @@ class PaymentGatewayService:
 
         # Eventos de liquidação
         if event_name in ("PAYMENT_RECEIVED", "PAYMENT_CONFIRMED", "RECEIVED", "CONFIRMED"):
+            if charge["status"] == "CONFIRMED" or entry["status"] == "pago":
+                conn.close()
+                return {"status": "ignored", "reason": "Cobrança já liquidada anteriormente (evento duplicado)."}
             paid_val = float(payment_data.get("value") or charge["value"])
             net_val = float(payment_data.get("netValue") or paid_val)
             pay_date = payment_data.get("confirmedDate") or payment_data.get("paymentDate") or date.today().isoformat()

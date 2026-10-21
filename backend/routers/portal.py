@@ -1,15 +1,12 @@
-from datetime import date
-from fastapi import APIRouter, HTTPException, Depends
-from fastapi.responses import HTMLResponse
-from typing import Dict, Any, Optional
+from fastapi import APIRouter, HTTPException
 
 try:
-    from ..database import get_conn
+    from ..database import get_conn, begin_write
     from ..utils import rows_to_dicts
     from ..services.payment_gateway import PaymentGatewayService
     from .sales import _process_sale_billing
 except ImportError:
-    from database import get_conn
+    from database import get_conn, begin_write
     from utils import rows_to_dicts
     from services.payment_gateway import PaymentGatewayService
     from routers.sales import _process_sale_billing
@@ -29,7 +26,7 @@ def get_quote_by_token(token: str):
         FROM sales s
         LEFT JOIN contacts c ON c.id = s.contact_id
         LEFT JOIN companies comp ON comp.id = s.company_id
-        WHERE s.token_access = ? OR CAST(s.id AS TEXT) = ?
+        WHERE s.token_access = ? AND length(?) >= 16
         LIMIT 1
     """, (token, token)).fetchone()
 
@@ -54,11 +51,12 @@ async def accept_quote_by_token(token: str):
     3. Gera cobrança Pix imediata para o cliente pagar na hora.
     """
     conn = get_conn()
+    begin_write(conn)
     cur = conn.cursor()
 
     sale = cur.execute("""
         SELECT * FROM sales
-        WHERE token_access = ? OR CAST(id AS TEXT) = ?
+        WHERE token_access = ? AND length(?) >= 16
         LIMIT 1
     """, (token, token)).fetchone()
 
@@ -110,7 +108,7 @@ async def get_invoice_portal(token: str):
         SELECT s.*, c.name as client_name, c.document as client_doc
         FROM sales s
         LEFT JOIN contacts c ON c.id = s.contact_id
-        WHERE s.token_access = ? OR CAST(s.id AS TEXT) = ?
+        WHERE s.token_access = ? AND length(?) >= 16
         LIMIT 1
     """, (token, token)).fetchone()
 

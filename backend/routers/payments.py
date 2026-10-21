@@ -1,6 +1,8 @@
+import hmac
+import os
 from fastapi import APIRouter, Request, HTTPException, Depends
 from fastapi.responses import HTMLResponse
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 
 try:
     from ..database import get_conn
@@ -74,6 +76,13 @@ async def payment_webhook(req: Request):
     Webhook receptor do Gateway (ex: Asaas).
     Recebe eventos de pagamento confirmado, liquidação via Pix e baixa automaticamente no ERP.
     """
+    expected = os.getenv("PAYMENT_WEBHOOK_TOKEN", "").strip()
+    if not expected:
+        raise HTTPException(status_code=503, detail="Webhook de pagamento não configurado (defina PAYMENT_WEBHOOK_TOKEN).")
+    received = req.headers.get("asaas-access-token") or req.headers.get("x-webhook-token") or ""
+    if not hmac.compare_digest(received.encode("utf-8"), expected.encode("utf-8")):
+        raise HTTPException(status_code=401, detail="Token do webhook inválido.")
+
     try:
         payload = await req.json()
     except Exception:
@@ -93,7 +102,7 @@ def view_bank_slip(gateway_id: str):
         raise HTTPException(status_code=404, detail="Boleto não encontrado.")
 
     entry = conn.execute("SELECT * FROM financial_entries WHERE id = ?", (charge["entry_id"],)).fetchone()
-    comp = conn.execute("SELECT * FROM companies LIMIT 1").fetchone()
+    comp = conn.execute("SELECT * FROM companies WHERE id = ?", (charge["company_id"] or 1,)).fetchone()
     conn.close()
 
     linha_digitavel = f"34191.79001 01043.510047 91020.150008 4 99990000{int(charge['value'] * 100):06d}"

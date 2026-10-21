@@ -4,15 +4,14 @@ from fastapi import APIRouter, HTTPException, Request, Depends
 from typing import Optional, Dict, Any
 
 try:
-    from ..database import get_conn
+    from ..database import get_conn, begin_write
     from ..auth import get_current_user, log_audit
     from ..utils import rows_to_dicts
     from ..schemas.products import ProductCreate, StockAdjustRequest
 except ImportError:
-    from database import get_conn
+    from database import get_conn, begin_write
     from auth import get_current_user, log_audit
     from utils import rows_to_dicts
-    from schemas.products import ProductCreate, StockAdjustRequest
 
 router = APIRouter(tags=["Produtos & Estoque"])
 
@@ -21,8 +20,8 @@ router = APIRouter(tags=["Produtos & Estoque"])
 def list_products(type: Optional[str] = None, q: Optional[str] = None, current_user: Dict[str, Any] = Depends(get_current_user)):
     conn = get_conn()
     company_id = current_user.get("company_id", 1)
-    sql = "SELECT * FROM products WHERE active = 1"
-    params = []
+    sql = "SELECT * FROM products WHERE active = 1 AND company_id = ?"
+    params = [company_id]
     if type and type != "todos":
         sql += " AND type = ?"
         params.append(type)
@@ -46,6 +45,7 @@ async def save_product(req: Request, current_user: Dict[str, Any] = Depends(get_
     data = await req.json()
     conn = get_conn()
     cur = conn.cursor()
+    company_id = current_user.get("company_id", 1)
     pid = data.get("id")
     cost = float(data.get("cost_price") or 0.0)
     sale = float(data.get("sale_price") or 0.0)
@@ -78,16 +78,16 @@ async def save_product(req: Request, current_user: Dict[str, Any] = Depends(get_
                 type=?, sku=?, barcode=?, name=?, category_name=?, unit=?,
                 cost_price=?, average_cost=?, margin_percent=?, sale_price=?,
                 stock_qty=?, min_stock=?, ncm=?, cest=?, origin=?, cfop_internal=?
-            WHERE id=?
-        """, (*fields, pid))
+            WHERE id=? AND company_id=?
+        """, (*fields, pid, company_id))
     else:
         cur.execute("""
             INSERT INTO products (
-                type, sku, barcode, name, category_name, unit,
+                company_id, type, sku, barcode, name, category_name, unit,
                 cost_price, average_cost, margin_percent, sale_price,
                 stock_qty, min_stock, ncm, cest, origin, cfop_internal
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, fields)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (company_id, *fields))
         pid = cur.lastrowid
 
     conn.commit()
@@ -103,8 +103,9 @@ async def adjust_stock(product_id: int, req: Request, current_user: Dict[str, An
     reason = data.get("reason", "Ajuste de estoque")
 
     conn = get_conn()
+    begin_write(conn)
     cur = conn.cursor()
-    prod = cur.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
+    prod = cur.execute("SELECT * FROM products WHERE id = ? AND company_id = ?", (product_id, current_user.get("company_id", 1))).fetchone()
     if not prod:
         conn.close()
         raise HTTPException(status_code=404, detail="Produto não encontrado.")

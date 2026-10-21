@@ -1,6 +1,9 @@
-const CACHE_NAME = 'cortex-erp-v1';
+﻿const CACHE_NAME = 'cortex-erp-v7';
 const STATIC_ASSETS = [
   '/',
+  '/static/auth.js',
+  '/static/theme.css',
+  '/static/theme.js',
   '/static/app.js',
   '/static/manifest.json'
 ];
@@ -44,3 +47,4 @@ self.addEventListener('fetch', (event) => {
     })
   );
 });
+

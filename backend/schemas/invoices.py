@@ -10,6 +10,21 @@ class InvoiceEmitRequest(BaseModel):
     items: List[Dict[str, Any]] = []
     total_amount: Optional[float] = 0.0
     company_id: Optional[int] = 1
+    # Identificação avançada
+    finalidade: Optional[str] = "1"
+    tipo_operacao: Optional[str] = "1"
+    destino_operacao: Optional[str] = "1"
+    ind_presenca: Optional[str] = "1"
+    ind_ie_dest: Optional[str] = "9"
+    # Frete e pagamento
+    modalidade_frete: Optional[str] = "9"
+    shipping_amount: Optional[float] = 0.0
+    discount_amount: Optional[float] = 0.0
+    outras_despesas: Optional[float] = 0.0
+    forma_pagamento: Optional[str] = "01"
+    # Informações adicionais
+    informacoes_adicionais: Optional[str] = ""
+    informe_fisco: Optional[str] = ""
 
 
 class InvoiceCancelRequest(BaseModel):

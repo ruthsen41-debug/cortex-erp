@@ -7,7 +7,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT_DIR))
 
 from backend.main import app
-from backend.database import get_conn
+from backend.database import get_conn, is_postgres
 
 client = TestClient(app)
 
@@ -137,10 +137,19 @@ def test_payment_gateway_and_webhook():
     assert len(charge["pix_qr_code_b64"]) > 50
 
     # 3. Simula Webhook de Confirmação de Pagamento
-    wh_res = client.post("/api/payments/webhook", json={
-        "event": "PAYMENT_RECEIVED",
-        "payment": {"id": charge["gateway_id"], "value": 350.00},
-    })
+    import os
+    assert client.post("/api/payments/webhook", json={"event": "PAYMENT_RECEIVED", "payment": {"id": charge["gateway_id"]}}).status_code == 503
+    os.environ["PAYMENT_WEBHOOK_TOKEN"] = "token-de-teste"
+    try:
+        bad = client.post("/api/payments/webhook", headers={"asaas-access-token": "errado"},
+                          json={"event": "PAYMENT_RECEIVED", "payment": {"id": charge["gateway_id"]}})
+        assert bad.status_code == 401
+        wh_res = client.post("/api/payments/webhook", headers={"asaas-access-token": "token-de-teste"}, json={
+            "event": "PAYMENT_RECEIVED",
+            "payment": {"id": charge["gateway_id"], "value": 350.00},
+        })
+    finally:
+        os.environ.pop("PAYMENT_WEBHOOK_TOKEN", None)
     assert wh_res.status_code == 200
     assert wh_res.json()["status"] == "success"
 
@@ -724,9 +733,13 @@ def test_phase5_system_metrics_backup_and_logs():
 
     # 2. Download do Backup Quente do Banco (SQLite VACUUM/Backup)
     backup_res = client.get("/api/system/backup", headers=headers)
-    assert backup_res.status_code == 200
-    assert "application/x-sqlite3" in backup_res.headers.get("content-type", "")
-    assert len(backup_res.content) > 1000
+    if is_postgres():
+        # Backup pela API e so do SQLite; no PostgreSQL usa-se pg_dump.
+        assert backup_res.status_code == 501
+    else:
+        assert backup_res.status_code == 200
+        assert "application/x-sqlite3" in backup_res.headers.get("content-type", "")
+        assert len(backup_res.content) > 1000
 
     # 3. Consulta de Logs de Auditoria
     logs_res = client.get("/api/system/logs?limit=10", headers=headers)
@@ -764,3 +777,153 @@ if __name__ == "__main__":
     test_phase5_notifications_center()
     test_phase5_system_metrics_backup_and_logs()
     print("TODOS OS 25 TESTES AUTOMATIZADOS (FASES 0, 1, 2, 3, 4 E 5) PASSARAM COM SUCESSO!")
+
+
+# ==========================================
+# SEGURANÇA
+# ==========================================
+def test_api_requires_authentication():
+    anon = TestClient(app)
+    for path in ("/api/auth/me", "/api/products", "/api/dashboard"):
+        assert anon.get(path).status_code == 401, path
+    assert anon.get("/api/auth/me", headers={"Authorization": "Bearer invalido"}).status_code == 401
+
+
+def test_portal_rejects_numeric_sale_id():
+    anon = TestClient(app)
+    assert anon.get("/api/portal/quote/1").status_code == 404
+    assert anon.post("/api/portal/quote/1/accept").status_code == 404
+
+
+def test_webhook_blocks_internal_urls():
+    from backend.services.webhook_dispatcher import validate_target_url
+    import pytest
+    for url in ("http://127.0.0.1:8000/x", "http://169.254.169.254/latest", "http://10.0.0.5/hook", "file:///etc/passwd", "ftp://example.com"):
+        with pytest.raises(ValueError):
+            validate_target_url(url)
+
+
+def test_login_rate_limit():
+    anon = TestClient(app)
+    codes = [anon.post("/api/auth/login", json={"email": "ninguem@x.com", "password": "errada"}).status_code for _ in range(7)]
+    assert codes[:5] == [401] * 5
+    assert 429 in codes[5:]
+
+
+def test_concurrent_receive_purchase_order_adds_stock_once():
+    """Duas requisições simultâneas de recebimento do mesmo pedido: o estoque só pode entrar uma vez."""
+    import threading
+    token = client.post("/api/auth/login", json={"email": "admin@cortex.com.br", "password": "admin123"}).json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    prod = client.post("/api/products", json={
+        "name": "Produto Concorrência", "sku": "CONC-001", "type": "produto",
+        "cost_price": 10.0, "sale_price": 20.0, "stock_qty": 0,
+    }, headers=headers).json()
+    pid = prod.get("id")
+    po = client.post("/api/purchase-orders", json={
+        "supplier_id": 1, "payment_terms": "Boleto 30 dias",
+        "items": [{"product_id": pid, "quantity": 10, "unit_price": 10.0}],
+    }, headers=headers).json()
+    po_id = po["id"]
+
+    codes = []
+    def receive():
+        codes.append(TestClient(app).post(f"/api/purchase-orders/{po_id}/receive", headers=headers).status_code)
+
+    threads = [threading.Thread(target=receive) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert sorted(codes) == [200, 400, 400, 400], codes
+    conn = get_conn()
+    stock = conn.execute("SELECT stock_qty FROM products WHERE id = ?", (pid,)).fetchone()[0]
+    conn.close()
+    assert stock == 10.0
+
+
+def _new_entry(headers, amount=100.0):
+    res = client.post("/api/financial", json={
+        "type": "despesa", "description": "Teste Concorrência Baixa", "amount": amount,
+        "due_date": "2026-10-25", "payment_method": "Pix", "installments": 1,
+    }, headers=headers)
+    assert res.status_code == 200
+    return res.json()["created_ids"][0]
+
+
+def test_concurrent_pay_same_entry_only_once():
+    """Quatro baixas totais simultâneas do mesmo título: só uma pode ser registrada."""
+    import threading
+    headers = {"Authorization": f"Bearer {get_auth_token()}"}
+    eid = _new_entry(headers, 100.0)
+
+    codes = []
+    def pay():
+        codes.append(TestClient(app).post(f"/api/financial/{eid}/pay", json={"amount": 100.0, "bank_account_id": 1}, headers=headers).status_code)
+
+    threads = [threading.Thread(target=pay) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert sorted(codes) == [200, 400, 400, 400], codes
+    conn = get_conn()
+    n, total = conn.execute("SELECT COUNT(*), COALESCE(SUM(principal_paid),0) FROM financial_payments WHERE entry_id = ?", (eid,)).fetchone()
+    conn.close()
+    assert n == 1 and total == 100.0
+
+
+def test_batch_pay_works_and_is_not_repeated():
+    headers = {"Authorization": f"Bearer {get_auth_token()}"}
+    ids = [_new_entry(headers, 40.0), _new_entry(headers, 60.0)]
+    body = {"entry_ids": ids, "bank_account_id": 1}
+    first = client.post("/api/financial/batch-pay", json=body, headers=headers)
+    assert first.status_code == 200 and first.json()["count"] == 2
+    again = client.post("/api/financial/batch-pay", json=body, headers=headers)
+    assert again.status_code == 200 and again.json()["count"] == 0
+
+
+def test_reverse_and_delete_respect_company_scope():
+    headers = {"Authorization": f"Bearer {get_auth_token()}"}
+    eid = _new_entry(headers, 80.0)
+    assert client.post(f"/api/financial/{eid}/pay", json={"amount": 80.0, "bank_account_id": 1}, headers=headers).status_code == 200
+
+    # Move o título para outra empresa: o admin da empresa 1 não pode estornar nem apagar seus pagamentos.
+    conn = get_conn()
+    conn.execute("UPDATE financial_entries SET company_id = 99 WHERE id = ?", (eid,))
+    conn.commit()
+    conn.close()
+    try:
+        assert client.post(f"/api/financial/{eid}/reverse", headers=headers).status_code == 404
+        assert client.delete(f"/api/financial/{eid}", headers=headers).status_code == 404
+        conn = get_conn()
+        n = conn.execute("SELECT COUNT(*) FROM financial_payments WHERE entry_id = ?", (eid,)).fetchone()[0]
+        conn.close()
+        assert n == 1
+    finally:
+        conn = get_conn()
+        conn.execute("UPDATE financial_entries SET company_id = 1 WHERE id = ?", (eid,))
+        conn.commit()
+        conn.close()
+
+
+def test_gateway_webhook_duplicate_event_is_idempotent():
+    import os
+    headers = {"Authorization": f"Bearer {get_auth_token()}"}
+    eid = _new_entry(headers, 120.0)
+    charge = client.post(f"/api/payments/charge/{eid}", json={"billing_type": "PIX"}, headers=headers).json()["charge"]
+    os.environ["PAYMENT_WEBHOOK_TOKEN"] = "token-de-teste"
+    try:
+        wh = {"asaas-access-token": "token-de-teste"}
+        ev = {"event": "PAYMENT_RECEIVED", "payment": {"id": charge["gateway_id"], "value": 120.0}}
+        assert client.post("/api/payments/webhook", headers=wh, json=ev).json()["status"] == "success"
+        assert client.post("/api/payments/webhook", headers=wh, json=ev).json()["status"] == "ignored"
+    finally:
+        os.environ.pop("PAYMENT_WEBHOOK_TOKEN", None)
+    conn = get_conn()
+    n = conn.execute("SELECT COUNT(*) FROM financial_payments WHERE entry_id = ?", (eid,)).fetchone()[0]
+    conn.close()
+    assert n == 1

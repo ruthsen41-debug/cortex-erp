@@ -1,0 +1,11 @@
+# Lint minimo: erros de sintaxe e bugs reais (pyflakes). Endurecer aos poucos.
+[lint]
+select = ["E9", "F"]
+# F841 (variavel local sem uso) fica pendente: corrigir exige revisar cada caso.
+ignore = ["F841"]
+
+[lint.per-file-ignores]
+"__init__.py" = ["F401"]
+# Imports dentro de try/except (fallback de import relativo/absoluto): o ruff nao remove automaticamente.
+"backend/routers/*.py" = ["F401"]
+"backend/services/fiscal_provider.py" = ["F401"]

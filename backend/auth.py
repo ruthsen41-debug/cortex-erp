@@ -5,7 +5,7 @@ from typing import Optional, Dict, Any
 
 import bcrypt
 import jwt
-from fastapi import Depends, HTTPException, status, Request
+from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 
 try:
@@ -49,43 +49,29 @@ def decode_access_token(token: str) -> Optional[dict]:
 
 
 def get_current_user(token: Optional[str] = Depends(oauth2_scheme)) -> Dict[str, Any]:
-    """
-    Retorna o usuário autenticado via Bearer Token.
-    Se nenhum token for enviado (modo desenvolvimento/desktop SPA),
-    retorna o usuário Administrador padrão.
-    """
+    """Retorna o usuário autenticado via Bearer Token; sem token válido responde 401."""
+    unauthorized = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Autenticação necessária.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    if not token:
+        raise unauthorized
+    payload = decode_access_token(token)
+    if not payload or "sub" not in payload:
+        raise unauthorized
+
     conn = get_conn()
-    cur = conn.cursor()
-
-    if token:
-        payload = decode_access_token(token)
-        if payload and "sub" in payload:
-            email = payload["sub"]
-            user = cur.execute(
-                "SELECT id, company_id, name, email, role, active FROM users WHERE email = ? AND active = 1",
-                (email,),
-            ).fetchone()
-            if user:
-                conn.close()
-                return dict(user)
-
-    # Fallback para usuário admin padrão se não houver token explícito
-    admin = cur.execute(
-        "SELECT id, company_id, name, email, role, active FROM users WHERE role = 'admin' AND active = 1 ORDER BY id ASC LIMIT 1"
-    ).fetchone()
-    conn.close()
-
-    if admin:
-        return dict(admin)
-
-    return {
-        "id": 1,
-        "company_id": DEFAULT_COMPANY_ID,
-        "name": "Administrador Cortex",
-        "email": "admin@cortex.com.br",
-        "role": "admin",
-        "active": 1,
-    }
+    try:
+        user = conn.execute(
+            "SELECT id, company_id, name, email, role, active FROM users WHERE email = ? AND active = 1",
+            (payload["sub"],),
+        ).fetchone()
+    finally:
+        conn.close()
+    if not user:
+        raise unauthorized
+    return dict(user)
 
 
 def require_role(*allowed_roles: str):

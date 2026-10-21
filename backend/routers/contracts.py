@@ -1,6 +1,6 @@
 from datetime import date
-from fastapi import APIRouter, HTTPException, Request, Depends
-from typing import Dict, Any, List, Optional
+from fastapi import APIRouter, HTTPException, Depends
+from typing import Dict, Any
 
 try:
     from ..database import get_conn
@@ -48,7 +48,7 @@ def create_contract(req: ContractCreate, current_user: Dict[str, Any] = Depends(
     ))
     cid = cur.lastrowid
     conn.commit()
-    log_audit(conn, action="create", entity="recurring_contracts", entity_id=cid, new_data=req.dict(), user_id=current_user.get("id"))
+    log_audit(conn, action="create", entity="recurring_contracts", entity_id=cid, new_data=req.model_dump(), user_id=current_user.get("id"))
     conn.close()
     return {"status": "ok", "id": cid}
 
@@ -98,7 +98,7 @@ def adjust_contract(contract_id: int, data: ContractAdjustRequest, current_user:
     """Reajuste automático anual/periódico de contrato por índice (IPCA, IGP-M ou percentual fixo)."""
     conn = get_conn()
     cur = conn.cursor()
-    c = cur.execute("SELECT * FROM recurring_contracts WHERE id = ?", (contract_id,)).fetchone()
+    c = cur.execute("SELECT * FROM recurring_contracts WHERE id = ? AND company_id = ?", (contract_id, current_user.get("company_id", 1))).fetchone()
     if not c:
         conn.close()
         raise HTTPException(status_code=404, detail="Contrato não encontrado.")

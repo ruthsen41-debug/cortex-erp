@@ -2,15 +2,15 @@ import re
 import uuid
 from datetime import date, timedelta
 from fastapi import APIRouter, HTTPException, Request, Depends
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 
 try:
-    from ..database import get_conn, recalculate_bank_balances
+    from ..database import get_conn, begin_write, recalculate_bank_balances
     from ..auth import get_current_user, log_audit
     from ..utils import rows_to_dicts, add_months
     from ..schemas.financial import FinancialCreate, FinancialPayRequest, BatchPayRequest, AiLaunchRequest
 except ImportError:
-    from database import get_conn, recalculate_bank_balances
+    from database import get_conn, begin_write, recalculate_bank_balances
     from auth import get_current_user, log_audit
     from utils import rows_to_dicts, add_months
     from schemas.financial import FinancialCreate, FinancialPayRequest, BatchPayRequest, AiLaunchRequest
@@ -173,7 +173,7 @@ def create_financial_entry(req: FinancialCreate, current_user: Dict[str, Any] = 
             """, (eid, bank_account_id, due_d, amt, amt, payment_method))
 
     recalculate_bank_balances(conn)
-    log_audit(conn, action="create", entity="financial_entries", entity_id=created_ids[0] if created_ids else None, new_data=req.dict(), user_id=current_user.get("id"))
+    log_audit(conn, action="create", entity="financial_entries", entity_id=created_ids[0] if created_ids else None, new_data=req.model_dump(), user_id=current_user.get("id"))
     conn.close()
     return {"status": "ok", "created_ids": created_ids}
 
@@ -181,12 +181,16 @@ def create_financial_entry(req: FinancialCreate, current_user: Dict[str, Any] = 
 @router.post("/{entry_id}/pay")
 def pay_financial_entry(entry_id: int, req: FinancialPayRequest, current_user: Dict[str, Any] = Depends(get_current_user)):
     conn = get_conn()
+    begin_write(conn)
     cur = conn.cursor()
     company_id = current_user.get("company_id", 1)
     entry = cur.execute("SELECT * FROM financial_entries WHERE id = ? AND company_id = ?", (entry_id, company_id)).fetchone()
     if not entry:
         conn.close()
         raise HTTPException(status_code=404, detail="Lançamento não encontrado.")
+    if entry["status"] == "pago":
+        conn.close()
+        raise HTTPException(status_code=400, detail="Este lançamento já está totalmente baixado.")
 
     bank_account_id = req.bank_account_id
     payment_date = req.payment_date or date.today().isoformat()
@@ -223,7 +227,7 @@ def pay_financial_entry(entry_id: int, req: FinancialPayRequest, current_user: D
     ))
 
     recalculate_bank_balances(conn)
-    log_audit(conn, action="pay", entity="financial_entries", entity_id=entry_id, new_data=req.dict(), user_id=current_user.get("id"))
+    log_audit(conn, action="pay", entity="financial_entries", entity_id=entry_id, new_data=req.model_dump(), user_id=current_user.get("id"))
     conn.close()
 
     return {
@@ -237,8 +241,12 @@ def pay_financial_entry(entry_id: int, req: FinancialPayRequest, current_user: D
 @router.post("/{entry_id}/reverse")
 def reverse_financial_entry(entry_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
     conn = get_conn()
+    begin_write(conn)
     cur = conn.cursor()
     company_id = current_user.get("company_id", 1)
+    if not cur.execute("SELECT 1 FROM financial_entries WHERE id = ? AND company_id = ?", (entry_id, company_id)).fetchone():
+        conn.close()
+        raise HTTPException(status_code=404, detail="Lançamento não encontrado.")
     cur.execute("DELETE FROM financial_payments WHERE entry_id = ?", (entry_id,))
     cur.execute("""
         UPDATE financial_entries
@@ -254,6 +262,7 @@ def reverse_financial_entry(entry_id: int, current_user: Dict[str, Any] = Depend
 @router.post("/batch-pay")
 def batch_pay_entries(req: BatchPayRequest, current_user: Dict[str, Any] = Depends(get_current_user)):
     conn = get_conn()
+    begin_write(conn)
     cur = conn.cursor()
     count = 0
     today_iso = req.payment_date or date.today().isoformat()
@@ -263,12 +272,13 @@ def batch_pay_entries(req: BatchPayRequest, current_user: Dict[str, Any] = Depen
         entry = cur.execute("SELECT * FROM financial_entries WHERE id = ? AND company_id = ?", (eid, company_id)).fetchone()
         if not entry or entry["status"] == "pago":
             continue
+        entry = dict(entry)
         net = round(float(entry["amount"]) + float(entry.get("interest") or 0.0) + float(entry.get("fine") or 0.0) - float(entry.get("discount") or 0.0), 2)
         rem = max(0.0, round(net - float(entry.get("paid_amount") or 0.0), 2))
         if rem <= 0:
             continue
         b_id = req.bank_account_id
-        cur.execute("UPDATE financial_entries SET paid_amount = ?, status = 'pago', bank_account_id = ? WHERE id = ?", (net, b_id, eid))
+        cur.execute("UPDATE financial_entries SET paid_amount = ?, status = 'pago', bank_account_id = ? WHERE id = ? AND company_id = ?", (net, b_id, eid, company_id))
         cur.execute("""
             INSERT INTO financial_payments (entry_id, bank_account_id, payment_date, principal_paid, total_cash_flow, payment_method, notes)
             VALUES (?, ?, ?, ?, ?, ?, 'Baixa em Lote')
@@ -276,7 +286,7 @@ def batch_pay_entries(req: BatchPayRequest, current_user: Dict[str, Any] = Depen
         count += 1
 
     recalculate_bank_balances(conn)
-    log_audit(conn, action="batch_pay", entity="financial_entries", new_data=req.dict(), user_id=current_user.get("id"))
+    log_audit(conn, action="batch_pay", entity="financial_entries", new_data=req.model_dump(), user_id=current_user.get("id"))
     conn.close()
     return {"status": "ok", "count": count}
 
@@ -284,7 +294,11 @@ def batch_pay_entries(req: BatchPayRequest, current_user: Dict[str, Any] = Depen
 @router.delete("/{entry_id}")
 def delete_financial_entry(entry_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
     conn = get_conn()
+    begin_write(conn)
     company_id = current_user.get("company_id", 1)
+    if not conn.execute("SELECT 1 FROM financial_entries WHERE id = ? AND company_id = ?", (entry_id, company_id)).fetchone():
+        conn.close()
+        raise HTTPException(status_code=404, detail="Lançamento não encontrado.")
     conn.execute("DELETE FROM financial_payments WHERE entry_id = ?", (entry_id,))
     conn.execute("DELETE FROM financial_entries WHERE id = ? AND company_id = ?", (entry_id, company_id))
     recalculate_bank_balances(conn)

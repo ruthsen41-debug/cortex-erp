@@ -66,7 +66,7 @@ def get_cost_centers_budget(month: str = None, current_user: Dict[str, Any] = De
 def update_cost_center_budget(cost_center_id: int, req: dict, current_user: Dict[str, Any] = Depends(get_current_user)):
     conn = get_conn()
     budget = float(req.get("monthly_budget") or 0.0)
-    conn.execute("UPDATE cost_centers SET monthly_budget = ? WHERE id = ?", (budget, cost_center_id))
+    conn.execute("UPDATE cost_centers SET monthly_budget = ? WHERE id = ? AND company_id = ?", (budget, cost_center_id, current_user.get("company_id", 1)))
     conn.commit()
     conn.close()
     return {"status": "ok", "message": "Orçamento atualizado!"}

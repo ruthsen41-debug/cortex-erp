@@ -1,8 +1,8 @@
 import re
 import urllib.parse
-from datetime import date, timedelta
+from datetime import date
 from fastapi import APIRouter, HTTPException, Request, Depends
-from typing import Dict, Any, List
+from typing import Dict, Any
 
 try:
     from ..database import get_conn

@@ -1,14 +1,14 @@
 from datetime import date, timedelta
 from fastapi import APIRouter, HTTPException, Depends
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 
 try:
-    from ..database import get_conn
+    from ..database import get_conn, begin_write
     from ..auth import get_current_user, log_audit
     from ..utils import rows_to_dicts
     from ..schemas.phase3 import PurchaseOrderCreate
 except ImportError:
-    from database import get_conn
+    from database import get_conn, begin_write
     from auth import get_current_user, log_audit
     from utils import rows_to_dicts
     from schemas.phase3 import PurchaseOrderCreate
@@ -51,7 +51,7 @@ def create_purchase_order(data: PurchaseOrderCreate, current_user: Dict[str, Any
     company_id = current_user.get("company_id", 1)
 
     # Verifica fornecedor
-    supplier = cur.execute("SELECT name FROM contacts WHERE id = ?", (data.supplier_id,)).fetchone()
+    supplier = cur.execute("SELECT name FROM contacts WHERE id = ? AND company_id = ?", (data.supplier_id, company_id)).fetchone()
     if not supplier:
         conn.close()
         raise HTTPException(status_code=404, detail="Fornecedor não encontrado.")
@@ -82,7 +82,7 @@ def create_purchase_order(data: PurchaseOrderCreate, current_user: Dict[str, Any
         """, (poid, it.product_id, it.quantity, it.unit_price, it.discount or 0.0, tot))
 
     conn.commit()
-    log_audit(conn, action="create", entity="purchase_orders", entity_id=poid, new_data=data.dict(), user_id=current_user.get("id"))
+    log_audit(conn, action="create", entity="purchase_orders", entity_id=poid, new_data=data.model_dump(), user_id=current_user.get("id"))
     conn.close()
 
     return {"status": "ok", "id": poid, "order_number": next_num, "total_amount": calc_subtotal}
@@ -131,7 +131,7 @@ def update_purchase_order_status(order_id: int, status_update: Dict[str, str], c
     conn.commit()
     log_audit(conn, action="update_status", entity="purchase_orders", entity_id=order_id, new_data={"status": new_status}, user_id=current_user.get("id"))
     conn.close()
-    return {"status": "ok", "order_id": order_id, "status": new_status}
+    return {"status": new_status, "order_id": order_id}
 
 
 @router.post("/{order_id}/receive")
@@ -144,6 +144,7 @@ def receive_purchase_order(order_id: int, current_user: Dict[str, Any] = Depends
     4. Gera automaticamente o título no Contas a Pagar (financial_entries).
     """
     conn = get_conn()
+    begin_write(conn)
     cur = conn.cursor()
     company_id = current_user.get("company_id", 1)
 
@@ -173,7 +174,7 @@ def receive_purchase_order(order_id: int, current_user: Dict[str, Any] = Depends
         qty_in = float(it["quantity"])
         u_price = float(it["unit_price"])
 
-        prod = cur.execute("SELECT stock_qty, average_cost, cost_price FROM products WHERE id = ?", (pid,)).fetchone()
+        prod = cur.execute("SELECT stock_qty, average_cost, cost_price FROM products WHERE id = ? AND company_id = ?", (pid, company_id)).fetchone()
         if prod:
             current_qty = float(prod["stock_qty"] or 0.0)
             current_avg = float(prod["average_cost"] or prod["cost_price"] or 0.0)

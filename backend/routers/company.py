@@ -1,6 +1,6 @@
 import base64
-from datetime import date, timedelta
-from fastapi import APIRouter, Request, HTTPException, Depends
+from datetime import date
+from fastapi import APIRouter, Request, Depends
 from typing import Dict, Any
 
 try:
@@ -11,7 +11,6 @@ try:
 except ImportError:
     from database import get_conn
     from auth import get_current_user, log_audit
-    from schemas.company import CompanyUpdate
     from services.crypto_vault import CryptoVault
 
 router = APIRouter(prefix="/api/company", tags=["Empresa & Certificado A1"])
@@ -70,7 +69,10 @@ async def update_company(req: Request, current_user: Dict[str, Any] = Depends(ge
             serie_nfce = COALESCE(?, serie_nfce),
             proximo_numero_nfce = COALESCE(?, proximo_numero_nfce),
             serie_nfse = COALESCE(?, serie_nfse),
-            proximo_numero_nfse = COALESCE(?, proximo_numero_nfse)
+            proximo_numero_nfse = COALESCE(?, proximo_numero_nfse),
+            complemento = COALESCE(?, complemento),
+            csc_id = COALESCE(?, csc_id),
+            csc_token = COALESCE(?, csc_token)
         WHERE id = ?
     """, (
         data.get("razao_social"),
@@ -100,6 +102,9 @@ async def update_company(req: Request, current_user: Dict[str, Any] = Depends(ge
         int(data["proximo_numero_nfce"]) if data.get("proximo_numero_nfce") is not None else None,
         int(data["serie_nfse"]) if data.get("serie_nfse") is not None else None,
         int(data["proximo_numero_nfse"]) if data.get("proximo_numero_nfse") is not None else None,
+        data.get("complemento"),
+        data.get("csc_id"),
+        data.get("csc_token"),
         company_id,
     ))
     conn.commit()

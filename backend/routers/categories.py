@@ -34,6 +34,6 @@ def create_category(req: CategoryCreate, current_user: Dict[str, Any] = Depends(
     """, (company_id, req.code, req.name, req.type, req.dre_group or "despesas_operacionais", req.keywords or ""))
     cat_id = cur.lastrowid
     conn.commit()
-    log_audit(conn, action="create", entity="categories", entity_id=cat_id, new_data=req.dict(), user_id=current_user.get("id"))
+    log_audit(conn, action="create", entity="categories", entity_id=cat_id, new_data=req.model_dump(), user_id=current_user.get("id"))
     conn.close()
     return {"status": "ok", "id": cat_id}

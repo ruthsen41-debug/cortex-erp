@@ -1,9 +1,9 @@
 from datetime import date, timedelta
 from fastapi import APIRouter, HTTPException, Depends
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any
 
 try:
-    from ..database import get_conn
+    from ..database import get_conn, begin_write
     from ..auth import get_current_user, log_audit
     from ..utils import rows_to_dicts
     from ..schemas.phase3 import (
@@ -14,7 +14,7 @@ try:
         InventoryAdjustmentCreate
     )
 except ImportError:
-    from database import get_conn
+    from database import get_conn, begin_write
     from auth import get_current_user, log_audit
     from utils import rows_to_dicts
     from schemas.phase3 import (
@@ -59,7 +59,7 @@ def create_warehouse(data: WarehouseCreate, current_user: Dict[str, Any] = Depen
     """, (company_id, data.name, data.code.upper(), data.location, data.is_default, data.active))
     wid = cur.lastrowid
     conn.commit()
-    log_audit(conn, action="create", entity="warehouses", entity_id=wid, new_data=data.dict(), user_id=current_user.get("id"))
+    log_audit(conn, action="create", entity="warehouses", entity_id=wid, new_data=data.model_dump(), user_id=current_user.get("id"))
     conn.close()
     return {"status": "ok", "id": wid, "name": data.name}
 
@@ -82,7 +82,7 @@ def update_warehouse(wid: int, data: WarehouseCreate, current_user: Dict[str, An
         conn.close()
         raise HTTPException(status_code=404, detail="Depósito não encontrado.")
     conn.commit()
-    log_audit(conn, action="update", entity="warehouses", entity_id=wid, new_data=data.dict(), user_id=current_user.get("id"))
+    log_audit(conn, action="update", entity="warehouses", entity_id=wid, new_data=data.model_dump(), user_id=current_user.get("id"))
     conn.close()
     return {"status": "ok", "id": wid}
 
@@ -113,6 +113,7 @@ def transfer_stock(data: StockTransferCreate, current_user: Dict[str, Any] = Dep
         raise HTTPException(status_code=400, detail="O depósito de origem e destino devem ser diferentes.")
 
     conn = get_conn()
+    begin_write(conn)
     cur = conn.cursor()
     company_id = current_user.get("company_id", 1)
 
@@ -121,8 +122,8 @@ def transfer_stock(data: StockTransferCreate, current_user: Dict[str, Any] = Dep
         conn.close()
         raise HTTPException(status_code=404, detail="Produto não encontrado.")
 
-    wh_from = cur.execute("SELECT * FROM warehouses WHERE id = ?", (data.from_warehouse_id,)).fetchone()
-    wh_to = cur.execute("SELECT * FROM warehouses WHERE id = ?", (data.to_warehouse_id,)).fetchone()
+    wh_from = cur.execute("SELECT * FROM warehouses WHERE id = ? AND company_id = ?", (data.from_warehouse_id, company_id)).fetchone()
+    wh_to = cur.execute("SELECT * FROM warehouses WHERE id = ? AND company_id = ?", (data.to_warehouse_id, company_id)).fetchone()
     if not wh_from or not wh_to:
         conn.close()
         raise HTTPException(status_code=404, detail="Depósito de origem ou destino não localizado.")
@@ -143,7 +144,7 @@ def transfer_stock(data: StockTransferCreate, current_user: Dict[str, Any] = Dep
     """, (data.product_id, data.quantity, avg_cost, cur_stock - data.quantity, cur_stock, f"ENTRADA-DEP-{wh_to['code']}", data.notes or ref_desc))
 
     conn.commit()
-    log_audit(conn, action="transfer", entity="inventory", entity_id=data.product_id, new_data=data.dict(), user_id=current_user.get("id"))
+    log_audit(conn, action="transfer", entity="inventory", entity_id=data.product_id, new_data=data.model_dump(), user_id=current_user.get("id"))
     conn.close()
 
     return {
@@ -158,6 +159,7 @@ def transfer_stock(data: StockTransferCreate, current_user: Dict[str, Any] = Dep
 @router.post("/api/inventory/adjustment")
 def adjust_inventory(data: InventoryAdjustmentCreate, current_user: Dict[str, Any] = Depends(get_current_user)):
     conn = get_conn()
+    begin_write(conn)
     cur = conn.cursor()
     company_id = current_user.get("company_id", 1)
 
@@ -221,7 +223,7 @@ def create_product_batch(product_id: int, data: BatchCreate, current_user: Dict[
     """, (company_id, product_id, data.warehouse_id or 1, data.batch_number, data.expiry_date, data.manufacturing_date, data.quantity))
     bid = cur.lastrowid
     conn.commit()
-    log_audit(conn, action="create_batch", entity="product_batches", entity_id=bid, new_data=data.dict(), user_id=current_user.get("id"))
+    log_audit(conn, action="create_batch", entity="product_batches", entity_id=bid, new_data=data.model_dump(), user_id=current_user.get("id"))
     conn.close()
     return {"status": "ok", "id": bid, "batch_number": data.batch_number}
 
@@ -272,6 +274,6 @@ def create_product_variant(product_id: int, data: VariantCreate, current_user: D
     """, (company_id, product_id, data.variant_name, data.sku, data.additional_price, data.stock_qty, data.active))
     vid = cur.lastrowid
     conn.commit()
-    log_audit(conn, action="create_variant", entity="product_variants", entity_id=vid, new_data=data.dict(), user_id=current_user.get("id"))
+    log_audit(conn, action="create_variant", entity="product_variants", entity_id=vid, new_data=data.model_dump(), user_id=current_user.get("id"))
     conn.close()
     return {"status": "ok", "id": vid, "variant_name": data.variant_name}

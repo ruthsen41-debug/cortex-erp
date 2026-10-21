@@ -2,12 +2,12 @@ from fastapi import APIRouter, Request, Depends
 from typing import Dict, Any
 
 try:
-    from ..database import get_conn
+    from ..database import get_conn, begin_write
     from ..auth import get_current_user, log_audit
     from ..utils import rows_to_dicts
     from ..fiscal_engine import gerar_xml_compra_exemplo, parse_nfe_compra_xml
 except ImportError:
-    from database import get_conn
+    from database import get_conn, begin_write
     from auth import get_current_user, log_audit
     from utils import rows_to_dicts
     from fiscal_engine import gerar_xml_compra_exemplo, parse_nfe_compra_xml
@@ -62,8 +62,9 @@ async def import_supplier_xml(req: Request, current_user: Dict[str, Any] = Depen
         supplier_id = cur.lastrowid
 
     # 2. Produtos e Estoque com Custo Médio
+    begin_write(conn)
     for it in parsed["items"]:
-        prod = cur.execute("SELECT * FROM products WHERE sku = ? OR name = ?", (it["sku"], it["name"])).fetchone()
+        prod = cur.execute("SELECT * FROM products WHERE (sku = ? OR name = ?) AND company_id = ?", (it["sku"], it["name"], company_id)).fetchone()
         qty = float(it["quantity"])
         u_cost = float(it["unit_cost"])
         if prod:
@@ -76,9 +77,9 @@ async def import_supplier_xml(req: Request, current_user: Dict[str, Any] = Depen
         else:
             sale_p = round(u_cost * 1.55, 2)
             cur.execute("""
-                INSERT INTO products (type, sku, barcode, name, category_name, unit, cost_price, average_cost, margin_percent, sale_price, stock_qty, min_stock, ncm)
-                VALUES ('produto', ?, ?, ?, 'Importado XML', ?, ?, ?, 55.0, ?, ?, 3.0, ?)
-            """, (it["sku"], it["barcode"], it["name"], it["unit"], u_cost, u_cost, sale_p, qty, it["ncm"]))
+                INSERT INTO products (company_id, type, sku, barcode, name, category_name, unit, cost_price, average_cost, margin_percent, sale_price, stock_qty, min_stock, ncm)
+                VALUES (?, 'produto', ?, ?, ?, 'Importado XML', ?, ?, ?, 55.0, ?, ?, 3.0, ?)
+            """, (company_id, it["sku"], it["barcode"], it["name"], it["unit"], u_cost, u_cost, sale_p, qty, it["ncm"]))
             pid = cur.lastrowid
             prev_stock = 0.0
             new_stock = qty

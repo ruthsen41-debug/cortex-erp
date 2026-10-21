@@ -29,6 +29,7 @@ from .public_api import router as public_api_router
 from .webhooks import router as webhooks_router
 from .notifications import router as notifications_router
 from .system import router as system_router
+from .quotes import router as quotes_router
 
 all_routers = [
     auth_router,
@@ -62,4 +63,5 @@ all_routers = [
     webhooks_router,
     notifications_router,
     system_router,
+    quotes_router,
 ]

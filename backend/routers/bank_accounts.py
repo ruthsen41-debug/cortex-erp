@@ -1,15 +1,15 @@
 import uuid
 from datetime import date
 from fastapi import APIRouter, HTTPException, Depends
-from typing import Dict, Any, List
+from typing import Dict, Any
 
 try:
-    from ..database import get_conn, recalculate_bank_balances
+    from ..database import get_conn, begin_write, recalculate_bank_balances
     from ..auth import get_current_user, log_audit
     from ..utils import rows_to_dicts
     from ..schemas.financial import BankAccountCreate, TransferRequest
 except ImportError:
-    from database import get_conn, recalculate_bank_balances
+    from database import get_conn, begin_write, recalculate_bank_balances
     from auth import get_current_user, log_audit
     from utils import rows_to_dicts
     from schemas.financial import BankAccountCreate, TransferRequest
@@ -50,7 +50,7 @@ def create_bank_account(req: BankAccountCreate, current_user: Dict[str, Any] = D
     ))
     acc_id = cur.lastrowid
     recalculate_bank_balances(conn)
-    log_audit(conn, action="create", entity="bank_accounts", entity_id=acc_id, new_data=req.dict(), user_id=current_user.get("id"))
+    log_audit(conn, action="create", entity="bank_accounts", entity_id=acc_id, new_data=req.model_dump(), user_id=current_user.get("id"))
     conn.close()
     return {"status": "ok", "id": acc_id}
 
@@ -68,6 +68,7 @@ def transfer_between_accounts(req: TransferRequest, current_user: Dict[str, Any]
         raise HTTPException(status_code=400, detail="Selecione contas distintas e um valor maior que zero.")
 
     conn = get_conn()
+    begin_write(conn)
     cur = conn.cursor()
     from_acc = cur.execute("SELECT name FROM bank_accounts WHERE id = ? AND company_id = ?", (from_id, company_id)).fetchone()
     to_acc = cur.execute("SELECT name FROM bank_accounts WHERE id = ? AND company_id = ?", (to_id, company_id)).fetchone()
@@ -104,6 +105,6 @@ def transfer_between_accounts(req: TransferRequest, current_user: Dict[str, Any]
     """, (in_id, to_id, transfer_date, amount, amount))
 
     recalculate_bank_balances(conn)
-    log_audit(conn, action="transfer", entity="bank_accounts", entity_id=from_id, new_data=req.dict(), user_id=current_user.get("id"))
+    log_audit(conn, action="transfer", entity="bank_accounts", entity_id=from_id, new_data=req.model_dump(), user_id=current_user.get("id"))
     conn.close()
     return {"status": "ok", "message": "Transferência realizada e saldos bancários atualizados!"}

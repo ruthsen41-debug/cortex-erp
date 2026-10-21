@@ -1,18 +1,18 @@
 import secrets
-from fastapi import APIRouter, HTTPException, Depends, Request
-from typing import Dict, Any, List, Optional
+from fastapi import APIRouter, HTTPException, Depends
+from typing import Dict, Any, Optional
 from pydantic import BaseModel, Field
 
 try:
     from ..database import get_conn
     from ..auth import get_current_user, log_audit
     from ..utils import rows_to_dicts
-    from ..services.webhook_dispatcher import WebhookDispatcher
+    from ..services.webhook_dispatcher import WebhookDispatcher, validate_target_url
 except ImportError:
     from database import get_conn
     from auth import get_current_user, log_audit
     from utils import rows_to_dicts
-    from services.webhook_dispatcher import WebhookDispatcher
+    from services.webhook_dispatcher import WebhookDispatcher, validate_target_url
 
 router = APIRouter(prefix="/api/webhooks", tags=["Webhooks & Notificações Externas"])
 
@@ -39,6 +39,10 @@ def list_webhooks(current_user: Dict[str, Any] = Depends(get_current_user)):
 
 @router.post("")
 def create_webhook(data: WebhookCreate, current_user: Dict[str, Any] = Depends(get_current_user)):
+    try:
+        validate_target_url(data.target_url)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     conn = get_conn()
     cur = conn.cursor()
     company_id = current_user.get("company_id", 1)

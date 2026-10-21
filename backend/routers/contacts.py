@@ -1,7 +1,7 @@
 import re
 import httpx
 from fastapi import APIRouter, HTTPException, Depends
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 
 try:
     from ..database import get_conn
@@ -68,7 +68,7 @@ def save_contact(req: ContactCreate, current_user: Dict[str, Any] = Depends(get_
     ))
     cid = cur.lastrowid
     conn.commit()
-    log_audit(conn, action="create", entity="contacts", entity_id=cid, new_data=req.dict(), user_id=current_user.get("id"))
+    log_audit(conn, action="create", entity="contacts", entity_id=cid, new_data=req.model_dump(), user_id=current_user.get("id"))
     conn.close()
     return {"status": "ok", "id": cid}
 

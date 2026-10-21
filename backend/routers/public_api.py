@@ -1,15 +1,15 @@
 from datetime import date
+import secrets
 from fastapi import APIRouter, HTTPException, Header, Depends, Request
-from typing import Dict, Any, List, Optional
-import json
+from typing import Dict, Any, Optional
 
 try:
-    from ..database import get_conn
+    from ..database import get_conn, begin_write
     from ..utils import rows_to_dicts
     from ..routers.sales import _process_sale_billing
     from ..services.webhook_dispatcher import WebhookDispatcher
 except ImportError:
-    from database import get_conn
+    from database import get_conn, begin_write
     from utils import rows_to_dicts
     from routers.sales import _process_sale_billing
     from services.webhook_dispatcher import WebhookDispatcher
@@ -70,6 +70,7 @@ async def sync_inventory_bulk(req: Request, auth: Dict[str, Any] = Depends(get_a
         raise HTTPException(status_code=400, detail="O corpo da requisição deve ser uma lista de itens com 'sku' e 'stock'.")
 
     conn = get_conn()
+    begin_write(conn)
     cur = conn.cursor()
     company_id = auth["company_id"]
     updated_count = 0
@@ -179,10 +180,10 @@ async def create_external_order(req: Request, auth: Dict[str, Any] = Depends(get
 
     cur.execute("""
         INSERT INTO sales (
-            company_id, number, sale_type, status, contact_id, seller_name, sale_date,
+            company_id, token_access, number, sale_type, status, contact_id, seller_name, sale_date,
             subtotal, discount_amount, shipping_amount, total_amount, payment_method, notes
-        ) VALUES (?, ?, 'venda', 'aprovada', ?, 'Integração E-commerce', ?, ?, ?, ?, ?, ?, ?)
-    """, (company_id, next_num, contact_id, date.today().isoformat(), calc_subtotal, discount, shipping, total_order, pay_method, notes))
+        ) VALUES (?, ?, ?, 'venda', 'aprovada', ?, 'Integração E-commerce', ?, ?, ?, ?, ?, ?, ?)
+    """, (company_id, secrets.token_urlsafe(16), next_num, contact_id, date.today().isoformat(), calc_subtotal, discount, shipping, total_order, pay_method, notes))
     sale_id = cur.lastrowid
 
     for it in items_processed:
@@ -214,7 +215,7 @@ async def create_external_order(req: Request, auth: Dict[str, Any] = Depends(get
         company_id,
         f"Novo Pedido de E-commerce #{next_num}",
         f"Venda no valor de R$ {total_order:,.2f} recebida via API ({cust_name}).",
-        f"/sales"
+        "/sales"
     ))
     conn.commit()
     conn.close()

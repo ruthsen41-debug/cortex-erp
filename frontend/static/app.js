@@ -151,11 +151,17 @@ async function switchTab(tab) {
     case 'inventory':
       await renderInventory(main);
       break;
+    case 'quotes':
+      await renderQuotes(main);
+      break;
     case 'invoices':
       await renderInvoices(main);
       break;
     case 'reports':
       await renderReports(main);
+      break;
+    case 'settings':
+      await renderSettings(main);
       break;
     default:
       main.innerHTML = `<div class="p-6">Módulo "${tab}" em desenvolvimento.</div>`;
@@ -297,16 +303,17 @@ async function renderDashboard(container) {
         data: {
           labels,
           datasets: [
-            { label: 'Receitas', data: recData, backgroundColor: '#10b981', borderRadius: 6 },
-            { label: 'Despesas', data: despData, backgroundColor: '#f43f5e', borderRadius: 6 },
+            { label: 'Receitas', data: recData, backgroundColor: '#34d399', hoverBackgroundColor: '#6ee7b7', borderRadius: 8, borderSkipped: false, maxBarThickness: 28 },
+            { label: 'Despesas', data: despData, backgroundColor: '#fb7185', hoverBackgroundColor: '#fda4af', borderRadius: 8, borderSkipped: false, maxBarThickness: 28 },
           ],
         },
         options: {
           responsive: true,
           maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
           scales: {
-            y: { grid: { color: 'rgba(150,150,150,0.1)' } },
-            x: { grid: { display: false } },
+            y: { grid: { color: 'rgba(129,140,248,0.10)' }, border: { display: false } },
+            x: { grid: { display: false }, border: { display: false } },
           },
         },
       });
@@ -394,7 +401,7 @@ async function renderFinancial(container, type) {
       <div class="flex items-center justify-between mb-4">
         <div>
           <h2 class="text-lg font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-            ${isRec ? '<i data-lucide="arrow-up-right-circle" class="w-5 h-5 text-emerald-500"></i>' : '<i data-lucide="arrow-down-left-circle" class="w-5 h-5 text-rose-500"></i>'}
+            ${isRec ? '<i data-lucide="arrow-up-right" class="w-5 h-5 text-emerald-500"></i>' : '<i data-lucide="arrow-down-left" class="w-5 h-5 text-rose-500"></i>'}
             ${title}
           </h2>
           <p class="text-xs text-slate-400">Gerenciamento completo de lançamentos, parcelamentos e baixas</p>
@@ -955,7 +962,7 @@ async function renderCrm(container) {
       `).join('');
 
       return `
-        <div class="bg-slate-100 dark:bg-slate-900/50 rounded-2xl p-3 flex flex-col min-w-[240px]">
+        <div class="bg-slate-100 dark:bg-slate-900/50 rounded-2xl p-3 flex flex-col shrink-0 w-[280px]">
           <div class="flex justify-between items-center mb-2 px-1">
             <span class="font-bold text-xs text-slate-700 dark:text-slate-300">${s.name} (${stageDeals.length})</span>
             <span class="text-[10px] text-slate-400 font-semibold">${formatCurrency(totalStage)}</span>
@@ -980,7 +987,7 @@ async function renderCrm(container) {
         </button>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-3 overflow-x-auto pb-4">
+      <div class="flex gap-4 overflow-x-auto pb-4 items-start">
         ${columnsHtml}
       </div>
     `;
@@ -1123,7 +1130,7 @@ async function renderSales(container) {
               Aprovar Venda
             </button>
           ` : ''}
-          <a href="/api/sales/${s.id}/print" target="_blank" class="inline-block bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 px-2.5 py-1 rounded-lg font-semibold text-[11px] transition">
+          <a href="#" onclick="openAuthed('/api/sales/${s.id}/print'); return false;" class="inline-block bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 px-2.5 py-1 rounded-lg font-semibold text-[11px] transition">
             Imprimir
           </a>
         </td>
@@ -1511,7 +1518,7 @@ async function renderServiceOrders(container) {
               Faturar OS
             </button>
           ` : ''}
-          <a href="/api/service-orders/${os.id}/print" target="_blank" class="inline-block bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2.5 py-1 rounded-lg font-semibold text-[11px]">
+          <a href="#" onclick="openAuthed('/api/service-orders/${os.id}/print'); return false;" class="inline-block bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2.5 py-1 rounded-lg font-semibold text-[11px]">
             Imprimir
           </a>
         </td>
@@ -2044,10 +2051,10 @@ async function renderInvoices(container) {
           </span>
         </td>
         <td class="py-3 px-4 text-right space-x-1">
-          <a href="/api/invoices/${inv.id}/danfe" target="_blank" class="inline-block bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 px-2 py-1 rounded-lg font-semibold text-[11px] transition">
+          <a href="#" onclick="openAuthed('/api/invoices/${inv.id}/danfe'); return false;" class="inline-block bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 px-2 py-1 rounded-lg font-semibold text-[11px] transition">
             DANFE
           </a>
-          <a href="/api/invoices/${inv.id}/xml" target="_blank" class="inline-block bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2 py-1 rounded-lg font-semibold text-[11px]">
+          <a href="#" onclick="openAuthed('/api/invoices/${inv.id}/xml'); return false;" class="inline-block bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2 py-1 rounded-lg font-semibold text-[11px]">
             XML
           </a>
           ${inv.status === 'autorizada' ? `
@@ -2068,7 +2075,7 @@ async function renderInvoices(container) {
           <p class="text-xs text-slate-400">Emissão de notas fiscais com assinatura digital, DANFE em PDF e arquivo XML</p>
         </div>
         <div class="flex gap-2">
-          <a href="/api/invoices/export-zip" class="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 transition">
+          <a href="#" onclick="openAuthed('/api/invoices/export-zip', 'XMLs_Contabilidade_CortexERP.zip'); return false;" class="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 transition">
             <i data-lucide="archive" class="w-4 h-4"></i> Exportar ZIP Contabilidade
           </a>
           <button onclick="openEmitInvoiceModal()" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-1.5 shadow-sm transition">
@@ -2100,9 +2107,14 @@ async function renderInvoices(container) {
   }
 }
 
+// Estado global dos itens do formulário de emissão fiscal
+let invoiceItems = [];
+let invItemCounter = 0;
+
 function openEmitInvoiceModal() {
+  invoiceItems = [];
+  invItemCounter = 0;
   const contactOpts = currentContacts.map(c => `<option value="${c.id}">${c.name} (${c.document || 'Sem doc'})</option>`).join('');
-  const prodOpts = currentProducts.map(p => `<option value="${p.id}" data-price="${p.sale_price}">${p.name} - ${formatCurrency(p.sale_price)}</option>`).join('');
 
   const html = `
     <div class="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-800">
@@ -2112,69 +2124,378 @@ function openEmitInvoiceModal() {
       <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button>
     </div>
 
-    <form onsubmit="submitEmitInvoice(event)" class="mt-4 space-y-4 text-xs">
-      <div class="grid grid-cols-2 gap-4">
-        <div>
-          <label class="block font-semibold mb-1">Modelo do Documento</label>
-          <select name="model" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5">
-            <option value="55">NF-e (Modelo 55 - Mercadorias)</option>
-            <option value="65">NFC-e (Modelo 65 - Consumidor)</option>
-            <option value="nfse">NFS-e (Nota de Serviços Municipal)</option>
-          </select>
+    <form id="emit-invoice-form" onsubmit="submitEmitInvoice(event)" class="mt-4 space-y-4 text-xs">
+
+      <!-- 1. IDENTIFICAÇÃO -->
+      <div class="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
+        <div class="bg-slate-100 dark:bg-slate-800 px-4 py-2 font-bold text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+          1. Identificação do Documento
         </div>
-        <div>
-          <label class="block font-semibold mb-1">Destinatário</label>
-          <select name="recipient_id" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5">
-            <option value="">Consumidor Final Não Identificado</option>
-            ${contactOpts}
-          </select>
+        <div class="p-4 space-y-3">
+          <div class="grid grid-cols-3 gap-3">
+            <div>
+              <label class="block font-semibold mb-1">Modelo *</label>
+              <select name="model" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2">
+                <option value="55">NF-e (Mod. 55 — Mercadorias)</option>
+                <option value="65">NFC-e (Mod. 65 — Consumidor)</option>
+                <option value="nfse">NFS-e (Serviços Municipal)</option>
+              </select>
+            </div>
+            <div>
+              <label class="block font-semibold mb-1">Finalidade *</label>
+              <select name="finalidade" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2">
+                <option value="1">1 — NF-e Normal</option>
+                <option value="2">2 — NF-e Complementar</option>
+                <option value="3">3 — NF-e de Ajuste</option>
+                <option value="4">4 — Devolução / Retorno</option>
+              </select>
+            </div>
+            <div>
+              <label class="block font-semibold mb-1">Tipo de Operação *</label>
+              <select name="tipo_operacao" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2">
+                <option value="1">1 — Saída</option>
+                <option value="0">0 — Entrada</option>
+              </select>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block font-semibold mb-1">Destino da Operação *</label>
+              <select name="destino_operacao" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2">
+                <option value="1">1 — Operação Interna</option>
+                <option value="2">2 — Operação Interestadual</option>
+                <option value="3">3 — Operação com Exterior</option>
+              </select>
+            </div>
+            <div>
+              <label class="block font-semibold mb-1">Presença do Comprador *</label>
+              <select name="ind_presenca" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2">
+                <option value="1">1 — Presencial</option>
+                <option value="2">2 — Operação pela Internet</option>
+                <option value="3">3 — Teleatendimento</option>
+                <option value="4">4 — Entrega em Domicílio (NFC-e)</option>
+                <option value="9">9 — Outros</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label class="block font-semibold mb-1">Natureza da Operação *</label>
+            <input name="natureza_operacao" value="VENDA DE MERCADORIA DENTRO DO ESTADO"
+              class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2">
+          </div>
         </div>
       </div>
 
-      <div class="border border-slate-200 dark:border-slate-700 rounded-xl p-3 bg-slate-50/50 dark:bg-slate-800/30">
-        <label class="block font-bold mb-2">Item Fiscal Principal</label>
-        <div class="grid grid-cols-3 gap-3">
-          <div class="col-span-2">
-            <select id="inv-product-select" class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2">
-              ${prodOpts}
+      <!-- 2. DESTINATÁRIO -->
+      <div class="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
+        <div class="bg-slate-100 dark:bg-slate-800 px-4 py-2 font-bold text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+          2. Destinatário
+        </div>
+        <div class="p-4 grid grid-cols-2 gap-3">
+          <div>
+            <label class="block font-semibold mb-1">Destinatário *</label>
+            <select name="recipient_id" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2">
+              <option value="">Consumidor Final Não Identificado</option>
+              ${contactOpts}
             </select>
           </div>
           <div>
-            <input id="inv-product-qty" type="number" min="1" value="1" placeholder="Qtd" class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2">
+            <label class="block font-semibold mb-1">Indicador IE do Destinatário</label>
+            <select name="ind_ie_dest" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2">
+              <option value="9">9 — Não Contribuinte / SUFRAMA</option>
+              <option value="1">1 — Contribuinte do ICMS</option>
+              <option value="2">2 — Contribuinte Isento de IE</option>
+            </select>
           </div>
         </div>
       </div>
 
-      <div>
-        <label class="block font-semibold mb-1">Natureza da Operação</label>
-        <input name="natureza_operacao" value="VENDA DE MERCADORIA DENTRO DO ESTADO" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5">
+      <!-- 3. ITENS -->
+      <div class="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
+        <div class="bg-slate-100 dark:bg-slate-800 px-4 py-2 font-bold text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center justify-between">
+          <span>3. Itens / Produtos</span>
+          <button type="button" onclick="addInvoiceItem()"
+            class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1 rounded-lg font-semibold text-[11px]">
+            + Adicionar Item
+          </button>
+        </div>
+        <div class="p-4">
+          <div id="invoice-items-list" class="space-y-3"></div>
+          <p id="invoice-items-empty" class="text-center text-slate-400 py-3 italic">
+            Clique em "+ Adicionar Item" para incluir produtos na nota.
+          </p>
+        </div>
       </div>
 
-      <div class="flex justify-end gap-2 pt-4 border-t border-slate-200 dark:border-slate-800">
+      <!-- 4. FRETE & PAGAMENTO -->
+      <div class="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
+        <div class="bg-slate-100 dark:bg-slate-800 px-4 py-2 font-bold text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+          4. Frete, Totais & Pagamento
+        </div>
+        <div class="p-4 space-y-3">
+          <div class="grid grid-cols-3 gap-3">
+            <div>
+              <label class="block font-semibold mb-1">Modalidade do Frete</label>
+              <select name="modalidade_frete" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2">
+                <option value="9">9 — Sem Frete</option>
+                <option value="0">0 — Por conta do Emitente (CIF)</option>
+                <option value="1">1 — Por conta do Destinatário (FOB)</option>
+                <option value="2">2 — Por conta de Terceiros</option>
+                <option value="3">3 — Próprio / Emitente</option>
+                <option value="4">4 — Próprio / Destinatário</option>
+              </select>
+            </div>
+            <div>
+              <label class="block font-semibold mb-1">Valor do Frete (R$)</label>
+              <input name="shipping_amount" type="number" step="0.01" min="0" value="0"
+                class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2">
+            </div>
+            <div>
+              <label class="block font-semibold mb-1">Desconto Geral (R$)</label>
+              <input name="discount_amount" type="number" step="0.01" min="0" value="0"
+                class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2">
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block font-semibold mb-1">Forma de Pagamento *</label>
+              <select name="forma_pagamento" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2">
+                <option value="01">01 — Dinheiro</option>
+                <option value="15">15 — PIX</option>
+                <option value="03">03 — Cartão de Crédito</option>
+                <option value="04">04 — Cartão de Débito</option>
+                <option value="02">02 — Cheque</option>
+                <option value="14">14 — Duplicata Mercantil</option>
+                <option value="10">10 — Vale Alimentação</option>
+                <option value="11">11 — Vale Refeição</option>
+                <option value="05">05 — Crédito em Loja</option>
+                <option value="99">99 — Outros</option>
+              </select>
+            </div>
+            <div>
+              <label class="block font-semibold mb-1">Outras Despesas Acessórias (R$)</label>
+              <input name="outras_despesas" type="number" step="0.01" min="0" value="0"
+                class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 5. INFORMAÇÕES ADICIONAIS -->
+      <div class="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
+        <div class="bg-slate-100 dark:bg-slate-800 px-4 py-2 font-bold text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+          5. Informações Adicionais
+        </div>
+        <div class="p-4 space-y-3">
+          <div>
+            <label class="block font-semibold mb-1">Informações Complementares (para o consumidor)</label>
+            <textarea name="informacoes_adicionais" rows="2"
+              placeholder="Ex: Pedido nº 123 | Validade 12 meses | Garantia de fábrica..."
+              class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2 resize-none"></textarea>
+          </div>
+          <div>
+            <label class="block font-semibold mb-1">Informações de Interesse do Fisco</label>
+            <textarea name="informe_fisco" rows="2"
+              placeholder="Ex: NF referenciada: chave com 44 dígitos..."
+              class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2 resize-none"></textarea>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex justify-end gap-2 pt-2">
         <button type="button" onclick="closeModal()" class="px-4 py-2 rounded-xl bg-slate-200 dark:bg-slate-700 font-semibold">Cancelar</button>
-        <button type="submit" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold">Transmitir para SEFAZ</button>
+        <button type="submit" class="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center gap-2">
+          <i data-lucide="send" class="w-4 h-4"></i> Transmitir para SEFAZ
+        </button>
       </div>
     </form>
   `;
   openModal(html);
+  addInvoiceItem();
+}
+
+function _invItemRowHtml(idx) {
+  const prodOpts = currentProducts.map(p =>
+    `<option value="${p.id}" data-price="${p.sale_price||0}" data-ncm="${p.ncm||''}" data-cfop="${p.cfop_internal||'5102'}" data-csosn="${p.csosn_cst||'102'}">${p.name}</option>`
+  ).join('');
+  return `
+    <div id="inv-item-${idx}" class="border border-slate-200 dark:border-slate-700 rounded-xl p-3 bg-slate-50/50 dark:bg-slate-800/30 space-y-2">
+      <div class="flex items-center justify-between">
+        <span class="font-bold text-slate-600 dark:text-slate-300">Item ${idx + 1}</span>
+        <button type="button" onclick="removeInvoiceItem(${idx})" class="text-rose-500 hover:text-rose-700 text-[11px] font-semibold">Remover</button>
+      </div>
+      <div class="grid grid-cols-4 gap-2">
+        <div class="col-span-2">
+          <label class="block font-semibold mb-1">Produto / Serviço *</label>
+          <select id="inv-item-prod-${idx}" onchange="invItemFillFromProduct(${idx})"
+            class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2">
+            ${prodOpts}
+          </select>
+        </div>
+        <div>
+          <label class="block font-semibold mb-1">Quantidade *</label>
+          <input id="inv-item-qty-${idx}" type="number" step="0.001" min="0.001" value="1"
+            class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2">
+        </div>
+        <div>
+          <label class="block font-semibold mb-1">Unidade</label>
+          <select id="inv-item-unit-${idx}" class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2">
+            <option value="UN">UN</option><option value="CX">CX</option><option value="KG">KG</option>
+            <option value="L">L</option><option value="M">M</option><option value="M2">M²</option>
+            <option value="M3">M³</option><option value="PC">PC</option><option value="PAR">PAR</option>
+            <option value="HR">HR</option><option value="SC">SC</option><option value="FD">FD</option>
+          </select>
+        </div>
+      </div>
+      <div class="grid grid-cols-4 gap-2">
+        <div>
+          <label class="block font-semibold mb-1">Valor Unit. (R$) *</label>
+          <input id="inv-item-price-${idx}" type="number" step="0.01" min="0" value="0"
+            class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2">
+        </div>
+        <div>
+          <label class="block font-semibold mb-1">Desconto Unit. (R$)</label>
+          <input id="inv-item-disc-${idx}" type="number" step="0.01" min="0" value="0"
+            class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2">
+        </div>
+        <div>
+          <label class="block font-semibold mb-1">NCM *</label>
+          <input id="inv-item-ncm-${idx}" type="text" maxlength="8" placeholder="00000000"
+            class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2">
+        </div>
+        <div>
+          <label class="block font-semibold mb-1">CFOP *</label>
+          <input id="inv-item-cfop-${idx}" type="text" maxlength="4" placeholder="5102" value="5102"
+            class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2">
+        </div>
+      </div>
+      <div class="grid grid-cols-3 gap-2">
+        <div>
+          <label class="block font-semibold mb-1">CSOSN / CST</label>
+          <select id="inv-item-csosn-${idx}" class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2">
+            <option value="102">102 — Trib. s/ permissão de crédito (SN)</option>
+            <option value="103">103 — Isenção do ICMS / receita bruta (SN)</option>
+            <option value="300">300 — Imune (SN)</option>
+            <option value="400">400 — Não tributada pelo Simples Nacional</option>
+            <option value="500">500 — ICMS cobrado anteriormente por ST</option>
+            <option value="900">900 — Outros (SN)</option>
+            <option value="00">00 — Tributada integralmente (Regime Normal)</option>
+            <option value="20">20 — Com redução de BC</option>
+            <option value="40">40 — Isenta</option>
+            <option value="41">41 — Não tributada</option>
+            <option value="50">50 — Suspensão</option>
+            <option value="51">51 — Diferimento</option>
+            <option value="60">60 — ICMS cobrado anteriormente por ST</option>
+            <option value="70">70 — Red. BC + cobrança do ICMS-ST</option>
+            <option value="90">90 — Outras</option>
+          </select>
+        </div>
+        <div>
+          <label class="block font-semibold mb-1">Origem do Produto</label>
+          <select id="inv-item-origin-${idx}" class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2">
+            <option value="0">0 — Nacional</option>
+            <option value="1">1 — Estrangeira (importação direta)</option>
+            <option value="2">2 — Estrangeira (mercado interno)</option>
+            <option value="3">3 — Nacional c/ +40% conteúdo estrangeiro</option>
+            <option value="4">4 — Nacional / processo produtivo básico</option>
+            <option value="5">5 — Nacional c/ até 40% conteúdo estrangeiro</option>
+          </select>
+        </div>
+        <div>
+          <label class="block font-semibold mb-1">GTIN / EAN (opcional)</label>
+          <input id="inv-item-ean-${idx}" type="text" placeholder="SEM GTIN"
+            class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2">
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function addInvoiceItem() {
+  const list = document.getElementById('invoice-items-list');
+  const empty = document.getElementById('invoice-items-empty');
+  if (!list) return;
+  const idx = invItemCounter++;
+  invoiceItems.push(idx);
+  list.insertAdjacentHTML('beforeend', _invItemRowHtml(idx));
+  if (empty) empty.style.display = 'none';
+  if (window.lucide) lucide.createIcons();
+  invItemFillFromProduct(idx);
+}
+
+function removeInvoiceItem(idx) {
+  const el = document.getElementById(`inv-item-${idx}`);
+  if (el) el.remove();
+  invoiceItems = invoiceItems.filter(i => i !== idx);
+  const list = document.getElementById('invoice-items-list');
+  const empty = document.getElementById('invoice-items-empty');
+  if (empty && list && list.children.length === 0) empty.style.display = '';
+}
+
+function invItemFillFromProduct(idx) {
+  const sel = document.getElementById(`inv-item-prod-${idx}`);
+  if (!sel) return;
+  const prodId = parseInt(sel.value);
+  const prod = currentProducts.find(p => p.id === prodId);
+  if (!prod) return;
+  const priceEl = document.getElementById(`inv-item-price-${idx}`);
+  const ncmEl   = document.getElementById(`inv-item-ncm-${idx}`);
+  const cfopEl  = document.getElementById(`inv-item-cfop-${idx}`);
+  const csosnEl = document.getElementById(`inv-item-csosn-${idx}`);
+  if (priceEl) priceEl.value = prod.sale_price || 0;
+  if (ncmEl)   ncmEl.value   = prod.ncm || '';
+  if (cfopEl)  cfopEl.value  = prod.cfop_internal || '5102';
+  if (csosnEl && prod.csosn_cst) {
+    for (const o of csosnEl.options) { if (o.value === String(prod.csosn_cst)) { o.selected = true; break; } }
+  }
 }
 
 async function submitEmitInvoice(e) {
   e.preventDefault();
   const form = e.target;
-  const prodSelect = document.getElementById('inv-product-select');
-  const qtyInput = document.getElementById('inv-product-qty');
-  const prodId = prodSelect ? parseInt(prodSelect.value) : null;
-  const qty = qtyInput ? parseFloat(qtyInput.value) || 1 : 1;
-  const prod = currentProducts.find(p => p.id === prodId);
-  const price = prod ? prod.sale_price : 100.0;
+
+  const items = invoiceItems.map(idx => {
+    const prodSel = document.getElementById(`inv-item-prod-${idx}`);
+    const prodId  = prodSel ? parseInt(prodSel.value) : null;
+    const prod    = prodId  ? currentProducts.find(p => p.id === prodId) : null;
+    return {
+      product_id:      prodId,
+      name:            prod?.name || 'Item',
+      quantity:        parseFloat(document.getElementById(`inv-item-qty-${idx}`)?.value   || 1),
+      unit_price:      parseFloat(document.getElementById(`inv-item-price-${idx}`)?.value || 0),
+      discount_amount: parseFloat(document.getElementById(`inv-item-disc-${idx}`)?.value  || 0),
+      ncm:             document.getElementById(`inv-item-ncm-${idx}`)?.value   || (prod?.ncm || '84716052'),
+      cfop:            document.getElementById(`inv-item-cfop-${idx}`)?.value  || '5102',
+      csosn_cst:       document.getElementById(`inv-item-csosn-${idx}`)?.value || '102',
+      origin:          document.getElementById(`inv-item-origin-${idx}`)?.value || '0',
+      unit:            document.getElementById(`inv-item-unit-${idx}`)?.value  || 'UN',
+      ean:             document.getElementById(`inv-item-ean-${idx}`)?.value   || 'SEM GTIN',
+      sku:             prod?.sku || null,
+    };
+  }).filter(it => it.quantity > 0 && it.unit_price >= 0);
+
+  if (items.length === 0) {
+    showToast('Adicione pelo menos 1 item à nota fiscal.', 'warning');
+    return;
+  }
 
   const payload = {
-    model: form.model.value,
-    recipient_id: form.recipient_id.value ? parseInt(form.recipient_id.value) : null,
-    natureza_operacao: form.natureza_operacao.value,
-    items: prodId ? [{ product_id: prodId, name: prod.name, quantity: qty, unit_price: price, ncm: prod.ncm || '84716052' }] : [],
-    total_amount: price * qty,
+    model:                 form.model.value,
+    recipient_id:          form.recipient_id.value ? parseInt(form.recipient_id.value) : null,
+    natureza_operacao:     form.natureza_operacao.value,
+    finalidade:            form.finalidade.value,
+    tipo_operacao:         form.tipo_operacao.value,
+    destino_operacao:      form.destino_operacao.value,
+    ind_presenca:          form.ind_presenca.value,
+    ind_ie_dest:           form.ind_ie_dest.value,
+    modalidade_frete:      form.modalidade_frete.value,
+    shipping_amount:       parseFloat(form.shipping_amount.value   || 0),
+    discount_amount:       parseFloat(form.discount_amount.value   || 0),
+    outras_despesas:       parseFloat(form.outras_despesas.value   || 0),
+    forma_pagamento:       form.forma_pagamento.value,
+    informacoes_adicionais: form.informacoes_adicionais.value || '',
+    informe_fisco:         form.informe_fisco.value           || '',
+    items,
   };
 
   showToast('Transmitindo XML e obtendo protocolo SEFAZ...', 'info');
@@ -2190,7 +2511,8 @@ async function submitEmitInvoice(e) {
       closeModal();
       switchTab('invoices');
     } else {
-      showToast('Erro na autorização da nota fiscal.', 'error');
+      const err = await res.json().catch(() => ({}));
+      showToast(`Erro: ${err.detail || 'Falha na autorização da nota fiscal.'}`, 'error');
     }
   } catch (err) {
     showToast('Falha na transmissão.', 'error');
@@ -2442,6 +2764,712 @@ async function markAllNotificationsRead() {
   await fetch('/api/notifications/mark-all-read', { method: 'POST' });
   refreshNotificationBadge();
   openNotificationsModal();
+}
+
+// ==============================================================================
+// PEDIDOS & ORÇAMENTOS
+// ==============================================================================
+let quoteItems = [];
+let quoteItemCounter = 0;
+
+const QUOTE_STATUS_STYLES = {
+  rascunho:  'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300',
+  enviado:   'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300',
+  aprovado:  'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300',
+  rejeitado: 'bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300',
+  faturado:  'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300',
+  cancelado: 'bg-slate-200 dark:bg-slate-800 text-slate-400',
+};
+
+async function renderQuotes(container) {
+  try {
+    const [quotes, stats] = await Promise.all([
+      fetch('/api/quotes').then(r => r.json()),
+      fetch('/api/quotes/stats').then(r => r.json()),
+    ]);
+
+    const totalOrc = quotes.filter(q => q.type === 'orcamento').length;
+    const totalPed = quotes.filter(q => q.type === 'pedido').length;
+    const totalAprov = quotes.filter(q => q.status === 'aprovado').length;
+    const totalValor = quotes.reduce((s, q) => s + (q.total_amount || 0), 0);
+
+    const kpis = [
+      { label: 'Orçamentos',   value: totalOrc,  icon: 'file-text',   color: 'text-yellow-500' },
+      { label: 'Pedidos',      value: totalPed,  icon: 'shopping-bag', color: 'text-blue-500' },
+      { label: 'Aprovados',    value: totalAprov, icon: 'check-circle', color: 'text-emerald-500' },
+      { label: 'Valor Total',  value: formatCurrency(totalValor), icon: 'dollar-sign', color: 'text-purple-500' },
+    ];
+
+    const kpiHtml = kpis.map(k => `
+      <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 flex items-center gap-3 shadow-xs">
+        <div class="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center shrink-0">
+          <i data-lucide="${k.icon}" class="w-5 h-5 ${k.color}"></i>
+        </div>
+        <div>
+          <div class="text-lg font-bold text-slate-900 dark:text-slate-100">${k.value}</div>
+          <div class="text-xs text-slate-500">${k.label}</div>
+        </div>
+      </div>`).join('');
+
+    const rows = quotes.map(q => {
+      const style = QUOTE_STATUS_STYLES[q.status] || '';
+      const isExpired = q.valid_until && new Date(q.valid_until) < new Date() && !['faturado','cancelado'].includes(q.status);
+      return `
+        <tr class="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition text-xs">
+          <td class="py-2.5 px-4 font-bold text-slate-700 dark:text-slate-200">
+            <span class="text-${q.type === 'orcamento' ? 'yellow' : 'blue'}-600">${q.type === 'orcamento' ? 'ORC' : 'PED'}-${String(q.quote_number).padStart(4,'0')}</span>
+          </td>
+          <td class="py-2.5 px-4">${q.contact_name || '<span class="text-slate-400 italic">Sem cliente</span>'}</td>
+          <td class="py-2.5 px-4">${q.created_at ? q.created_at.substring(0,10) : ''}</td>
+          <td class="py-2.5 px-4 ${isExpired ? 'text-rose-500 font-semibold' : ''}">${q.valid_until || '—'} ${isExpired ? '⚠️' : ''}</td>
+          <td class="py-2.5 px-4 font-semibold text-slate-800 dark:text-slate-100">${formatCurrency(q.total_amount)}</td>
+          <td class="py-2.5 px-4">
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${style}">${q.status_label}</span>
+          </td>
+          <td class="py-2.5 px-4">
+            <div class="flex gap-1 flex-wrap">
+              <button onclick="openQuoteModal(${q.id})" class="text-blue-600 hover:underline font-semibold px-2 py-1 rounded-lg bg-blue-50 dark:bg-blue-900/20">Editar</button>
+              ${q.status === 'rascunho' ? `<button onclick="quoteAction(${q.id},'send')" class="text-slate-600 hover:underline font-semibold px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800">Enviar</button>` : ''}
+              ${['rascunho','enviado'].includes(q.status) ? `<button onclick="quoteAction(${q.id},'approve')" class="text-emerald-600 hover:underline font-semibold px-2 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-900/20">Aprovar</button>` : ''}
+              ${q.status === 'aprovado' ? `<button onclick="quoteAction(${q.id},'convert')" class="text-purple-600 hover:underline font-semibold px-2 py-1 rounded-lg bg-purple-50 dark:bg-purple-900/20">→ Venda</button>` : ''}
+              <button onclick="openAuthed('/api/quotes/${q.id}/print'); return false;" class="text-slate-500 hover:underline font-semibold px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800">Imprimir</button>
+              ${!['faturado','cancelado'].includes(q.status) ? `<button onclick="quoteAction(${q.id},'cancel')" class="text-rose-500 hover:underline font-semibold px-2 py-1 rounded-lg bg-rose-50 dark:bg-rose-900/20">Cancelar</button>` : ''}
+            </div>
+          </td>
+        </tr>`;
+    }).join('') || '<tr><td colspan="7" class="py-8 text-center text-slate-400 italic">Nenhum orçamento/pedido encontrado.</td></tr>';
+
+    container.innerHTML = `
+      <div class="space-y-5">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-lg font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+              <i data-lucide="file-text" class="w-5 h-5 text-yellow-500"></i> Pedidos &amp; Orçamentos
+            </h2>
+            <p class="text-xs text-slate-400 mt-0.5">Crie orçamentos, envie para clientes e converta em vendas</p>
+          </div>
+          <button onclick="openQuoteModal(null)"
+            class="bg-yellow-500 hover:bg-yellow-600 text-white font-bold text-xs px-4 py-2.5 rounded-xl flex items-center gap-2 shadow-sm transition">
+            <i data-lucide="plus" class="w-4 h-4"></i> Novo Orçamento / Pedido
+          </button>
+        </div>
+
+        <div class="grid grid-cols-4 gap-4">${kpiHtml}</div>
+
+        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold uppercase tracking-wider text-slate-500 bg-slate-50 dark:bg-slate-800/50">
+                  <th class="py-3 px-4">Nº</th>
+                  <th class="py-3 px-4">Cliente</th>
+                  <th class="py-3 px-4">Data</th>
+                  <th class="py-3 px-4">Validade</th>
+                  <th class="py-3 px-4">Total</th>
+                  <th class="py-3 px-4">Status</th>
+                  <th class="py-3 px-4">Ações</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>`;
+    if (window.lucide) lucide.createIcons();
+  } catch (e) {
+    container.innerHTML = `<div class="p-6 text-rose-500">Erro: ${e.message}</div>`;
+  }
+}
+
+async function openQuoteModal(quoteId) {
+  quoteItems = [];
+  quoteItemCounter = 0;
+
+  let q = null;
+  if (quoteId) {
+    try { q = await fetch(`/api/quotes/${quoteId}`).then(r => r.json()); } catch {}
+  }
+
+  const contactOpts = currentContacts.map(c =>
+    `<option value="${c.id}" ${q && q.contact_id === c.id ? 'selected' : ''}>${c.name} (${c.document || '—'})</option>`
+  ).join('');
+
+  const today = new Date();
+  const defaultValidity = new Date(today.setDate(today.getDate() + 30)).toISOString().split('T')[0];
+
+  const html = `
+    <div class="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-800">
+      <h3 class="font-bold text-base text-slate-900 dark:text-slate-100 flex items-center gap-2">
+        <i data-lucide="file-text" class="w-5 h-5 text-yellow-500"></i>
+        ${quoteId ? 'Editar' : 'Novo'} Orçamento / Pedido
+      </h3>
+      <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+    </div>
+
+    <form id="quote-form" onsubmit="submitQuote(event, ${quoteId || 'null'})" class="mt-4 space-y-4 text-xs">
+
+      <div class="grid grid-cols-3 gap-3">
+        <div>
+          <label class="block font-semibold mb-1">Tipo *</label>
+          <select name="type" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5">
+            <option value="orcamento" ${!q || q.type === 'orcamento' ? 'selected' : ''}>📋 Orçamento</option>
+            <option value="pedido" ${q && q.type === 'pedido' ? 'selected' : ''}>🛒 Pedido de Venda</option>
+          </select>
+        </div>
+        <div>
+          <label class="block font-semibold mb-1">Cliente</label>
+          <select name="contact_id" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5">
+            <option value="">Selecionar cliente...</option>
+            ${contactOpts}
+          </select>
+        </div>
+        <div>
+          <label class="block font-semibold mb-1">Válido até *</label>
+          <input name="valid_until" type="date" value="${q ? q.valid_until : defaultValidity}"
+            class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5">
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block font-semibold mb-1">Condição de Pagamento</label>
+          <select name="payment_terms" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5">
+            ${['À Vista','30 dias','60 dias','30/60 dias','30/60/90 dias','Boleto 30 dias','Cartão de Crédito','Cartão de Débito','PIX','Cheque'].map(t =>
+              `<option ${q && q.payment_terms === t ? 'selected' : ''}>${t}</option>`
+            ).join('')}
+          </select>
+        </div>
+        <div>
+          <label class="block font-semibold mb-1">Vendedor</label>
+          <select name="seller_id" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5">
+            <option value="">Nenhum</option>
+            ${(window.currentSellers || []).map(s =>
+              `<option value="${s.id}" ${q && q.seller_id === s.id ? 'selected' : ''}>${s.name}</option>`
+            ).join('')}
+          </select>
+        </div>
+      </div>
+
+      <!-- ITENS -->
+      <div class="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
+        <div class="bg-slate-100 dark:bg-slate-800 px-4 py-2 font-bold text-[11px] uppercase tracking-wider text-slate-500 flex items-center justify-between">
+          <span>Itens</span>
+          <button type="button" onclick="addQuoteItem()"
+            class="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded-lg font-semibold text-[11px]">
+            + Adicionar Item
+          </button>
+        </div>
+        <div class="p-4">
+          <div id="quote-items-list" class="space-y-2"></div>
+          <p id="quote-items-empty" class="text-center text-slate-400 py-3 italic">Clique em "+ Adicionar Item".</p>
+        </div>
+      </div>
+
+      <!-- TOTAIS -->
+      <div class="grid grid-cols-3 gap-3">
+        <div>
+          <label class="block font-semibold mb-1">Desconto Geral (R$)</label>
+          <input name="discount_amount" type="number" step="0.01" min="0" value="${q ? q.discount_amount : 0}"
+            oninput="updateQuoteTotals()"
+            class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5">
+        </div>
+        <div>
+          <label class="block font-semibold mb-1">Frete (R$)</label>
+          <input name="shipping_amount" type="number" step="0.01" min="0" value="${q ? q.shipping_amount : 0}"
+            oninput="updateQuoteTotals()"
+            class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5">
+        </div>
+        <div class="flex flex-col justify-end">
+          <div class="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-xl p-3 text-right">
+            <div class="text-xs text-slate-500">Total do Documento</div>
+            <div id="quote-total-display" class="text-xl font-bold text-yellow-700 dark:text-yellow-400">R$ 0,00</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block font-semibold mb-1">Observações (visível ao cliente)</label>
+          <textarea name="notes" rows="2" placeholder="Condições de garantia, prazo de entrega, validade da proposta..."
+            class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 resize-none">${q ? q.notes : ''}</textarea>
+        </div>
+        <div>
+          <label class="block font-semibold mb-1">Notas Internas (não aparece na impressão)</label>
+          <textarea name="internal_notes" rows="2" placeholder="Margem negociável, contato preferencial..."
+            class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 resize-none">${q ? q.internal_notes : ''}</textarea>
+        </div>
+      </div>
+
+      <div class="flex justify-between items-center gap-2 pt-2">
+        <div>
+          ${quoteId ? `<button type="button" onclick="openAuthed('/api/quotes/${quoteId}/print')" class="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 font-semibold flex items-center gap-2 text-slate-600 dark:text-slate-300 transition">
+            <i data-lucide="printer" class="w-4 h-4"></i> Imprimir
+          </button>` : ''}
+        </div>
+        <div class="flex gap-2">
+          <button type="button" onclick="closeModal()" class="px-4 py-2 rounded-xl bg-slate-200 dark:bg-slate-700 font-semibold">Cancelar</button>
+          <button type="submit" class="px-5 py-2 rounded-xl bg-yellow-500 hover:bg-yellow-600 text-white font-bold flex items-center gap-2">
+            <i data-lucide="save" class="w-4 h-4"></i> Salvar
+          </button>
+        </div>
+      </div>
+    </form>`;
+
+  openModal(html);
+
+  // Pré-carrega itens existentes
+  if (q && q.items && q.items.length > 0) {
+    for (const it of q.items) addQuoteItem(it);
+  } else {
+    addQuoteItem();
+  }
+  updateQuoteTotals();
+}
+
+function _quoteItemRowHtml(idx, it) {
+  const prodOpts = currentProducts.map(p =>
+    `<option value="${p.id}" data-price="${p.sale_price||0}" ${it && it.product_id === p.id ? 'selected' : ''}>${p.name}</option>`
+  ).join('');
+  return `
+    <div id="qit-${idx}" class="grid grid-cols-12 gap-2 items-end border border-slate-200 dark:border-slate-700 rounded-xl p-3 bg-slate-50/50 dark:bg-slate-800/30">
+      <div class="col-span-4">
+        <label class="block font-semibold mb-1 text-[10px] text-slate-500">Produto / Serviço *</label>
+        <select id="qit-prod-${idx}" onchange="quoteItemFillFromProduct(${idx})"
+          class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs">
+          <option value="">Descrição livre...</option>
+          ${prodOpts}
+        </select>
+      </div>
+      <div class="col-span-3">
+        <label class="block font-semibold mb-1 text-[10px] text-slate-500">Descrição (se livre)</label>
+        <input id="qit-name-${idx}" type="text" value="${it ? (it.product_name || '') : ''}" placeholder="Nome do item"
+          class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs">
+      </div>
+      <div class="col-span-1">
+        <label class="block font-semibold mb-1 text-[10px] text-slate-500">Qtd *</label>
+        <input id="qit-qty-${idx}" type="number" step="0.01" min="0.01" value="${it ? it.quantity : 1}"
+          oninput="updateQuoteTotals()"
+          class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs">
+      </div>
+      <div class="col-span-1">
+        <label class="block font-semibold mb-1 text-[10px] text-slate-500">Un</label>
+        <select id="qit-unit-${idx}" class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs">
+          ${['UN','CX','KG','L','M','M2','PC','HR','SC'].map(u =>
+            `<option ${it && it.unit === u ? 'selected' : ''}>${u}</option>`).join('')}
+        </select>
+      </div>
+      <div class="col-span-1">
+        <label class="block font-semibold mb-1 text-[10px] text-slate-500">V. Unit (R$) *</label>
+        <input id="qit-price-${idx}" type="number" step="0.01" min="0" value="${it ? it.unit_price : 0}"
+          oninput="updateQuoteTotals()"
+          class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs">
+      </div>
+      <div class="col-span-1">
+        <label class="block font-semibold mb-1 text-[10px] text-slate-500">Desc (R$)</label>
+        <input id="qit-disc-${idx}" type="number" step="0.01" min="0" value="${it ? it.discount : 0}"
+          oninput="updateQuoteTotals()"
+          class="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2 text-xs">
+      </div>
+      <div class="col-span-1 flex items-center justify-end pb-0.5">
+        <button type="button" onclick="removeQuoteItem(${idx})"
+          class="text-rose-500 hover:text-rose-700 text-xs font-bold px-2 py-2 rounded-lg bg-rose-50 dark:bg-rose-900/20">✕</button>
+      </div>
+    </div>`;
+}
+
+function addQuoteItem(it) {
+  const list  = document.getElementById('quote-items-list');
+  const empty = document.getElementById('quote-items-empty');
+  if (!list) return;
+  const idx = quoteItemCounter++;
+  quoteItems.push(idx);
+  list.insertAdjacentHTML('beforeend', _quoteItemRowHtml(idx, it || null));
+  if (empty) empty.style.display = 'none';
+  if (it && it.product_id) {
+    const sel = document.getElementById(`qit-prod-${idx}`);
+    if (sel) sel.value = it.product_id;
+  }
+  updateQuoteTotals();
+}
+
+function removeQuoteItem(idx) {
+  const el = document.getElementById(`qit-${idx}`);
+  if (el) el.remove();
+  quoteItems = quoteItems.filter(i => i !== idx);
+  const list  = document.getElementById('quote-items-list');
+  const empty = document.getElementById('quote-items-empty');
+  if (empty && list && list.children.length === 0) empty.style.display = '';
+  updateQuoteTotals();
+}
+
+function quoteItemFillFromProduct(idx) {
+  const sel   = document.getElementById(`qit-prod-${idx}`);
+  if (!sel || !sel.value) return;
+  const prod  = currentProducts.find(p => p.id === parseInt(sel.value));
+  if (!prod) return;
+  const nameEl  = document.getElementById(`qit-name-${idx}`);
+  const priceEl = document.getElementById(`qit-price-${idx}`);
+  if (nameEl)  nameEl.value  = prod.name;
+  if (priceEl) priceEl.value = prod.sale_price || 0;
+  updateQuoteTotals();
+}
+
+function updateQuoteTotals() {
+  let sub = 0;
+  for (const idx of quoteItems) {
+    const qty   = parseFloat(document.getElementById(`qit-qty-${idx}`)?.value   || 0);
+    const price = parseFloat(document.getElementById(`qit-price-${idx}`)?.value || 0);
+    const disc  = parseFloat(document.getElementById(`qit-disc-${idx}`)?.value  || 0);
+    sub += Math.max(0, (qty * price) - disc);
+  }
+  const form     = document.getElementById('quote-form');
+  const discGl   = parseFloat(form?.querySelector('[name=discount_amount]')?.value || 0);
+  const shipping = parseFloat(form?.querySelector('[name=shipping_amount]')?.value || 0);
+  const total    = Math.max(0, sub - discGl + shipping);
+  const el = document.getElementById('quote-total-display');
+  if (el) el.textContent = formatCurrency(total);
+}
+
+async function submitQuote(e, quoteId) {
+  e.preventDefault();
+  const form = document.getElementById('quote-form');
+
+  let sub = 0;
+  const items = quoteItems.map(idx => {
+    const prodSel = document.getElementById(`qit-prod-${idx}`);
+    const prodId  = prodSel?.value ? parseInt(prodSel.value) : null;
+    const prod    = prodId ? currentProducts.find(p => p.id === prodId) : null;
+    const nameEl  = document.getElementById(`qit-name-${idx}`);
+    const qty   = parseFloat(document.getElementById(`qit-qty-${idx}`)?.value   || 1);
+    const price = parseFloat(document.getElementById(`qit-price-${idx}`)?.value || 0);
+    const disc  = parseFloat(document.getElementById(`qit-disc-${idx}`)?.value  || 0);
+    const total = Math.max(0, (qty * price) - disc);
+    sub += total;
+    return {
+      product_id:   prodId,
+      product_name: nameEl?.value || prod?.name || 'Item',
+      sku:          prod?.sku || '',
+      quantity:     qty,
+      unit:         document.getElementById(`qit-unit-${idx}`)?.value || 'UN',
+      unit_price:   price,
+      discount:     disc,
+      total_price:  total,
+    };
+  });
+
+  if (items.length === 0) { showToast('Adicione pelo menos 1 item.', 'warning'); return; }
+
+  const fd = new FormData(form);
+  const discGl   = parseFloat(fd.get('discount_amount') || 0);
+  const shipping = parseFloat(fd.get('shipping_amount') || 0);
+
+  const payload = {
+    type:            fd.get('type'),
+    contact_id:      fd.get('contact_id') ? parseInt(fd.get('contact_id')) : null,
+    seller_id:       fd.get('seller_id')  ? parseInt(fd.get('seller_id'))  : null,
+    valid_until:     fd.get('valid_until'),
+    payment_terms:   fd.get('payment_terms'),
+    subtotal:        sub,
+    discount_amount: discGl,
+    shipping_amount: shipping,
+    total_amount:    Math.max(0, sub - discGl + shipping),
+    notes:           fd.get('notes') || '',
+    internal_notes:  fd.get('internal_notes') || '',
+    items,
+  };
+
+  try {
+    const url    = quoteId ? `/api/quotes/${quoteId}` : '/api/quotes';
+    const method = quoteId ? 'PUT' : 'POST';
+    const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    if (res.ok) {
+      const d = await res.json();
+      showToast(d.message || 'Salvo com sucesso!', 'success');
+      closeModal();
+      switchTab('quotes');
+    } else {
+      const err = await res.json().catch(() => ({}));
+      showToast(`Erro: ${err.detail || 'Falha ao salvar.'}`, 'error');
+    }
+  } catch (err) {
+    showToast('Falha na requisição.', 'error');
+  }
+}
+
+async function quoteAction(quoteId, action) {
+  const labels = { send: 'Enviar', approve: 'Aprovar', reject: 'Rejeitar', convert: 'Converter em Venda', cancel: 'Cancelar' };
+  const confirm_actions = ['cancel', 'reject', 'convert'];
+  if (confirm_actions.includes(action)) {
+    if (!confirm(`Confirma: ${labels[action]} este orçamento?`)) return;
+  }
+  try {
+    const res = await fetch(`/api/quotes/${quoteId}/${action}`, { method: 'POST' });
+    const d   = await res.json();
+    if (res.ok) {
+      showToast(d.message || 'Operação realizada!', 'success');
+      switchTab('quotes');
+    } else {
+      showToast(`Erro: ${d.detail || 'Falha.'}`, 'error');
+    }
+  } catch {
+    showToast('Falha na requisição.', 'error');
+  }
+}
+
+// ==============================================================================
+// CONFIGURAÇÕES DA EMPRESA (EMITENTE FISCAL)
+// ==============================================================================
+async function renderSettings(container) {
+  try {
+    const comp = await fetch('/api/company').then(r => r.json());
+    const cert = await fetch('/api/company/certificate/status').then(r => r.json());
+
+    const field = (name, label, value, type = 'text', placeholder = '') => `
+      <div>
+        <label class="block font-semibold mb-1 text-slate-600 dark:text-slate-400">${label}</label>
+        <input name="${name}" type="${type}" value="${value ?? ''}" placeholder="${placeholder}"
+          class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs focus:ring-2 focus:ring-blue-500 outline-none">
+      </div>`;
+
+    const select = (name, label, options, selected) => `
+      <div>
+        <label class="block font-semibold mb-1 text-slate-600 dark:text-slate-400">${label}</label>
+        <select name="${name}" class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 text-xs focus:ring-2 focus:ring-blue-500 outline-none">
+          ${options.map(([v, l]) => `<option value="${v}" ${String(selected) === String(v) ? 'selected' : ''}>${l}</option>`).join('')}
+        </select>
+      </div>`;
+
+    const section = (title, icon, color, content) => `
+      <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs">
+        <div class="flex items-center gap-2 px-5 py-3 border-b border-slate-100 dark:border-slate-800">
+          <i data-lucide="${icon}" class="w-4 h-4 ${color}"></i>
+          <h3 class="font-bold text-sm text-slate-800 dark:text-slate-100">${title}</h3>
+        </div>
+        <div class="p-5">${content}</div>
+      </div>`;
+
+    const certBadge = cert.installed
+      ? `<div class="flex items-center gap-2 text-xs ${cert.is_expired ? 'text-rose-600' : 'text-emerald-600'} font-semibold">
+           <i data-lucide="${cert.is_expired ? 'shield-x' : 'shield-check'}" class="w-4 h-4"></i>
+           ${cert.titular} — válido até ${cert.valid_until ? cert.valid_until.substring(0,10) : '?'}
+           ${cert.days_remaining !== null ? `(${cert.days_remaining} dias)` : ''}
+         </div>`
+      : `<div class="flex items-center gap-2 text-xs text-amber-600 font-semibold">
+           <i data-lucide="shield-alert" class="w-4 h-4"></i> Nenhum certificado A1 instalado
+         </div>`;
+
+    container.innerHTML = `
+      <div class="space-y-5 max-w-4xl">
+
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-lg font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+              <i data-lucide="building-2" class="w-5 h-5 text-orange-500"></i> Configurações da Empresa
+            </h2>
+            <p class="text-xs text-slate-400 mt-0.5">Dados do emitente utilizados nas Notas Fiscais (NF-e, NFC-e, NFS-e)</p>
+          </div>
+          <button onclick="submitCompanySettings(event)"
+            class="bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs px-5 py-2.5 rounded-xl flex items-center gap-2 shadow-sm transition">
+            <i data-lucide="save" class="w-4 h-4"></i> Salvar Todas as Configurações
+          </button>
+        </div>
+
+        <form id="company-settings-form" onsubmit="submitCompanySettings(event)" class="space-y-5">
+
+          ${section('Identificação da Empresa', 'building-2', 'text-orange-500', `
+            <div class="grid grid-cols-2 gap-4">
+              ${field('razao_social', 'Razão Social *', comp.razao_social, 'text', 'Ex: Empresa LTDA')}
+              ${field('nome_fantasia', 'Nome Fantasia *', comp.nome_fantasia, 'text', 'Ex: Empresa')}
+            </div>
+            <div class="grid grid-cols-3 gap-4 mt-3">
+              ${field('cnpj', 'CNPJ *', comp.cnpj, 'text', '00.000.000/0000-00')}
+              ${field('inscricao_estadual', 'Inscrição Estadual (IE)', comp.inscricao_estadual, 'text', 'ISENTO ou número')}
+              ${field('inscricao_municipal', 'Inscrição Municipal (IM)', comp.inscricao_municipal, 'text', 'Para NFS-e')}
+            </div>
+            <div class="grid grid-cols-2 gap-4 mt-3">
+              ${field('cnae_principal', 'CNAE Principal', comp.cnae_principal, 'text', '6201-5/01')}
+              ${select('regime_tributario', 'Regime Tributário *', [
+                ['simples_nacional', 'Simples Nacional'],
+                ['mei', 'MEI — Microempreendedor Individual'],
+                ['lucro_presumido', 'Lucro Presumido'],
+                ['lucro_real', 'Lucro Real'],
+              ], comp.regime_tributario)}
+            </div>
+            <div class="grid grid-cols-1 gap-4 mt-3">
+              ${field('aliquota_simples', 'Alíquota Simples Nacional (%)', comp.aliquota_simples, 'number', '6.0')}
+            </div>
+          `)}
+
+          ${section('Endereço do Emitente', 'map-pin', 'text-blue-500', `
+            <div class="grid grid-cols-4 gap-4">
+              ${field('cep', 'CEP *', comp.cep, 'text', '00000-000')}
+              ${field('logradouro', 'Logradouro (Rua / Av.) *', comp.logradouro, 'text', 'Av. Principal')}
+              ${field('numero', 'Número *', comp.numero, 'text', 'S/N')}
+              ${field('complemento', 'Complemento', comp.complemento, 'text', 'Sala 01')}
+            </div>
+            <div class="grid grid-cols-4 gap-4 mt-3">
+              ${field('bairro', 'Bairro *', comp.bairro, 'text', 'Centro')}
+              ${field('cidade', 'Município *', comp.cidade, 'text', 'Cáceres')}
+              ${select('uf', 'UF *', [
+                ['AC','AC'],['AL','AL'],['AP','AP'],['AM','AM'],['BA','BA'],['CE','CE'],
+                ['DF','DF'],['ES','ES'],['GO','GO'],['MA','MA'],['MT','MT'],['MS','MS'],
+                ['MG','MG'],['PA','PA'],['PB','PB'],['PR','PR'],['PE','PE'],['PI','PI'],
+                ['RJ','RJ'],['RN','RN'],['RS','RS'],['RO','RO'],['RR','RR'],['SC','SC'],
+                ['SP','SP'],['SE','SE'],['TO','TO'],
+              ], comp.uf)}
+              ${field('codigo_ibge_municipio', 'Código IBGE Município *', comp.codigo_ibge_municipio, 'text', '5102504')}
+            </div>
+          `)}
+
+          ${section('Contato', 'phone', 'text-green-500', `
+            <div class="grid grid-cols-3 gap-4">
+              ${field('telefone', 'Telefone / WhatsApp', comp.telefone, 'text', '(65) 99999-0000')}
+              ${field('email', 'E-mail da Empresa', comp.email, 'email', 'contato@empresa.com.br')}
+              ${field('chave_pix', 'Chave PIX', comp.chave_pix, 'text', 'CNPJ, CPF, e-mail ou telefone')}
+            </div>
+          `)}
+
+          ${section('Configurações Fiscais SEFAZ', 'server', 'text-purple-500', `
+            <div class="grid grid-cols-3 gap-4">
+              ${select('ambiente_fiscal', 'Ambiente SEFAZ *', [
+                ['homologacao', '🧪 Homologação (Testes)'],
+                ['producao', '🟢 Produção (Notas Reais)'],
+              ], comp.ambiente_fiscal)}
+              ${select('motor_fiscal', 'Motor / Provedor Fiscal', [
+                ['sefaz_direto', 'SEFAZ Direto (A1 Local)'],
+                ['nuvem_fiscal', 'Nuvem Fiscal'],
+                ['focus_nfe', 'Focus NFe'],
+                ['plug_notas', 'PlugNotas'],
+              ], comp.motor_fiscal)}
+              ${field('api_fiscal_token', 'Token da API Fiscal', comp.api_fiscal_token, 'text', 'Token do provedor (se aplicável)')}
+            </div>
+            <div class="grid grid-cols-2 gap-4 mt-3">
+              ${field('codigo_ibge_uf', 'Código IBGE da UF', comp.codigo_ibge_uf, 'text', '51')}
+              <div>
+                <label class="block font-semibold mb-1 text-slate-600 dark:text-slate-400">Ambiente atual</label>
+                <div class="flex items-center gap-2 h-9 px-3 rounded-xl border ${comp.ambiente_fiscal === 'producao' ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400' : 'border-amber-300 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400'} text-xs font-bold">
+                  <span class="w-2 h-2 rounded-full ${comp.ambiente_fiscal === 'producao' ? 'bg-emerald-500' : 'bg-amber-500'}"></span>
+                  ${comp.ambiente_fiscal === 'producao' ? 'PRODUÇÃO — Notas com validade jurídica' : 'HOMOLOGAÇÃO — Apenas para testes'}
+                </div>
+              </div>
+            </div>
+          `)}
+
+          ${section('Séries e Numeração Fiscal', 'hash', 'text-indigo-500', `
+            <div class="grid grid-cols-3 gap-4">
+              <div class="border border-slate-200 dark:border-slate-700 rounded-xl p-3 space-y-2">
+                <div class="text-[11px] font-bold uppercase text-slate-500 tracking-wider">NF-e (Mod. 55)</div>
+                ${field('serie_nfe', 'Série', comp.serie_nfe, 'number', '1')}
+                ${field('proximo_numero_nfe', 'Próximo Número', comp.proximo_numero_nfe, 'number', '101')}
+              </div>
+              <div class="border border-slate-200 dark:border-slate-700 rounded-xl p-3 space-y-2">
+                <div class="text-[11px] font-bold uppercase text-slate-500 tracking-wider">NFC-e (Mod. 65)</div>
+                ${field('serie_nfce', 'Série', comp.serie_nfce, 'number', '1')}
+                ${field('proximo_numero_nfce', 'Próximo Número', comp.proximo_numero_nfce, 'number', '501')}
+              </div>
+              <div class="border border-slate-200 dark:border-slate-700 rounded-xl p-3 space-y-2">
+                <div class="text-[11px] font-bold uppercase text-slate-500 tracking-wider">NFS-e (Serviços)</div>
+                ${field('serie_nfse', 'Série', comp.serie_nfse, 'number', '1')}
+                ${field('proximo_numero_nfse', 'Próximo Número', comp.proximo_numero_nfse, 'number', '201')}
+              </div>
+            </div>
+          `)}
+
+          ${section('NFC-e — CSC (Código de Segurança do Contribuinte)', 'key-round', 'text-rose-500', `
+            <p class="text-xs text-slate-500 mb-3">Necessário para emissão de NFC-e (Modelo 65). Obtido no portal SEFAZ do seu estado.</p>
+            <div class="grid grid-cols-2 gap-4">
+              ${field('csc_id', 'CSC ID (Identificador)', comp.csc_id, 'text', '000001')}
+              ${field('csc_token', 'CSC Token', comp.csc_token, 'text', 'Token gerado pelo SEFAZ')}
+            </div>
+          `)}
+
+        </form>
+
+        ${section('Certificado Digital A1 (.PFX / .P12)', 'shield-check', 'text-blue-500', `
+          <div class="space-y-4">
+            <div>${certBadge}</div>
+            <form onsubmit="submitCertificate(event)" class="space-y-3" enctype="multipart/form-data">
+              <div class="grid grid-cols-2 gap-4">
+                <div>
+                  <label class="block font-semibold mb-1 text-slate-600 dark:text-slate-400 text-xs">Arquivo .PFX ou .P12</label>
+                  <input type="file" name="file" accept=".pfx,.p12"
+                    class="w-full text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5 file:mr-2 file:rounded-lg file:border-0 file:bg-blue-600 file:text-white file:px-3 file:py-1 file:text-xs cursor-pointer">
+                </div>
+                <div>
+                  <label class="block font-semibold mb-1 text-slate-600 dark:text-slate-400 text-xs">Senha do Certificado</label>
+                  <input type="password" name="password" placeholder="Senha do arquivo .PFX"
+                    class="w-full text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-2.5">
+                </div>
+              </div>
+              <button type="submit"
+                class="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl flex items-center gap-2 transition">
+                <i data-lucide="upload" class="w-4 h-4"></i> Instalar Certificado no Cofre Seguro
+              </button>
+            </form>
+          </div>
+        `)}
+
+      </div>
+    `;
+    if (window.lucide) lucide.createIcons();
+  } catch (e) {
+    container.innerHTML = `<div class="p-6 text-rose-500">Erro ao carregar configurações: ${e.message}</div>`;
+  }
+}
+
+async function submitCompanySettings(e) {
+  e.preventDefault();
+  const form = document.getElementById('company-settings-form');
+  if (!form) return;
+  const fd = new FormData(form);
+  const data = {};
+  for (const [k, v] of fd.entries()) {
+    if (['serie_nfe','proximo_numero_nfe','serie_nfce','proximo_numero_nfce','serie_nfse','proximo_numero_nfse'].includes(k)) {
+      data[k] = parseInt(v) || 0;
+    } else if (k === 'aliquota_simples') {
+      data[k] = parseFloat(v) || 0;
+    } else {
+      data[k] = v;
+    }
+  }
+  try {
+    const res = await fetch('/api/company', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (res.ok) {
+      showToast('Configurações da empresa salvas com sucesso!', 'success');
+      const sidebarName = document.getElementById('sidebar-company-name');
+      if (sidebarName && data.razao_social) sidebarName.textContent = data.nome_fantasia || data.razao_social;
+      switchTab('settings');
+    } else {
+      const err = await res.json().catch(() => ({}));
+      showToast(`Erro: ${err.detail || 'Falha ao salvar.'}`, 'error');
+    }
+  } catch (err) {
+    showToast('Falha na requisição.', 'error');
+  }
+}
+
+async function submitCertificate(e) {
+  e.preventDefault();
+  const form = e.target;
+  const fd = new FormData(form);
+  showToast('Instalando certificado no cofre seguro...', 'info');
+  try {
+    const res = await fetch('/api/company/certificate', { method: 'POST', body: fd });
+    if (res.ok) {
+      const d = await res.json();
+      showToast(`Certificado instalado! Titular: ${d.titular} | Validade: ${d.validade}`, 'success');
+      switchTab('settings');
+    } else {
+      const err = await res.json().catch(() => ({}));
+      showToast(`Erro: ${err.detail || 'Falha ao instalar certificado.'}`, 'error');
+    }
+  } catch (err) {
+    showToast('Falha na requisição.', 'error');
+  }
 }
 
 // Initial Boot

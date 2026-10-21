@@ -1,5 +1,9 @@
+import io
 import re
 import random
+import base64
+import hashlib
+import qrcode
 import xml.etree.ElementTree as ET
 from datetime import datetime, date, timedelta
 
@@ -76,6 +80,213 @@ def validar_dados_fiscais(company: dict, contact: dict, items: list[dict], model
     return erros
 
 
+
+
+def gerar_qrcode_nfce(
+    company: dict,
+    contact: dict,
+    chave: str,
+    dh_emi: str,
+    v_nf: float,
+    dig_val: str = "c2VmYXotY29ydGV4LWVycC1hc3NpbmF0dXJhLWRpZ2l0YWw=",
+) -> tuple[str, str]:
+    """
+    Gera a URL oficial do QR-Code e URL de consulta da NFC-e (Modelo 65)
+    conforme padrão SEFAZ Nota Técnica 2016.002 / 2020.005 versão 2.00.
+    """
+    uf = (company.get("uf") or "MT").upper()
+    tp_amb = "1" if company.get("ambiente_fiscal") == "producao" else "2"
+    csc_id = str(company.get("csc_id") or "000001").strip()
+    csc_token = str(company.get("csc_token") or "0123456789ABCDEF").strip()
+
+    doc_dest = _only_digits(contact.get("document", "")) if contact else ""
+    dh_hex = dh_emi.encode("utf-8").hex()
+    dig_hex = dig_val.encode("utf-8").hex()
+    v_nf_str = f"{v_nf:.2f}"
+
+    url_chave = f"http://www.sefaz.{uf.lower()}.gov.br/nfce/consultanfce"
+    url_base = f"https://www.sefaz.{uf.lower()}.gov.br/nfce/qrcode" if tp_amb == "1" else f"https://homologacao.sefaz.{uf.lower()}.gov.br/nfce/qrcode"
+
+    params = f"{chave}|2|{tp_amb}|{doc_dest}|{dh_hex}|{v_nf_str}|{dig_hex}|{csc_id}"
+    to_hash = (params + csc_token).encode("utf-8")
+    c_hash = hashlib.sha1(to_hash).hexdigest().upper()
+
+    url_qrcode = f"{url_base}?p={params}|{c_hash}"
+    return url_qrcode, url_chave
+
+
+def gerar_html_danfe_nfce(company: dict, contact: dict, invoice: dict, items: list[dict]) -> str:
+    """Gera o DANFE NFC-e (Cupom Fiscal Térmico 80mm) com QR Code oficial e protocolo SEFAZ."""
+    chave = invoice["access_key"]
+    chave_formatada = " ".join([chave[i:i+4] for i in range(0, len(chave), 4)])
+    numero = invoice.get("number", "1")
+    serie = invoice.get("series", "1")
+    dh_emi = invoice.get("issued_at") or datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    protocolo = invoice.get("protocol") or f"151{datetime.now().strftime('%y%m%d%H%M')}01"
+    v_tot = float(invoice.get("total_invoice") or 0.0)
+
+    url_qrcode, url_chave = gerar_qrcode_nfce(
+        company=company,
+        contact=contact,
+        chave=chave,
+        dh_emi=datetime.now().strftime("%Y-%m-%dT%H:%M:%S-04:00"),
+        v_nf=v_tot,
+    )
+
+    # Gera imagem PNG do QR Code em Base64
+    qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=4, border=2)
+    qr.add_data(url_qrcode)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    qr_b64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+    linhas_itens = ""
+    for idx, it in enumerate(items, start=1):
+        nome_prod = (it.get("product_name") or it.get("name") or "Item")[:28]
+        qty = float(it.get("quantity", 1))
+        unit = it.get("unit", "UN")
+        v_un = float(it.get("unit_price", 0))
+        total_it = float(it.get("total_price", qty * v_un))
+        linhas_itens += f"""
+        <tr>
+            <td style="padding: 2px 0;">{idx:03d}</td>
+            <td style="padding: 2px 0;">{it.get('sku', '')} {nome_prod}<br><span style="color:#666;">{qty:.2f} {unit} x R$ {v_un:.2f}</span></td>
+            <td style="padding: 2px 0; text-align: right; vertical-align: top;">R$ {total_it:.2f}</td>
+        </tr>
+        """
+
+    ambiente_banner = ""
+    if invoice.get("environment") == "homologacao":
+        ambiente_banner = """
+        <div style="background: #fef3c7; border: 1px dashed #d97706; color: #92400e; padding: 6px; text-align: center; font-size: 10px; font-weight: bold; margin-bottom: 8px;">
+            EMITIDA EM AMBIENTE DE HOMOLOGAÇÃO<br>SEM VALOR FISCAL
+        </div>
+        """
+
+    consumidor_str = "CONSUMIDOR NÃO IDENTIFICADO"
+    if contact and contact.get("name"):
+        consumidor_str = f"CONSUMIDOR: {contact.get('name')}<br>CPF/CNPJ: {contact.get('document', '')}"
+
+    return f"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>DANFE NFC-e - Cupom Fiscal #{numero}</title>
+<style>
+  body {{
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 11px;
+    line-height: 1.25;
+    color: #000;
+    margin: 0;
+    padding: 10px;
+    background: #f3f4f6;
+  }}
+  .cupom {{
+    width: 310px;
+    margin: 0 auto;
+    background: #fff;
+    padding: 12px;
+    box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+    box-sizing: border-box;
+  }}
+  .center {{ text-align: center; }}
+  .bold {{ font-weight: bold; }}
+  .divider {{ border-top: 1px dashed #000; margin: 6px 0; }}
+  table {{ width: 100%; border-collapse: collapse; font-size: 10px; }}
+  @media print {{
+    body {{ background: #fff; padding: 0; }}
+    .cupom {{ box-shadow: none; width: 100%; padding: 0; }}
+    .no-print {{ display: none !important; }}
+  }}
+</style>
+</head>
+<body>
+<div class="no-print center" style="margin-bottom: 12px;">
+    <button onclick="window.print()" style="padding: 6px 16px; background: #2563eb; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: bold;">
+        🖨️ Imprimir Cupom NFC-e
+    </button>
+</div>
+
+<div class="cupom">
+    {ambiente_banner}
+    <div class="center bold" style="font-size: 13px;">{company.get("nome_fantasia") or company.get("razao_social")}</div>
+    <div class="center">{company.get("razao_social")}</div>
+    <div class="center">CNPJ: {company.get("cnpj", "")} - IE: {company.get("inscricao_estadual", "")}</div>
+    <div class="center">{company.get("logradouro", "")}, {company.get("numero", "")} - {company.get("bairro", "")}</div>
+    <div class="center">{company.get("cidade", "")} / {company.get("uf", "")} - Tel: {company.get("telefone", "")}</div>
+    <div class="divider"></div>
+
+    <div class="center bold">DANFE NFC-e - Documento Auxiliar da<br>Nota Fiscal de Consumidor Eletrônica</div>
+    <div class="center" style="font-size: 9px;">Não permite aproveitamento de crédito de ICMS</div>
+    <div class="divider"></div>
+
+    <table>
+        <thead>
+            <tr style="border-bottom: 1px solid #000;">
+                <th style="text-align: left; padding-bottom: 2px;">#</th>
+                <th style="text-align: left; padding-bottom: 2px;">DESCRIÇÃO</th>
+                <th style="text-align: right; padding-bottom: 2px;">VALOR</th>
+            </tr>
+        </thead>
+        <tbody>
+            {linhas_itens}
+        </tbody>
+    </table>
+    <div class="divider"></div>
+
+    <table style="font-size: 11px;">
+        <tr>
+            <td>QTD. TOTAL DE ITENS:</td>
+            <td style="text-align: right;" class="bold">{len(items)}</td>
+        </tr>
+        <tr>
+            <td>VALOR TOTAL R$:</td>
+            <td style="text-align: right;" class="bold">R$ {float(invoice.get("total_products", v_tot)):.2f}</td>
+        </tr>
+        <tr>
+            <td>DESCONTOS R$:</td>
+            <td style="text-align: right;">R$ {float(invoice.get("total_discounts", 0.0)):.2f}</td>
+        </tr>
+        <tr style="font-size: 13px;">
+            <td class="bold">VALOR A PAGAR R$:</td>
+            <td style="text-align: right;" class="bold">R$ {v_tot:.2f}</td>
+        </tr>
+    </table>
+    <div class="divider"></div>
+
+    <div style="font-size: 10px;">
+        {consumidor_str}
+    </div>
+    <div class="divider"></div>
+
+    <div class="center bold" style="font-size: 10px;">
+        NFC-e nº {numero} - Série {serie}<br>
+        Emissão: {dh_emi}<br>
+        Protocolo de Autorização: {protocolo}
+    </div>
+    <div class="divider"></div>
+
+    <div class="center" style="font-size: 9px;">
+        <b>CHAVE DE ACESSO:</b><br>
+        {chave_formatada}
+    </div>
+    <div class="divider"></div>
+
+    <div class="center">
+        <div style="font-size: 9px; margin-bottom: 4px;"><b>Consulta via leitor de QR Code</b></div>
+        <img src="data:image/png;base64,{qr_b64}" alt="QR Code NFC-e" style="width: 140px; height: 140px; margin: 0 auto; display: block;" />
+        <div style="font-size: 8px; margin-top: 4px; color: #555;">Consulte pela Chave de Acesso em:<br>{url_chave}</div>
+    </div>
+    <div class="divider"></div>
+    <div class="center" style="font-size: 8px; color: #777;">Cortex ERP - Tecnologia Fiscal Inteligente</div>
+</div>
+</body>
+</html>
+"""
+
 def gerar_xml_nfe_400(
     company: dict,
     contact: dict,
@@ -84,7 +295,7 @@ def gerar_xml_nfe_400(
 ) -> str:
     """Gera o XML completo no Layout 4.00 da SEFAZ (<nfeProc versao="4.00">)."""
     chave = invoice_data["access_key"]
-    protocolo = invoice_data["protocol"]
+    protocolo = invoice_data.get("protocol") or f"151{datetime.now().strftime('%y%m%d%H%M')}{random.randint(10, 99)}"
     numero = invoice_data["number"]
     serie = invoice_data["series"]
     mod_code = "65" if "65" in invoice_data["model"] else "55"
@@ -97,26 +308,30 @@ def gerar_xml_nfe_400(
 
     det_xml_list = []
     for idx, it in enumerate(items, start=1):
-        ncm = _only_digits(it.get("ncm", "84713012")).zfill(8)
-        cfop = _only_digits(it.get("cfop", "5102")).zfill(4)
+        ncm   = _only_digits(it.get("ncm", "84713012")).zfill(8)
+        cfop  = _only_digits(it.get("cfop", "5102")).zfill(4)
         csosn = it.get("csosn_cst", "102")
-        qty = float(it.get("quantity", 1))
-        v_un = float(it.get("unit_price", 0))
+        qty   = float(it.get("quantity", 1))
+        v_un  = float(it.get("unit_price", 0))
+        v_item_desc = float(it.get("discount_amount") or 0.0)
         v_prod = round(qty * v_un, 2)
+        ean_val = it.get("ean") or "SEM GTIN"
+        unit_val = it.get("unit") or "UN"
         det_xml_list.append(f"""
         <det nItem="{idx}">
           <prod>
             <cProd>{it.get("sku") or f"PRD-{idx:03d}"}</cProd>
-            <cEAN>SEM GTIN</cEAN>
+            <cEAN>{ean_val}</cEAN>
             <xProd>{it.get("product_name") or it.get("name")}</xProd>
             <NCM>{ncm}</NCM>
             <CFOP>{cfop}</CFOP>
-            <uCom>{it.get("unit") or "UN"}</uCom>
+            <uCom>{unit_val}</uCom>
             <qCom>{qty:.4f}</qCom>
             <vUnCom>{v_un:.4f}</vUnCom>
             <vProd>{v_prod:.2f}</vProd>
-            <cEANTrib>SEM GTIN</cEANTrib>
-            <uTrib>{it.get("unit") or "UN"}</uTrib>
+            <vDesc>{v_item_desc:.2f}</vDesc>
+            <cEANTrib>{ean_val}</cEANTrib>
+            <uTrib>{unit_val}</uTrib>
             <qTrib>{qty:.4f}</qTrib>
             <vUnTrib>{v_un:.4f}</vUnTrib>
             <indTot>1</indTot>
@@ -148,12 +363,37 @@ def gerar_xml_nfe_400(
         </det>""")
 
     dets_joined = "\n".join(det_xml_list)
-    v_prod_total = float(invoice_data.get("total_products", 0))
-    v_desc = float(invoice_data.get("total_discounts", 0))
-    v_frete = float(invoice_data.get("total_shipping", 0))
-    v_nf = float(invoice_data.get("total_invoice", 0))
-    v_pis = float(invoice_data.get("total_pis", 0))
-    v_cofins = float(invoice_data.get("total_cofins", 0))
+    v_prod_total  = float(invoice_data.get("total_products", 0))
+    v_desc        = float(invoice_data.get("total_discounts", 0))
+    v_frete       = float(invoice_data.get("total_shipping", 0))
+    v_nf          = float(invoice_data.get("total_invoice", 0))
+    v_pis         = float(invoice_data.get("total_pis", 0))
+    v_cofins      = float(invoice_data.get("total_cofins", 0))
+    v_outro       = float(invoice_data.get("outras_despesas", 0))
+    mod_frete     = str(invoice_data.get("modalidade_frete", "9"))
+    forma_pag     = str(invoice_data.get("forma_pagamento", "01"))
+    inf_cpl       = invoice_data.get("informacoes_adicionais", "")
+    inf_fisco     = invoice_data.get("informe_fisco", "")
+    inf_cpl_final = (inf_cpl + " " if inf_cpl else "") + "Documento emitido por ME ou EPP optante pelo Simples Nacional. Nao gera direito a credito fiscal de IPI. Emitido via Cortex ERP Pro+."
+    if inf_fisco:
+        inf_obs_fisco = f"<obsFisco xCampo='InfFisco'><xTexto>{inf_fisco}</xTexto></obsFisco>"
+    else:
+        inf_obs_fisco = ""
+
+    inf_supl_xml = ""
+    if mod_code == "65":
+        url_qrcode, url_chave = gerar_qrcode_nfce(
+            company=company,
+            contact=contact,
+            chave=chave,
+            dh_emi=dh_emi,
+            v_nf=v_nf,
+        )
+        inf_supl_xml = f"""
+    <infNFeSupl>
+      <qrCode><![CDATA[{url_qrcode}]]></qrCode>
+      <urlChave>{url_chave}</urlChave>
+    </infNFeSupl>"""
 
     xml_str = f"""<?xml version="1.0" encoding="UTF-8"?>
 <nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
@@ -167,16 +407,16 @@ def gerar_xml_nfe_400(
         <serie>{serie}</serie>
         <nNF>{numero}</nNF>
         <dhEmi>{dh_emi}</dhEmi>
-        <tpNF>1</tpNF>
-        <idDest>1</idDest>
+        <tpNF>{invoice_data.get("tipo_operacao", "1")}</tpNF>
+        <idDest>{invoice_data.get("destino_operacao", "1")}</idDest>
         <cMunFG>{company.get("codigo_ibge_municipio", "5102504")}</cMunFG>
         <tpImp>1</tpImp>
         <tpEmis>1</tpEmis>
         <cDV>{chave[-1]}</cDV>
         <tpAmb>{tp_amb}</tpAmb>
-        <finNFe>1</finNFe>
+        <finNFe>{invoice_data.get("finalidade", "1")}</finNFe>
         <indFinal>1</indFinal>
-        <indPres>1</indPres>
+        <indPres>{invoice_data.get("ind_presenca", "1")}</indPres>
         <procEmi>0</procEmi>
         <verProc>CortexERP-Pro-4.0</verProc>
       </ide>
@@ -212,7 +452,7 @@ def gerar_xml_nfe_400(
           <cPais>1058</cPais>
           <xPais>BRASIL</xPais>
         </enderDest>
-        <indIEDest>{contact.get("ie_indicator", "9")}</indIEDest>
+        <indIEDest>{invoice_data.get("ind_ie_dest") or contact.get("ie_indicator", "9")}</indIEDest>
       </dest>{dets_joined}
       <total>
         <ICMSTot>
@@ -233,17 +473,24 @@ def gerar_xml_nfe_400(
           <vIPIDevol>0.00</vIPIDevol>
           <vPIS>{v_pis:.2f}</vPIS>
           <vCOFINS>{v_cofins:.2f}</vCOFINS>
-          <vOutro>0.00</vOutro>
+          <vOutro>{v_outro:.2f}</vOutro>
           <vNF>{v_nf:.2f}</vNF>
         </ICMSTot>
       </total>
       <transp>
-        <modFrete>9</modFrete>
+        <modFrete>{mod_frete}</modFrete>
       </transp>
+      <pag>
+        <detPag>
+          <tPag>{forma_pag}</tPag>
+          <vPag>{v_nf:.2f}</vPag>
+        </detPag>
+      </pag>
       <infAdic>
-        <infCpl>Documento emitido por ME ou EPP optante pelo Simples Nacional. Nao gera direito a credito fiscal de IPI. Emitido via Cortex ERP Pro+.</infCpl>
+        <infCpl>{inf_cpl_final}</infCpl>
+        {inf_obs_fisco}
       </infAdic>
-    </infNFe>
+    </infNFe>{inf_supl_xml}
   </NFe>
   <protNFe versao="4.00">
     <infProt>
@@ -263,6 +510,9 @@ def gerar_xml_nfe_400(
 
 def gerar_html_danfe(company: dict, contact: dict, invoice: dict, items: list[dict]) -> str:
     """Gera o DANFE / DANFSE completo pronto para impressão/PDF em padrão SEFAZ."""
+    if "65" in str(invoice.get("model", "")):
+        return gerar_html_danfe_nfce(company, contact, invoice, items)
+
     chave = invoice["access_key"]
     chave_formatada = " ".join([chave[i:i+4] for i in range(0, len(chave), 4)])
     linhas_itens = ""

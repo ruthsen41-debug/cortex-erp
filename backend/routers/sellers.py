@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any
 
 try:
     from ..database import get_conn
@@ -42,7 +42,7 @@ def create_price_table(data: PriceTableCreate, current_user: Dict[str, Any] = De
     """, (company_id, data.name, data.discount_percent, data.markup_percent, data.active))
     ptid = cur.lastrowid
     conn.commit()
-    log_audit(conn, action="create", entity="price_tables", entity_id=ptid, new_data=data.dict(), user_id=current_user.get("id"))
+    log_audit(conn, action="create", entity="price_tables", entity_id=ptid, new_data=data.model_dump(), user_id=current_user.get("id"))
     conn.close()
     return {"status": "ok", "id": ptid, "name": data.name}
 
@@ -61,7 +61,7 @@ def update_price_table(ptid: int, data: PriceTableCreate, current_user: Dict[str
         conn.close()
         raise HTTPException(status_code=404, detail="Tabela de preço não encontrada.")
     conn.commit()
-    log_audit(conn, action="update", entity="price_tables", entity_id=ptid, new_data=data.dict(), user_id=current_user.get("id"))
+    log_audit(conn, action="update", entity="price_tables", entity_id=ptid, new_data=data.model_dump(), user_id=current_user.get("id"))
     conn.close()
     return {"status": "ok", "id": ptid}
 
@@ -104,7 +104,7 @@ def create_seller(data: SellerCreate, current_user: Dict[str, Any] = Depends(get
     """, (company_id, data.name, data.email, data.phone, data.commission_percent, data.active))
     sid = cur.lastrowid
     conn.commit()
-    log_audit(conn, action="create", entity="sellers", entity_id=sid, new_data=data.dict(), user_id=current_user.get("id"))
+    log_audit(conn, action="create", entity="sellers", entity_id=sid, new_data=data.model_dump(), user_id=current_user.get("id"))
     conn.close()
     return {"status": "ok", "id": sid, "name": data.name}
 
@@ -123,7 +123,7 @@ def update_seller(sid: int, data: SellerCreate, current_user: Dict[str, Any] = D
         conn.close()
         raise HTTPException(status_code=404, detail="Vendedor não encontrado.")
     conn.commit()
-    log_audit(conn, action="update", entity="sellers", entity_id=sid, new_data=data.dict(), user_id=current_user.get("id"))
+    log_audit(conn, action="update", entity="sellers", entity_id=sid, new_data=data.model_dump(), user_id=current_user.get("id"))
     conn.close()
     return {"status": "ok", "id": sid}
 

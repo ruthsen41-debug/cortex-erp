@@ -1,5 +1,5 @@
 from datetime import date
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import HTMLResponse
 from typing import Dict, Any
 
@@ -60,7 +60,7 @@ def save_service_order(req: ServiceOrderCreate, current_user: Dict[str, Any] = D
     ))
     oid = cur.lastrowid
     conn.commit()
-    log_audit(conn, action="create", entity="service_orders", entity_id=oid, new_data=req.dict(), user_id=current_user.get("id"))
+    log_audit(conn, action="create", entity="service_orders", entity_id=oid, new_data=req.model_dump(), user_id=current_user.get("id"))
     conn.close()
     return {"status": "ok", "id": oid, "os_number": next_os}
 
@@ -101,14 +101,15 @@ def bill_service_order(os_id: int, current_user: Dict[str, Any] = Depends(get_cu
 
 
 @router.get("/{os_id}/print", response_class=HTMLResponse)
-def print_service_order(os_id: int):
+def print_service_order(os_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
     conn = get_conn()
-    company = dict(conn.execute("SELECT * FROM companies LIMIT 1").fetchone())
+    company_id = current_user.get("company_id", 1)
+    company = dict(conn.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone())
     so = dict(conn.execute("""
         SELECT o.*, c.name as contact_name, c.document as contact_doc, c.phone as contact_phone
         FROM service_orders o LEFT JOIN contacts c ON c.id = o.contact_id
-        WHERE o.id = ?
-    """, (os_id,)).fetchone())
+        WHERE o.id = ? AND o.company_id = ?
+    """, (os_id, company_id)).fetchone())
     conn.close()
     return f"""<!DOCTYPE html>
     <html lang="pt-BR"><head><meta charset="UTF-8"><title>OS #{so['os_number']}</title>

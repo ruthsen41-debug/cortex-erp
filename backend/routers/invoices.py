@@ -20,7 +20,6 @@ except ImportError:
     from database import get_conn
     from auth import get_current_user, log_audit
     from utils import rows_to_dicts
-    from schemas.invoices import InvoiceEmitRequest, InvoiceCancelRequest, InvoiceCceRequest
     from fiscal_engine import gerar_chave_acesso_sefaz, validar_dados_fiscais, gerar_xml_nfe_400, gerar_html_danfe
     from services.fiscal_provider import FiscalProviderFactory
     from services.tax_calculator import TaxCalculator
@@ -31,7 +30,8 @@ router = APIRouter(prefix="/api/invoices", tags=["Emissor Fiscal"])
 @router.get("")
 def list_invoices(current_user: Dict[str, Any] = Depends(get_current_user)):
     conn = get_conn()
-    rows = rows_to_dicts(conn.execute("SELECT * FROM invoices ORDER BY id DESC").fetchall())
+    company_id = current_user.get("company_id", 1)
+    rows = rows_to_dicts(conn.execute("SELECT * FROM invoices WHERE company_id = ? ORDER BY id DESC", (company_id,)).fetchall())
     conn.close()
     for r in rows:
         r["total_amount"] = r.get("total_invoice", 0.0)
@@ -50,7 +50,17 @@ async def emit_invoice(req: Request, current_user: Dict[str, Any] = Depends(get_
         model_str = "NFSe"
 
     sale_id = data.get("sale_id")
-    nature_op = data.get("natureza_operacao") or data.get("nature_operation") or "VENDA DE MERCADORIA DENTRO DO ESTADO"
+    nature_op        = data.get("natureza_operacao") or data.get("nature_operation") or "VENDA DE MERCADORIA DENTRO DO ESTADO"
+    finalidade       = str(data.get("finalidade", "1"))
+    tipo_operacao    = str(data.get("tipo_operacao", "1"))
+    destino_operacao = str(data.get("destino_operacao", "1"))
+    ind_presenca     = str(data.get("ind_presenca", "1"))
+    ind_ie_dest      = str(data.get("ind_ie_dest", "9"))
+    modalidade_frete = str(data.get("modalidade_frete", "9"))
+    outras_despesas  = float(data.get("outras_despesas") or 0.0)
+    forma_pagamento  = str(data.get("forma_pagamento", "01"))
+    inf_adicionais   = str(data.get("informacoes_adicionais") or "")
+    informe_fisco    = str(data.get("informe_fisco") or "")
     company_id = current_user.get("company_id", 1)
 
     conn = get_conn()
@@ -58,11 +68,11 @@ async def emit_invoice(req: Request, current_user: Dict[str, Any] = Depends(get_
     company = dict(cur.execute("SELECT * FROM companies WHERE id = ? LIMIT 1", (company_id,)).fetchone())
 
     if sale_id:
-        sale = cur.execute("SELECT * FROM sales WHERE id = ?", (sale_id,)).fetchone()
+        sale = cur.execute("SELECT * FROM sales WHERE id = ? AND company_id = ?", (sale_id, company_id)).fetchone()
         if not sale:
             conn.close()
             raise HTTPException(status_code=404, detail="Venda não encontrada.")
-        contact_row = cur.execute("SELECT * FROM contacts WHERE id = ?", (sale["contact_id"] or 1,)).fetchone()
+        contact_row = cur.execute("SELECT * FROM contacts WHERE id = ? AND company_id = ?", (sale["contact_id"] or 1, company_id)).fetchone()
         contact = dict(contact_row) if contact_row else {}
         sale_items = rows_to_dicts(cur.execute("""
             SELECT si.*, p.ncm, p.cfop_internal as cfop, p.csosn_cst, p.origin, p.pis_cst, p.pis_rate, p.cofins_cst, p.cofins_rate, p.iss_rate
@@ -76,7 +86,7 @@ async def emit_invoice(req: Request, current_user: Dict[str, Any] = Depends(get_
         total_invoice = float(sale["total_amount"])
     else:
         contact_id = int(data.get("recipient_id") or data.get("contact_id") or 1)
-        contact_row = cur.execute("SELECT * FROM contacts WHERE id = ?", (contact_id,)).fetchone()
+        contact_row = cur.execute("SELECT * FROM contacts WHERE id = ? AND company_id = ?", (contact_id, company_id)).fetchone()
         contact = dict(contact_row) if contact_row else {}
         sale_items = data.get("items", [])
         total_products = round(sum(float(i.get("quantity", 1)) * float(i.get("unit_price", 0)) for i in sale_items), 2)
@@ -141,6 +151,16 @@ async def emit_invoice(req: Request, current_user: Dict[str, Any] = Depends(get_
         "access_key": chave,
         "protocol": "",
         "nature_operation": nature_op,
+        "finalidade": finalidade,
+        "tipo_operacao": tipo_operacao,
+        "destino_operacao": destino_operacao,
+        "ind_presenca": ind_presenca,
+        "ind_ie_dest": ind_ie_dest,
+        "modalidade_frete": modalidade_frete,
+        "forma_pagamento": forma_pagamento,
+        "outras_despesas": outras_despesas,
+        "informacoes_adicionais": inf_adicionais,
+        "informe_fisco": informe_fisco,
         "total_products": total_products,
         "total_discounts": total_discounts,
         "total_shipping": total_shipping,
@@ -155,22 +175,36 @@ async def emit_invoice(req: Request, current_user: Dict[str, Any] = Depends(get_
     provider = FiscalProviderFactory.get_provider(company)
     provider_res = await provider.emit_invoice(company, contact, sale_items, inv_meta)
 
-    protocolo = provider_res.get("protocol") or f"151{datetime.now().strftime('%y%m%d%H%M')}{random.randint(10,99)}"
-    xml_str = provider_res.get("xml_content") or gerar_xml_nfe_400(company, contact, sale_items, inv_meta)
+    emit_status = provider_res.get("status", "autorizada")
+    # Notas em processamento assíncrono (Focus NFe NF-e / Nuvem Fiscal) não têm protocolo ainda
+    protocolo = provider_res.get("protocol") or ""
+    fiscal_ref = provider_res.get("fiscal_ref") or ""
+    danfe_url = provider_res.get("danfe_url") or ""
+    xml_str = provider_res.get("xml_content") or (
+        "" if emit_status == "processando" else gerar_xml_nfe_400(company, contact, sale_items, inv_meta)
+    )
+
+    # Notas rejeitadas ou com erro não gravam na tabela
+    if emit_status in ("erro", "rejeitada"):
+        conn.close()
+        raise HTTPException(status_code=422, detail=provider_res.get("message", "Nota rejeitada pelo provedor fiscal."))
 
     cur.execute("""
         INSERT INTO invoices (
-            model, series, number, access_key, protocol, status, environment,
+            company_id, model, series, number, access_key, protocol, status, environment,
             nature_operation, sale_id, contact_id, recipient_name, recipient_doc,
             recipient_uf, total_products, total_discounts, total_shipping,
-            total_icms, total_pis, total_cofins, total_iss, total_invoice, items_json, xml_content
-        ) VALUES (?, ?, ?, ?, ?, 'autorizada', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            total_icms, total_pis, total_cofins, total_iss, total_invoice,
+            items_json, xml_content, fiscal_ref, danfe_url
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
+        company_id,
         model_str,
         serie,
         numero,
         chave,
         protocolo,
+        emit_status,
         company.get("ambiente_fiscal", "homologacao"),
         nature_op,
         sale_id,
@@ -188,36 +222,110 @@ async def emit_invoice(req: Request, current_user: Dict[str, Any] = Depends(get_
         total_invoice,
         json.dumps(sale_items, ensure_ascii=False),
         xml_str,
+        fiscal_ref,
+        danfe_url,
     ))
     inv_id = cur.lastrowid
     if sale_id:
         cur.execute("UPDATE sales SET invoice_id = ? WHERE id = ?", (inv_id, sale_id))
 
     conn.commit()
-    log_audit(conn, action="emit_invoice", entity="invoices", entity_id=inv_id, new_data={"number": numero, "chave": chave, "provider": company.get("motor_fiscal", "sefaz_direct")}, user_id=current_user.get("id"))
+    log_audit(conn, action="emit_invoice", entity="invoices", entity_id=inv_id, new_data={"number": numero, "chave": chave, "provider": company.get("motor_fiscal", "sefaz_direct"), "fiscal_ref": fiscal_ref}, user_id=current_user.get("id"))
     conn.close()
 
-    return {
+    ambiente = company.get("ambiente_fiscal", "homologacao")
+    motor = company.get("motor_fiscal", "sefaz_direto")
+
+    aviso = None
+    if ambiente == "homologacao":
+        if motor == "sefaz_direto":
+            aviso = (
+                "⚠️ NOTA EM HOMOLOGAÇÃO (XML LOCAL) — sem validade jurídica e não enviada à SEFAZ. "
+                "Para emissão real: (1) contrate Nuvem Fiscal ou Focus NFe, (2) configure as credenciais "
+                "em Empresa → Fiscal, (3) altere Ambiente Fiscal para 'Produção'."
+            )
+        else:
+            aviso = (
+                "⚠️ NOTA EM HOMOLOGAÇÃO — válida apenas para testes. "
+                "Altere Ambiente Fiscal para 'Produção' no cadastro da empresa para emissão com validade legal."
+            )
+
+    msg = (
+        f"{model_str} Nº {numero} em processamento — aguardando SEFAZ."
+        if emit_status == "processando"
+        else f"{model_str} Nº {numero} {'emitida em homologação' if ambiente == 'homologacao' else 'autorizada com sucesso'}!"
+    )
+
+    response = {
         "status": "ok",
         "invoice_id": inv_id,
         "number": numero,
         "access_key": chave,
         "protocol": protocolo,
+        "fiscal_ref": fiscal_ref,
+        "emit_status": emit_status,
+        "environment": ambiente,
         "provider": provider_res.get("provider", "sefaz_direct"),
-        "message": f"{model_str} Nº {numero} autorizada com sucesso!",
+        "message": msg,
+        "danfe_url": danfe_url,
     }
+    if aviso:
+        response["aviso"] = aviso
+    return response
 
 
-@router.get("/{invoice_id}/danfe", response_class=HTMLResponse)
-def view_danfe(invoice_id: int):
+@router.get("/{invoice_id}/status")
+async def check_invoice_status(invoice_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Consulta o status atual de uma nota em processamento assíncrono (Focus NFe / Nuvem Fiscal)."""
     conn = get_conn()
-    company = dict(conn.execute("SELECT * FROM companies LIMIT 1").fetchone())
-    inv = conn.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
+    company_id = current_user.get("company_id", 1)
+    inv = conn.execute(
+        "SELECT * FROM invoices WHERE id = ? AND company_id = ?", (invoice_id, company_id)
+    ).fetchone()
     if not inv:
         conn.close()
         raise HTTPException(status_code=404, detail="Nota Fiscal não encontrada.")
     inv_dict = dict(inv)
-    contact_row = conn.execute("SELECT * FROM contacts WHERE id = ?", (inv_dict.get("contact_id") or 1,)).fetchone()
+
+    if inv_dict.get("status") != "processando":
+        conn.close()
+        return {"invoice_id": invoice_id, "status": inv_dict.get("status"), "protocol": inv_dict.get("protocol", ""), "message": "Nota já tem status final."}
+
+    fiscal_ref = inv_dict.get("fiscal_ref", "")
+    if not fiscal_ref:
+        conn.close()
+        return {"invoice_id": invoice_id, "status": "processando", "message": "Nota sem referência de rastreamento — consulta manual necessária."}
+
+    company = dict(conn.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone())
+    provider = FiscalProviderFactory.get_provider(company)
+    result = await provider.consult_invoice(fiscal_ref, model=inv_dict.get("model", "NFe-55"))
+
+    new_status = result.get("status", "processando")
+    if new_status == "autorizada":
+        conn.execute(
+            "UPDATE invoices SET status = ?, protocol = ?, access_key = COALESCE(NULLIF(?, ''), access_key), danfe_url = ? WHERE id = ?",
+            (new_status, result.get("protocol", ""), result.get("access_key", ""), result.get("danfe_url", ""), invoice_id),
+        )
+        conn.commit()
+    elif new_status == "rejeitada":
+        conn.execute("UPDATE invoices SET status = ? WHERE id = ?", (new_status, invoice_id))
+        conn.commit()
+
+    conn.close()
+    return {"invoice_id": invoice_id, "status": new_status, "protocol": result.get("protocol", ""), "danfe_url": result.get("danfe_url", ""), "message": result.get("message", "")}
+
+
+@router.get("/{invoice_id}/danfe", response_class=HTMLResponse)
+def view_danfe(invoice_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    company = dict(conn.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone())
+    inv = conn.execute("SELECT * FROM invoices WHERE id = ? AND company_id = ?", (invoice_id, company_id)).fetchone()
+    if not inv:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Nota Fiscal não encontrada.")
+    inv_dict = dict(inv)
+    contact_row = conn.execute("SELECT * FROM contacts WHERE id = ? AND company_id = ?", (inv_dict.get("contact_id") or 1, company_id)).fetchone()
     contact = dict(contact_row) if contact_row else {}
     items = json.loads(inv_dict.get("items_json") or "[]")
     conn.close()
@@ -225,9 +333,9 @@ def view_danfe(invoice_id: int):
 
 
 @router.get("/{invoice_id}/xml")
-def download_invoice_xml(invoice_id: int):
+def download_invoice_xml(invoice_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
     conn = get_conn()
-    inv = conn.execute("SELECT number, access_key, xml_content FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
+    inv = conn.execute("SELECT number, access_key, xml_content FROM invoices WHERE id = ? AND company_id = ?", (invoice_id, current_user.get("company_id", 1))).fetchone()
     conn.close()
     if not inv:
         raise HTTPException(status_code=404, detail="Nota não encontrada.")
@@ -240,9 +348,9 @@ def download_invoice_xml(invoice_id: int):
 
 
 @router.get("/export-zip")
-def export_invoices_zip():
+def export_invoices_zip(current_user: Dict[str, Any] = Depends(get_current_user)):
     conn = get_conn()
-    rows = rows_to_dicts(conn.execute("SELECT number, model, access_key, xml_content FROM invoices WHERE status != 'cancelada'").fetchall())
+    rows = rows_to_dicts(conn.execute("SELECT number, model, access_key, xml_content FROM invoices WHERE status != 'cancelada' AND company_id = ?", (current_user.get("company_id", 1),)).fetchall())
     conn.close()
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -267,7 +375,7 @@ async def emit_carta_correcao(invoice_id: int, req: Request, current_user: Dict[
     cur = conn.cursor()
     company_id = current_user.get("company_id", 1)
     company = dict(cur.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone())
-    inv = cur.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
+    inv = cur.execute("SELECT * FROM invoices WHERE id = ? AND company_id = ?", (invoice_id, company_id)).fetchone()
     if not inv:
         conn.close()
         raise HTTPException(status_code=404, detail="Nota Fiscal não encontrada.")
@@ -294,7 +402,7 @@ async def cancel_invoice(invoice_id: int, req: Request, current_user: Dict[str, 
     cur = conn.cursor()
     company_id = current_user.get("company_id", 1)
     company = dict(cur.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone())
-    inv = cur.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,)).fetchone()
+    inv = cur.execute("SELECT * FROM invoices WHERE id = ? AND company_id = ?", (invoice_id, company_id)).fetchone()
     if not inv:
         conn.close()
         raise HTTPException(status_code=404, detail="Nota Fiscal não encontrada.")

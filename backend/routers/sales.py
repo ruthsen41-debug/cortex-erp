@@ -2,24 +2,24 @@ import secrets
 from datetime import date, timedelta
 from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.responses import HTMLResponse
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 
 try:
-    from ..database import get_conn, recalculate_bank_balances
+    from ..database import get_conn, begin_write, recalculate_bank_balances
     from ..auth import get_current_user, log_audit
     from ..utils import rows_to_dicts, add_months
     from ..schemas.sales import SaleCreate
 except ImportError:
-    from database import get_conn, recalculate_bank_balances
+    from database import get_conn, begin_write, recalculate_bank_balances
     from auth import get_current_user, log_audit
     from utils import rows_to_dicts, add_months
-    from schemas.sales import SaleCreate
 
 router = APIRouter(prefix="/api/sales", tags=["Vendas & Orçamentos"])
 
 
 def _process_sale_billing(conn, sale_id: int, immediate_paid: bool = False, company_id: int = 1):
     """Dá baixa automática no estoque dos produtos vendidos e gera as parcelas no Contas a Receber."""
+    begin_write(conn)
     cur = conn.cursor()
     row = cur.execute("""
         SELECT s.*, c.name as contact_name
@@ -34,7 +34,7 @@ def _process_sale_billing(conn, sale_id: int, immediate_paid: bool = False, comp
     # 1. Baixa estoque de produtos físicos
     for it in items:
         if it.get("product_id"):
-            prod = cur.execute("SELECT * FROM products WHERE id = ?", (it["product_id"],)).fetchone()
+            prod = cur.execute("SELECT * FROM products WHERE id = ? AND company_id = ?", (it["product_id"], company_id)).fetchone()
             if prod and prod["type"] == "produto":
                 prev_s = float(prod["stock_qty"] or 0.0)
                 new_s = prev_s - float(it["quantity"])
@@ -133,7 +133,7 @@ async def create_sale(req: Request, current_user: Dict[str, Any] = Depends(get_c
     seller_name = current_user.get("name", "Vendedor")
     commission_percent = 0.0
     if seller_id:
-        seller_row = cur.execute("SELECT name, commission_percent FROM sellers WHERE id = ?", (seller_id,)).fetchone()
+        seller_row = cur.execute("SELECT name, commission_percent FROM sellers WHERE id = ? AND company_id = ?", (seller_id, company_id)).fetchone()
         if seller_row:
             seller_name = seller_row["name"]
             commission_percent = float(seller_row["commission_percent"] or 0.0)
@@ -143,7 +143,7 @@ async def create_sale(req: Request, current_user: Dict[str, Any] = Depends(get_c
     pt_discount = 0.0
     pt_markup = 0.0
     if price_table_id:
-        pt_row = cur.execute("SELECT discount_percent, markup_percent FROM price_tables WHERE id = ?", (price_table_id,)).fetchone()
+        pt_row = cur.execute("SELECT discount_percent, markup_percent FROM price_tables WHERE id = ? AND company_id = ?", (price_table_id, company_id)).fetchone()
         if pt_row:
             pt_discount = float(pt_row["discount_percent"] or 0.0)
             pt_markup = float(pt_row["markup_percent"] or 0.0)
@@ -219,8 +219,9 @@ async def create_sale(req: Request, current_user: Dict[str, Any] = Depends(get_c
 @router.post("/{sale_id}/approve")
 def approve_sale(sale_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
     conn = get_conn()
+    begin_write(conn)
     cur = conn.cursor()
-    sale = cur.execute("SELECT * FROM sales WHERE id = ?", (sale_id,)).fetchone()
+    sale = cur.execute("SELECT * FROM sales WHERE id = ? AND company_id = ?", (sale_id, current_user.get("company_id", 1))).fetchone()
     if not sale:
         conn.close()
         raise HTTPException(status_code=404, detail="Venda/Orçamento não encontrado.")
@@ -232,7 +233,7 @@ def approve_sale(sale_id: int, current_user: Dict[str, Any] = Depends(get_curren
 
 
 @router.get("/{sale_id}/print", response_class=HTMLResponse)
-def print_sale_proposal(sale_id: int):
+def print_sale_proposal(sale_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
     conn = get_conn()
     cur = conn.cursor()
     sale = cur.execute("""
@@ -240,10 +241,10 @@ def print_sale_proposal(sale_id: int):
                comp.razao_social as comp_name, comp.cnpj as comp_cnpj, comp.telefone as comp_phone
         FROM sales s
         LEFT JOIN contacts c ON c.id = s.contact_id
-        CROSS JOIN companies comp
-        WHERE s.id = ?
+        JOIN companies comp ON comp.id = s.company_id
+        WHERE s.id = ? AND s.company_id = ?
         LIMIT 1
-    """, (sale_id,)).fetchone()
+    """, (sale_id, current_user.get("company_id", 1))).fetchone()
     if not sale:
         conn.close()
         raise HTTPException(status_code=404, detail="Pedido não encontrado.")

@@ -2,12 +2,12 @@ from fastapi import APIRouter, Request, HTTPException, Depends
 from typing import Dict, Any
 
 try:
-    from ..database import get_conn, recalculate_bank_balances
+    from ..database import get_conn, begin_write, recalculate_bank_balances
     from ..auth import get_current_user, log_audit
     from ..utils import rows_to_dicts
     from ..fiscal_engine import gerar_ofx_exemplo, parse_ofx_content
 except ImportError:
-    from database import get_conn, recalculate_bank_balances
+    from database import get_conn, begin_write, recalculate_bank_balances
     from auth import get_current_user, log_audit
     from utils import rows_to_dicts
     from fiscal_engine import gerar_ofx_exemplo, parse_ofx_content
@@ -111,11 +111,15 @@ async def reconcile_ofx_transaction(ofx_id: int, req: Request, current_user: Dic
         data = {}
 
     conn = get_conn()
+    begin_write(conn)
     cur = conn.cursor()
-    ofx = cur.execute("SELECT * FROM ofx_transactions WHERE id = ?", (ofx_id,)).fetchone()
+    ofx = cur.execute("SELECT * FROM ofx_transactions WHERE id = ? AND company_id = ?", (ofx_id, current_user.get("company_id", 1))).fetchone()
     if not ofx:
         conn.close()
         raise HTTPException(status_code=404, detail="Transação OFX não encontrada.")
+    if ofx["status"] == "conciliado":
+        conn.close()
+        raise HTTPException(status_code=400, detail="Esta transação OFX já foi conciliada.")
 
     amt = float(ofx["amount"])
     abs_amt = abs(amt)
@@ -124,11 +128,14 @@ async def reconcile_ofx_transaction(ofx_id: int, req: Request, current_user: Dic
     matched_id = data.get("matched_entry_id") or ofx["matched_entry_id"]
 
     if matched_id:
+        if not cur.execute("SELECT 1 FROM financial_entries WHERE id = ? AND company_id = ?", (matched_id, current_user.get("company_id", 1))).fetchone():
+            conn.close()
+            raise HTTPException(status_code=404, detail="Lançamento a conciliar não encontrado.")
         cur.execute("""
             UPDATE financial_entries
             SET paid_amount = amount, status = 'pago', bank_account_id = ?
-            WHERE id = ?
-        """, (ofx["bank_account_id"], matched_id))
+            WHERE id = ? AND company_id = ?
+        """, (ofx["bank_account_id"], matched_id, current_user.get("company_id", 1)))
         cur.execute("""
             INSERT INTO financial_payments (entry_id, bank_account_id, payment_date, principal_paid, total_cash_flow, payment_method, notes)
             VALUES (?, ?, ?, ?, ?, 'Conciliação OFX', ?)
@@ -136,11 +143,11 @@ async def reconcile_ofx_transaction(ofx_id: int, req: Request, current_user: Dic
     else:
         cur.execute("""
             INSERT INTO financial_entries (
-                type, description, category_id, cost_center_id, bank_account_id,
+                company_id, type, description, category_id, cost_center_id, bank_account_id,
                 payment_method, competence_date, due_date, amount, paid_amount,
                 status, document_number, origin_type, origin_id
-            ) VALUES (?, ?, ?, 1, ?, 'Conciliação OFX', ?, ?, ?, ?, 'pago', ?, 'ofx', ?)
-        """, (e_type, ofx["memo"], cat_id, ofx["bank_account_id"], ofx["posted_date"], ofx["posted_date"], abs_amt, abs_amt, ofx["fitid"], ofx_id))
+            ) VALUES (?, ?, ?, ?, 1, ?, 'Conciliação OFX', ?, ?, ?, ?, 'pago', ?, 'ofx', ?)
+        """, (current_user.get("company_id", 1), e_type, ofx["memo"], cat_id, ofx["bank_account_id"], ofx["posted_date"], ofx["posted_date"], abs_amt, abs_amt, ofx["fitid"], ofx_id))
         new_entry_id = cur.lastrowid
         cur.execute("""
             INSERT INTO financial_payments (entry_id, bank_account_id, payment_date, principal_paid, total_cash_flow, payment_method, notes)
@@ -148,7 +155,7 @@ async def reconcile_ofx_transaction(ofx_id: int, req: Request, current_user: Dic
         """, (new_entry_id, ofx["bank_account_id"], ofx["posted_date"], abs_amt, abs_amt))
         matched_id = new_entry_id
 
-    cur.execute("UPDATE ofx_transactions SET status = 'conciliado', matched_entry_id = ? WHERE id = ?", (matched_id, ofx_id))
+    cur.execute("UPDATE ofx_transactions SET status = 'conciliado', matched_entry_id = ? WHERE id = ? AND company_id = ?", (matched_id, ofx_id, current_user.get("company_id", 1)))
     recalculate_bank_balances(conn)
     log_audit(conn, action="reconcile", entity="ofx_transactions", entity_id=ofx_id, user_id=current_user.get("id"))
     conn.close()

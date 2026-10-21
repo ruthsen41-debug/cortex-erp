@@ -2,19 +2,19 @@ import os
 import io
 import sqlite3
 import tempfile
-from datetime import datetime, date
+from datetime import datetime
 from fastapi import APIRouter, HTTPException, Depends, Response
 from typing import Dict, Any, Optional
 
 try:
     from ..config import DB_PATH
-    from ..database import get_conn
+    from ..database import get_conn, is_postgres
     from ..auth import get_current_user, log_audit
     from ..utils import rows_to_dicts
 except ImportError:
     from config import DB_PATH
-    from database import get_conn
-    from auth import get_current_user, log_audit
+    from database import get_conn, is_postgres
+    from auth import get_current_user
     from utils import rows_to_dicts
 
 router = APIRouter(prefix="/api/system", tags=["Sistema, Backup & Monitoramento"])
@@ -64,6 +64,12 @@ def download_database_backup(current_user: Dict[str, Any] = Depends(get_current_
     """
     if current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Apenas administradores podem realizar backup do banco.")
+
+    if is_postgres():
+        raise HTTPException(
+            status_code=501,
+            detail="Backup pela API só existe para SQLite. Com PostgreSQL use pg_dump (veja o README).",
+        )
 
     source_conn = sqlite3.connect(str(DB_PATH))
     dest_bytes = io.BytesIO()

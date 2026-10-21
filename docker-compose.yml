@@ -9,11 +9,10 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
+    env_file:
+      - .env
     environment:
       - ENVIRONMENT=production
-      - SECRET_KEY=cortex-erp-enterprise-secret-key-prod-2026
-      - ASAAS_ENVIRONMENT=sandbox
-      - ASAAS_API_KEY=
     volumes:
       - ./data:/app/data
     healthcheck:
@@ -21,3 +20,51 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+    depends_on:
+      db:
+        condition: service_healthy
+        required: false
+
+  # PostgreSQL opcional: docker compose --profile postgres up -d
+  # e defina DATABASE_URL=postgresql://cortex:${POSTGRES_PASSWORD}@db:5432/cortex no .env
+  db:
+    image: postgres:16-alpine
+    profiles: ["postgres"]
+    container_name: cortex_erp_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cortex
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+      POSTGRES_DB: cortex
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cortex -d cortex"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Proxy Reverso Caddy com HTTPS automático (Let's Encrypt / TLS local):
+  # docker compose --profile proxy up -d
+  proxy:
+    image: caddy:2-alpine
+    profiles: ["proxy"]
+    container_name: cortex_erp_proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+      - ACME_EMAIL=${ACME_EMAIL:-admin@cortex.com.br}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - cortex-erp
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

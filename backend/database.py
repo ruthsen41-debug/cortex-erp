@@ -1,7 +1,9 @@
+import os
+import secrets
 import sqlite3
 import json
 from pathlib import Path
-from datetime import datetime, date, timedelta
+from datetime import date, timedelta
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
@@ -9,16 +11,50 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DATA_DIR / "cortex_erp.db"
 
 
+def _database_url() -> str:
+    return os.environ.get("DATABASE_URL", "").strip()
+
+
+def is_postgres() -> bool:
+    return _database_url().startswith(("postgres://", "postgresql://"))
+
+
 def get_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
+    if is_postgres():
+        from .db_compat import PgConnection
+
+        return PgConnection(_database_url())
+    conn = sqlite3.connect(str(DB_PATH), check_same_thread=False, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
     return conn
 
 
+def begin_write(conn: sqlite3.Connection) -> None:
+    """Abre uma transação de escrita imediata (trava de escrita do SQLite).
+
+    Use antes de ler-calcular-gravar (estoque, status) para que requisições
+    concorrentes sejam serializadas em vez de gravarem sobre valores defasados.
+    Se já houver transação aberta, ela já detém a trava e nada é feito.
+    """
+    if is_postgres():
+        # Serializa escritores com um advisory lock de transacao (equivale ao BEGIN IMMEDIATE).
+        conn.execute("SELECT pg_advisory_xact_lock(1)")
+        return
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+
+
 def init_db() -> None:
     conn = get_conn()
     cur = conn.cursor()
+
+    if is_postgres():
+        # SQLite aceita ROUND(real, n); no PostgreSQL so existe para numeric.
+        cur.execute("""
+        CREATE OR REPLACE FUNCTION round(double precision, integer) RETURNS double precision
+        AS 'SELECT round($1::numeric, $2)::double precision' LANGUAGE SQL IMMUTABLE
+        """)
 
     # 1. Empresas / Configurações Fiscais e Certificado Digital A1
     cur.execute("""
@@ -379,6 +415,7 @@ def init_db() -> None:
     cur.execute("""
     CREATE TABLE IF NOT EXISTS invoices (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
         model TEXT NOT NULL, -- NFe-55, NFCe-65, NFSe
         series INTEGER DEFAULT 1,
         number INTEGER NOT NULL,
@@ -404,6 +441,8 @@ def init_db() -> None:
         xml_content TEXT DEFAULT '',
         correction_letter TEXT DEFAULT '',
         cancel_reason TEXT DEFAULT '',
+        fiscal_ref TEXT DEFAULT '',
+        danfe_url TEXT DEFAULT '',
         issued_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
     """)
@@ -713,7 +752,50 @@ def init_db() -> None:
     );
     """)
 
-    # 35. Notificações do Sistema
+    # 35. Orçamentos e Pedidos de Venda
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS quotes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        quote_number INTEGER NOT NULL,
+        type TEXT DEFAULT 'orcamento', -- orcamento, pedido
+        status TEXT DEFAULT 'rascunho', -- rascunho, enviado, aprovado, rejeitado, faturado, cancelado
+        contact_id INTEGER,
+        seller_id INTEGER,
+        valid_until TEXT,
+        payment_terms TEXT DEFAULT 'À Vista',
+        subtotal REAL DEFAULT 0.0,
+        discount_amount REAL DEFAULT 0.0,
+        shipping_amount REAL DEFAULT 0.0,
+        total_amount REAL DEFAULT 0.0,
+        notes TEXT DEFAULT '',
+        internal_notes TEXT DEFAULT '',
+        sale_id INTEGER,
+        invoice_id INTEGER,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (contact_id) REFERENCES contacts(id)
+    );
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS quote_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        quote_id INTEGER NOT NULL,
+        product_id INTEGER,
+        product_name TEXT NOT NULL,
+        sku TEXT DEFAULT '',
+        quantity REAL NOT NULL,
+        unit TEXT DEFAULT 'UN',
+        unit_price REAL NOT NULL,
+        discount REAL DEFAULT 0.0,
+        total_price REAL NOT NULL,
+        notes TEXT DEFAULT '',
+        FOREIGN KEY (quote_id) REFERENCES quotes(id) ON DELETE CASCADE,
+        FOREIGN KEY (product_id) REFERENCES products(id)
+    );
+    """)
+
+    # 36. Notificações do Sistema
     cur.execute("""
     CREATE TABLE IF NOT EXISTS notifications (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -775,6 +857,15 @@ def init_db() -> None:
         """)
         conn.commit()
 
+    # Empresa padrão e dados de demonstração primeiro: users/api_keys referenciam companies(id).
+    seed_initial_data(conn)
+
+    # Token do portal do contador (a empresa padrão só existe após o seed acima em banco novo).
+    row = cur.execute("SELECT accountant_token FROM companies WHERE id = 1").fetchone()
+    if row and not row["accountant_token"]:
+        cur.execute("UPDATE companies SET accountant_token = ? WHERE id = 1", (secrets.token_urlsafe(16),))
+        conn.commit()
+
     # Seed Admin User se não existir
     admin_exists = cur.execute("SELECT id FROM users WHERE email = 'admin@cortex.com.br'").fetchone()
     if not admin_exists:
@@ -809,7 +900,6 @@ def init_db() -> None:
         """)
         conn.commit()
 
-    seed_initial_data(conn)
     conn.close()
 
 
@@ -849,6 +939,8 @@ def migrate_db(conn: sqlite3.Connection) -> None:
             cur.execute("ALTER TABLE sales ADD COLUMN price_table_id INTEGER")
         if "token_access" not in sales_cols:
             cur.execute("ALTER TABLE sales ADD COLUMN token_access TEXT")
+        for r in cur.execute("SELECT id FROM sales WHERE token_access IS NULL OR length(token_access) < 16").fetchall():
+            cur.execute("UPDATE sales SET token_access = ? WHERE id = ?", (secrets.token_urlsafe(16), r["id"]))
     except Exception:
         pass
 
@@ -877,6 +969,10 @@ def migrate_db(conn: sqlite3.Connection) -> None:
             cur.execute("ALTER TABLE invoices ADD COLUMN cce_protocol TEXT DEFAULT ''")
         if "cancel_protocol" not in inv_cols:
             cur.execute("ALTER TABLE invoices ADD COLUMN cancel_protocol TEXT DEFAULT ''")
+        if "fiscal_ref" not in inv_cols:
+            cur.execute("ALTER TABLE invoices ADD COLUMN fiscal_ref TEXT DEFAULT ''")
+        if "danfe_url" not in inv_cols:
+            cur.execute("ALTER TABLE invoices ADD COLUMN danfe_url TEXT DEFAULT ''")
     except Exception:
         pass
 
@@ -886,14 +982,30 @@ def migrate_db(conn: sqlite3.Connection) -> None:
             cur.execute("ALTER TABLE companies ADD COLUMN accountant_token TEXT")
         if "accountant_email" not in comp_cols:
             cur.execute("ALTER TABLE companies ADD COLUMN accountant_email TEXT DEFAULT ''")
+        if "csc_id" not in comp_cols:
+            cur.execute("ALTER TABLE companies ADD COLUMN csc_id TEXT DEFAULT ''")
+        if "csc_token" not in comp_cols:
+            cur.execute("ALTER TABLE companies ADD COLUMN csc_token TEXT DEFAULT ''")
 
         # Seed accountant token if empty
         row = cur.execute("SELECT accountant_token FROM companies WHERE id = 1").fetchone()
         if row and not row["accountant_token"]:
-            import secrets
             cur.execute("UPDATE companies SET accountant_token = ? WHERE id = 1", (secrets.token_urlsafe(16),))
     except Exception:
         pass
+
+    # Tabela de tokens de recuperação de senha
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        token TEXT UNIQUE NOT NULL,
+        expires_at TEXT NOT NULL,
+        used INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+    """)
 
     conn.commit()
 

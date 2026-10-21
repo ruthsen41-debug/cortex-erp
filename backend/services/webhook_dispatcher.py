@@ -2,6 +2,9 @@ import hmac
 import hashlib
 import json
 import httpx
+import ipaddress
+import socket
+from urllib.parse import urlparse
 from datetime import datetime
 from typing import Dict, Any, List
 
@@ -9,6 +12,21 @@ try:
     from ..database import get_conn
 except ImportError:
     from database import get_conn
+
+
+def validate_target_url(url: str) -> None:
+    """Rejeita destinos que não sejam http(s) público (loopback, rede privada, link-local, metadados de nuvem)."""
+    parsed = urlparse(url or "")
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise ValueError("A URL do webhook deve usar http:// ou https://.")
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80))
+    except socket.gaierror:
+        raise ValueError("Não foi possível resolver o host da URL do webhook.")
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if not ip.is_global:
+            raise ValueError("A URL do webhook não pode apontar para endereços internos ou privados.")
 
 
 class WebhookDispatcher:
@@ -56,7 +74,8 @@ class WebhookDispatcher:
             status_code = 0
             success = 0
             try:
-                async with httpx.AsyncClient(timeout=5.0) as client:
+                validate_target_url(target_url)
+                async with httpx.AsyncClient(timeout=5.0, follow_redirects=False) as client:
                     resp = await client.post(target_url, content=payload_bytes, headers=headers)
                     status_code = resp.status_code
                     success = 1 if 200 <= status_code < 300 else 0

@@ -1,161 +1,172 @@
 <!DOCTYPE html>
-<html lang="pt-BR" class="h-full">
+<html lang="pt-BR" class="h-full dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="theme-color" content="#2563eb" />
+  <meta name="theme-color" content="#060914" />
   <link rel="manifest" href="/static/manifest.json" />
   <title>Cortex ERP Pro+ | Gestão Empresarial, Financeira & Emissor Fiscal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <script>
+    // Tema escuro por padrão; só vai para o claro se o usuário escolheu antes (evita "flash").
+    try { if (localStorage.getItem('cortex_theme') === 'light') document.documentElement.classList.remove('dark'); } catch (e) {}
+  </script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
   <script>
     tailwind.config = {
       darkMode: 'class',
       theme: {
         extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            display: ['Space Grotesk', 'Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
+          },
           colors: {
-            brand: {
-              50: '#eff6ff',
-              100: '#dbeafe',
-              500: '#3b82f6',
-              600: '#2563eb',
-              700: '#1d4ed8',
-              900: '#1e3a8a',
-            }
+            brand: { 50: '#eff6ff', 100: '#dbeafe', 500: '#3b82f6', 600: '#2563eb', 700: '#1d4ed8', 900: '#1e3a8a' }
           }
         }
       }
     }
   </script>
-  <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-    body { font-family: 'Inter', sans-serif; }
-    .nav-item.active {
-      background: linear-gradient(90deg, #2563eb 0%, #1d4ed8 100%);
-      color: #ffffff !important;
-      font-weight: 600;
-      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.28);
-    }
-    .custom-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
-    .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
-    .dark .custom-scroll::-webkit-scrollbar-thumb { background: #334155; }
-  </style>
+  <link rel="stylesheet" href="/static/theme.css" />
 </head>
-<body class="h-full bg-slate-50 text-slate-800 dark:bg-slate-950 dark:text-slate-100 flex overflow-hidden">
+<body class="h-full flex overflow-hidden">
 
   <!-- SIDEBAR DE NAVEGAÇÃO -->
-  <aside class="w-64 bg-slate-900 text-slate-300 flex flex-col shrink-0 border-r border-slate-800 select-none">
-    <div class="p-4 flex items-center gap-3 border-b border-slate-800">
-      <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-extrabold text-lg shadow-lg">
-        CX
-      </div>
+  <aside class="cx-sidebar w-64 text-slate-300 flex flex-col shrink-0 select-none">
+    <div class="p-4 flex items-center gap-3 border-b border-white/5">
+      <div class="cx-logo">CX</div>
       <div>
-        <div class="text-white font-bold text-base tracking-tight flex items-center gap-1.5">
-          Cortex ERP <span class="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.5 rounded-full font-semibold">PRO+</span>
+        <div class="text-white font-display font-bold text-base tracking-tight flex items-center gap-1.5">
+          Cortex ERP
+          <span class="font-mono text-[9px] tracking-widest bg-cyan-400/10 text-cyan-300 border border-cyan-400/30 px-1.5 py-0.5 rounded-md">PRO+</span>
         </div>
-        <div class="text-[11px] text-slate-400">Gestão & Emissor Fiscal IA</div>
+        <div class="font-mono text-[10px] tracking-wider text-slate-500 uppercase">Gestão · Fiscal · IA</div>
       </div>
     </div>
 
     <nav class="flex-1 overflow-y-auto custom-scroll p-3 space-y-1 text-sm">
-      <div class="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Visão & Inteligência</div>
-      <button onclick="switchTab('dashboard')" id="nav-dashboard" class="nav-item active w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-800/70 transition">
-        <i data-lucide="layout-dashboard" class="w-4 h-4"></i>
-        <span>Visão Geral & CFO IA</span>
+      <div class="cx-section px-3 py-1 font-bold uppercase">Visão &amp; Inteligência</div>
+      <button onclick="switchTab('dashboard')" id="nav-dashboard" class="nav-item active w-full flex items-center gap-3 px-3 py-2.5">
+        <i data-lucide="layout-dashboard" class="w-4 h-4 text-cyan-300"></i>
+        <span>Visão Geral &amp; CFO IA</span>
       </button>
 
-      <div class="pt-3 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Financeiro Completo</div>
-      <button onclick="switchTab('receivables')" id="nav-receivables" class="nav-item w-full flex items-center justify-between px-3 py-2.5 rounded-xl hover:bg-slate-800/70 transition">
-        <span class="flex items-center gap-3"><i data-lucide="arrow-up-right-circle" class="w-4 h-4 text-emerald-400"></i><span>Contas a Receber</span></span>
+      <div class="cx-section pt-4 px-3 py-1 font-bold uppercase">Financeiro</div>
+      <button onclick="switchTab('receivables')" id="nav-receivables" class="nav-item w-full flex items-center justify-between px-3 py-2.5">
+        <span class="flex items-center gap-3"><i data-lucide="arrow-up-right" class="w-4 h-4 text-emerald-400"></i><span>Contas a Receber</span></span>
       </button>
-      <button onclick="switchTab('payables')" id="nav-payables" class="nav-item w-full flex items-center justify-between px-3 py-2.5 rounded-xl hover:bg-slate-800/70 transition">
-        <span class="flex items-center gap-3"><i data-lucide="arrow-down-left-circle" class="w-4 h-4 text-rose-400"></i><span>Contas a Pagar</span></span>
+      <button onclick="switchTab('payables')" id="nav-payables" class="nav-item w-full flex items-center justify-between px-3 py-2.5">
+        <span class="flex items-center gap-3"><i data-lucide="arrow-down-left" class="w-4 h-4 text-rose-400"></i><span>Contas a Pagar</span></span>
       </button>
-      <button onclick="switchTab('ofx')" id="nav-ofx" class="nav-item w-full flex items-center justify-between px-3 py-2.5 rounded-xl hover:bg-slate-800/70 transition">
+      <button onclick="switchTab('ofx')" id="nav-ofx" class="nav-item w-full flex items-center justify-between px-3 py-2.5">
         <span class="flex items-center gap-3"><i data-lucide="file-check-2" class="w-4 h-4 text-amber-400"></i><span>Conciliação OFX</span></span>
-        <span id="badge-ofx" class="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded-full">0</span>
+        <span id="badge-ofx" class="font-mono text-[10px] bg-amber-400/15 text-amber-300 border border-amber-400/25 px-1.5 py-0.5 rounded-md">0</span>
       </button>
 
-      <div class="pt-3 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Comercial & Operações</div>
-      <button onclick="switchTab('crm')" id="nav-crm" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-800/70 transition">
-        <i data-lucide="kanban" class="w-4 h-4 text-purple-400"></i>
+      <div class="cx-section pt-4 px-3 py-1 font-bold uppercase">Comercial &amp; Operações</div>
+      <button onclick="switchTab('crm')" id="nav-crm" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
+        <i data-lucide="kanban" class="w-4 h-4 text-fuchsia-400"></i>
         <span>CRM Funil Kanban</span>
       </button>
-      <button onclick="switchTab('sales')" id="nav-sales" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-800/70 transition">
+      <button onclick="switchTab('sales')" id="nav-sales" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
         <i data-lucide="shopping-bag" class="w-4 h-4 text-blue-400"></i>
-        <span>Vendas & Orçamentos</span>
+        <span>Vendas &amp; Orçamentos</span>
       </button>
-      <button onclick="switchTab('pdv')" id="nav-pdv" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-800/70 transition">
+      <button onclick="switchTab('pdv')" id="nav-pdv" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
         <i data-lucide="monitor-smartphone" class="w-4 h-4 text-cyan-400"></i>
         <span>PDV Frente de Caixa</span>
       </button>
-      <button onclick="switchTab('os')" id="nav-os" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-800/70 transition">
+      <button onclick="switchTab('os')" id="nav-os" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
         <i data-lucide="wrench" class="w-4 h-4 text-orange-400"></i>
-        <span>Ordens de Serviço & Contratos</span>
+        <span>Ordens de Serviço &amp; Contratos</span>
       </button>
 
-      <div class="pt-3 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Estoque, Compras & Fiscal</div>
-      <button onclick="switchTab('inventory')" id="nav-inventory" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-800/70 transition">
+      <div class="cx-section pt-4 px-3 py-1 font-bold uppercase">Estoque, Compras &amp; Fiscal</div>
+      <button onclick="switchTab('inventory')" id="nav-inventory" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
         <i data-lucide="package-search" class="w-4 h-4 text-indigo-400"></i>
-        <span>Estoque, XML & Cadastros</span>
+        <span>Estoque, XML &amp; Cadastros</span>
       </button>
-      <button onclick="switchTab('invoices')" id="nav-invoices" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-800/70 transition">
+      <button onclick="switchTab('quotes')" id="nav-quotes" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
+        <i data-lucide="file-text" class="w-4 h-4 text-yellow-400"></i>
+        <span>Pedidos &amp; Orçamentos</span>
+      </button>
+      <button onclick="switchTab('invoices')" id="nav-invoices" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
         <i data-lucide="receipt" class="w-4 h-4 text-emerald-400"></i>
         <span>Emissor NF-e / NFS-e</span>
       </button>
-      <button onclick="switchTab('reports')" id="nav-reports" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-800/70 transition">
+      <button onclick="switchTab('reports')" id="nav-reports" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
         <i data-lucide="bar-chart-4" class="w-4 h-4 text-pink-400"></i>
-        <span>DRE & Config. Certificado</span>
+        <span>DRE &amp; Relatórios</span>
+      </button>
+      <button onclick="switchTab('settings')" id="nav-settings" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
+        <i data-lucide="building-2" class="w-4 h-4 text-orange-400"></i>
+        <span>Configurações da Empresa</span>
       </button>
     </nav>
 
-    <div class="p-3 border-t border-slate-800 text-xs text-slate-400 flex items-center justify-between">
-      <div class="truncate">
-        <div id="sidebar-company-name" class="font-semibold text-slate-200 truncate">Cortex ERP Solutions</div>
-        <div id="sidebar-company-env" class="text-[10px] text-emerald-400">● SEFAZ Ativo</div>
+    <div class="p-3 border-t border-white/5 text-xs text-slate-400 flex items-center gap-2">
+      <div class="min-w-0 flex-1">
+        <div id="sidebar-company-name" class="font-semibold text-slate-100 truncate">Cortex ERP Solutions</div>
+        <div id="sidebar-company-env" class="font-mono text-[10px] text-emerald-400 flex items-center gap-1.5">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399] animate-pulse"></span> SEFAZ ATIVO
+        </div>
       </div>
-      <button onclick="toggleDarkMode()" title="Alternar Tema Claro/Escuro" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200">
+      <button id="btn-logout" onclick="cortexLogout()" title="Sair" class="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 transition">
+        <i data-lucide="log-out" class="w-4 h-4"></i>
+      </button>
+      <button onclick="toggleDarkMode()" title="Alternar Tema Claro/Escuro" class="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-slate-200 transition">
         <i data-lucide="moon" class="w-4 h-4"></i>
       </button>
     </div>
   </aside>
 
   <!-- ÁREA PRINCIPAL -->
-  <div class="flex-1 flex flex-col h-full overflow-hidden">
+  <div class="flex-1 flex flex-col h-full overflow-hidden min-w-0">
 
     <!-- BARRA DE COMANDO POR IA + ATALHOS RÁPIDOS -->
-    <header class="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 py-3 flex flex-wrap items-center justify-between gap-3 shrink-0">
-      <div class="flex-1 min-w-[300px] max-w-2xl flex items-center gap-2 bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5">
-        <i data-lucide="sparkles" class="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0"></i>
-        <input
-          id="ai-quick-input"
-          type="text"
-          placeholder="Comando Mágico IA: ex. 'Despesa R$ 380 combustível hoje no Banco Inter pago' ou 'Receita R$ 2400 consultoria 2x'"
-          class="bg-transparent w-full text-xs md:text-sm focus:outline-none text-slate-800 dark:text-slate-100"
-          onkeydown="if(event.key==='Enter') executeAiLaunch()"
-        />
-        <button onclick="executeAiLaunch()" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg shrink-0 transition">
-          Lançar IA
-        </button>
+    <header class="cx-header px-6 py-3 flex flex-wrap items-center justify-between gap-3 shrink-0">
+      <div class="flex items-center gap-5 flex-1 min-w-[300px]">
+        <div class="hidden xl:block shrink-0">
+          <div class="cx-crumb">Cortex / <span id="page-crumb">módulo</span></div>
+          <div id="page-title" class="cx-page-title">Visão Geral</div>
+        </div>
+        <div class="cx-command flex-1 max-w-2xl flex items-center gap-2 rounded-xl px-3 py-1.5">
+          <i data-lucide="sparkles" class="w-4 h-4 text-cyan-300 shrink-0"></i>
+          <input
+            id="ai-quick-input"
+            type="text"
+            placeholder="Comando IA: 'Despesa R$ 380 combustível hoje no Banco Inter pago'"
+            class="bg-transparent w-full text-xs md:text-sm focus:outline-none"
+            onkeydown="if(event.key==='Enter') executeAiLaunch()"
+          />
+          <button onclick="executeAiLaunch()" class="bg-blue-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg shrink-0">
+            Lançar IA
+          </button>
+        </div>
       </div>
 
       <div class="flex items-center gap-2">
-        <button onclick="openFinancialModal('receita')" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 shadow-sm transition">
-          <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i> Nova Receita
+        <button onclick="openFinancialModal('receita')" class="bg-emerald-600 text-white text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5">
+          <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i> Receita
         </button>
-        <button onclick="openFinancialModal('despesa')" class="bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 shadow-sm transition">
-          <i data-lucide="minus-circle" class="w-3.5 h-3.5"></i> Nova Despesa
+        <button onclick="openFinancialModal('despesa')" class="bg-rose-600 text-white text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5">
+          <i data-lucide="minus-circle" class="w-3.5 h-3.5"></i> Despesa
         </button>
-        <button onclick="openSaleModal('venda')" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 shadow-sm transition">
-          <i data-lucide="shopping-cart" class="w-3.5 h-3.5"></i> Nova Venda
+        <button onclick="openSaleModal('venda')" class="bg-blue-600 text-white text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5">
+          <i data-lucide="shopping-cart" class="w-3.5 h-3.5"></i> Venda
         </button>
-        <button onclick="openEmitInvoiceModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 shadow-sm transition">
-          <i data-lucide="file-Check" class="w-3.5 h-3.5"></i> Emitir NF-e
+        <button onclick="openEmitInvoiceModal()" class="bg-indigo-600 text-white text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5">
+          <i data-lucide="file-check-2" class="w-3.5 h-3.5"></i> NF-e
         </button>
-        <button onclick="openNotificationsModal()" title="Central de Notificações" class="relative p-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition">
+        <button onclick="openNotificationsModal()" title="Central de Notificações" class="cx-iconbtn relative p-2 rounded-xl">
           <i data-lucide="bell" class="w-4 h-4"></i>
-          <span id="notif-badge" class="absolute -top-1 -right-1 bg-rose-500 text-white text-[9px] font-extrabold w-4 h-4 rounded-full flex items-center justify-center">0</span>
+          <span id="notif-badge" class="absolute -top-1 -right-1 bg-gradient-to-br from-rose-500 to-fuchsia-500 text-white text-[9px] font-extrabold w-4 h-4 rounded-full flex items-center justify-center shadow-[0_0_10px_rgba(244,63,94,.8)]">0</span>
         </button>
       </div>
     </header>
@@ -165,14 +176,16 @@
   </div>
 
   <!-- CONTAINER DE MODAIS DINÂMICOS -->
-  <div id="modal-backdrop" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 hidden items-center justify-center p-4">
-    <div id="modal-box" class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto custom-scroll p-6"></div>
+  <div id="modal-backdrop" class="fixed inset-0 z-50 hidden items-center justify-center p-4">
+    <div id="modal-box" class="w-full max-w-3xl max-h-[90vh] overflow-y-auto custom-scroll p-6"></div>
   </div>
 
   <!-- TOAST DE NOTIFICAÇÕES -->
   <div id="toast-container" class="fixed bottom-5 right-5 z-50 space-y-2"></div>
 
+  <script src="/static/auth.js"></script>
   <script src="/static/app.js"></script>
+  <script src="/static/theme.js"></script>
   <script>
     // PWA Service Worker Registration
     if ('serviceWorker' in navigator) {
