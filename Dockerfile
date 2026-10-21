@@ -25,7 +25,6 @@ COPY frontend /app/frontend
 COPY alembic /app/alembic
 COPY alembic.ini /app/alembic.ini
 COPY entrypoint.sh /app/entrypoint.sh
-COPY data /app/data
 
 # Cria diretórios e permissões para usuário não-root
 RUN mkdir -p /app/data && \
