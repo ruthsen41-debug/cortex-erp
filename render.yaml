@@ -74,9 +74,8 @@ services:
       - key: SMTP_FROM
         value: noreply@cortex.com.br
 
-      # Preenchido automaticamente após o deploy (URL pública do serviço Render)
       - key: APP_BASE_URL
-        value: ""        # ex.: https://cortex-erp.onrender.com
+        value: https://cortex-erp.onrender.com
 
       # ── Fiscal ───────────────────────────────────────────────────────────────
       - key: NUVEM_FISCAL_CLIENT_ID
