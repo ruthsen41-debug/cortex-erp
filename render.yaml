@@ -1,0 +1,105 @@
+# render.yaml — Blueprint do Cortex ERP para Render.com
+# Documentação: https://render.com/docs/blueprint-spec
+
+databases:
+  - name: cortex-erp-db
+    databaseName: cortex
+    user: cortex
+    plan: free          # troque para "starter" ou superior em produção
+
+services:
+  - type: web
+    name: cortex-erp
+    env: docker         # usa o Dockerfile na raiz do repositório
+    plan: free          # troque para "starter" ou superior em produção
+    healthCheckPath: /api/health
+    # Disco persistente: necessário para armazenar data/.jwt_secret quando JWT_SECRET_KEY
+    # não for definido via variável de ambiente. Em produção, defina JWT_SECRET_KEY
+    # explicitamente e remova este bloco (discos não estão disponíveis no plano Free).
+    # disk:
+    #   name: cortex-data
+    #   mountPath: /app/data
+    #   sizeGB: 1
+    envVars:
+      # ── Obrigatórias ─────────────────────────────────────────────────────────
+      - key: JWT_SECRET_KEY
+        generateValue: true           # Render gera e armazena automaticamente
+
+      - key: DATABASE_URL
+        fromDatabase:
+          name: cortex-erp-db
+          property: connectionString  # injeta a URL do PostgreSQL gerenciado
+
+      - key: ENVIRONMENT
+        value: production
+
+      # ── Proxy / Segurança ────────────────────────────────────────────────────
+      # Render senta um proxy reverso na frente — habilitar para rate-limit funcionar
+      # com o IP real do cliente (header X-Forwarded-For confiável).
+      - key: TRUSTED_PROXY
+        value: "1"
+
+      - key: CORS_ORIGINS
+        value: ""   # deixe vazio (frontend servido pelo próprio backend)
+                    # ou preencha com a URL do frontend separada por vírgula
+
+      # ── Webhook de pagamentos ────────────────────────────────────────────────
+      - key: PAYMENT_WEBHOOK_TOKEN
+        generateValue: true
+
+      # ── Asaas (cobranças, Boleto/Pix) ───────────────────────────────────────
+      - key: ASAAS_ENVIRONMENT
+        value: sandbox   # troque para "production" quando estiver pronto
+
+      - key: ASAAS_API_KEY
+        value: ""        # preencha no painel do Render após o deploy
+
+      # ── IA / Gemini ──────────────────────────────────────────────────────────
+      - key: GEMINI_API_KEY
+        value: ""        # opcional; sem ela o CFO virtual usa análise local
+
+      # ── E-mail (recuperação de senha) ────────────────────────────────────────
+      - key: SMTP_HOST
+        value: ""        # sem SMTP o link de reset é retornado na API (modo dev)
+
+      - key: SMTP_PORT
+        value: "587"
+
+      - key: SMTP_USER
+        value: ""
+
+      - key: SMTP_PASSWORD
+        value: ""
+
+      - key: SMTP_FROM
+        value: noreply@cortex.com.br
+
+      # Preenchido automaticamente após o deploy (URL pública do serviço Render)
+      - key: APP_BASE_URL
+        value: ""        # ex.: https://cortex-erp.onrender.com
+
+      # ── Fiscal ───────────────────────────────────────────────────────────────
+      - key: NUVEM_FISCAL_CLIENT_ID
+        value: ""
+
+      - key: NUVEM_FISCAL_CLIENT_SECRET
+        value: ""
+
+      - key: FOCUSNFE_TOKEN
+        value: ""
+
+      # ── Observabilidade ──────────────────────────────────────────────────────
+      - key: LOG_FORMAT
+        value: json      # logs estruturados para o Render Log Stream
+
+      - key: LOG_LEVEL
+        value: INFO
+
+      - key: RATE_LIMIT_API
+        value: "300"
+
+      - key: RATE_LIMIT_LOGIN
+        value: "10"
+
+      - key: METRICS_TOKEN
+        value: ""        # opcional; protege o endpoint /metrics
