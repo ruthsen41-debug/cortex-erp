@@ -114,6 +114,7 @@ async function preloadLookups() {
 // Navigation & Tab Switching
 async function switchTab(tab) {
   currentTab = tab;
+  if (typeof closeSidebar === 'function') closeSidebar();
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   const activeNav = document.getElementById(`nav-${tab}`);
   if (activeNav) activeNav.classList.add('active');
