@@ -115,6 +115,7 @@ def init_db() -> None:
         current_balance REAL DEFAULT 0.0,
         color TEXT DEFAULT '#2563eb',
         active INTEGER DEFAULT 1,
+        pluggy_account_id TEXT DEFAULT '',
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
     """)
@@ -286,6 +287,19 @@ def init_db() -> None:
     """)
 
     # 10. Conciliação Bancária OFX
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS bank_integrations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        item_id TEXT NOT NULL,
+        connector_name TEXT NOT NULL DEFAULT '',
+        status TEXT DEFAULT 'connected',
+        last_sync TEXT,
+        active INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
     cur.execute("""
     CREATE TABLE IF NOT EXISTS ofx_transactions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1004,6 +1018,27 @@ def migrate_db(conn: sqlite3.Connection) -> None:
         used INTEGER DEFAULT 0,
         created_at TEXT DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+    """)
+
+    # Open Finance (Pluggy) — banco já existente
+    try:
+        ba_cols = [c["name"] for c in cur.execute("PRAGMA table_info(bank_accounts)").fetchall()]
+        if "pluggy_account_id" not in ba_cols:
+            cur.execute("ALTER TABLE bank_accounts ADD COLUMN pluggy_account_id TEXT DEFAULT ''")
+    except Exception:
+        pass
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS bank_integrations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        item_id TEXT NOT NULL,
+        connector_name TEXT NOT NULL DEFAULT '',
+        status TEXT DEFAULT 'connected',
+        last_sync TEXT,
+        active INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
     """)
 

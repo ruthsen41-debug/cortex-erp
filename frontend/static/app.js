@@ -820,71 +820,184 @@ async function submitTransfer(e) {
 }
 
 // ==============================================================================
-// 3. CONCILIAÇÃO BANCÁRIA OFX
+// 3. CONCILIAÇÃO BANCÁRIA OFX + OPEN FINANCE
 // ==============================================================================
+
+let _ofxCurrentFilter = 'pendente';
+
 async function renderOfx(container) {
   try {
-    const res = await fetch('/api/ofx');
-    const items = await res.json();
-    const countBadge = document.getElementById('badge-ofx');
-    if (countBadge) countBadge.innerText = items.filter(i => !i.reconciled).length;
+    const [listRes, summaryRes, ofRes] = await Promise.all([
+      fetch('/api/ofx'),
+      fetch('/api/ofx/reconciliation-summary'),
+      fetch('/api/open-finance/status'),
+    ]);
+    const items = await listRes.json();
+    const summary = summaryRes.ok ? await summaryRes.json() : { accounts: [], integrations: [] };
+    const ofStatus = ofRes.ok ? await ofRes.json() : { configured: false, integrations: [] };
 
-    let rowsHtml = items.map(it => `
-      <tr class="border-b border-slate-100 dark:border-slate-800 text-xs">
-        <td class="py-3 px-4 font-medium">${formatDate(it.date)}</td>
-        <td class="py-3 px-4 font-bold text-slate-800 dark:text-slate-100">${it.memo || it.payee || 'Lançamento OFX'}</td>
-        <td class="py-3 px-4 font-bold ${it.amount >= 0 ? 'text-emerald-600' : 'text-rose-600'}">${formatCurrency(it.amount)}</td>
-        <td class="py-3 px-4">
-          <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${it.reconciled ? 'bg-emerald-500/20 text-emerald-600' : 'bg-amber-500/20 text-amber-600'}">
-            ${it.reconciled ? 'CONCILIADO' : 'PENDENTE'}
-          </span>
-        </td>
-        <td class="py-3 px-4 text-right">
-          ${!it.reconciled ? `
-            <button onclick="reconcileOfx(${it.id})" class="bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1 rounded-lg font-semibold text-[11px] transition">
-              Conciliar
-            </button>
-          ` : '<span class="text-slate-400 text-[11px]">✓ Pronto</span>'}
-        </td>
-      </tr>
-    `).join('');
+    const pending    = items.filter(i => i.status === 'pendente');
+    const reconciled = items.filter(i => i.status === 'conciliado');
+    const ignored    = items.filter(i => i.status === 'ignorado');
+
+    const countBadge = document.getElementById('badge-ofx');
+    if (countBadge) countBadge.innerText = pending.length;
+
+    const totalBalance    = (summary.accounts || []).reduce((s, a) => s + (a.current_balance || 0), 0);
+    const totalPendingAmt = (summary.accounts || []).reduce((s, a) => s + (a.pending_amount || 0), 0);
+    const lastImport      = (summary.accounts || []).reduce((best, a) => (!best || a.last_import > best) ? a.last_import : best, null);
+
+    const filtered = _ofxCurrentFilter === 'pendente' ? pending :
+                     _ofxCurrentFilter === 'conciliado' ? reconciled : ignored;
+    const rowsHtml = filtered.map(_buildOfxRow).join('');
 
     container.innerHTML = `
-      <div class="flex items-center justify-between mb-4">
+      <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
         <div>
           <h2 class="text-lg font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-            <i data-lucide="file-check-2" class="w-5 h-5 text-amber-500"></i> Conciliação OFX
+            <i data-lucide="landmark" class="w-5 h-5 text-amber-500"></i> Conciliação Bancária
           </h2>
-          <p class="text-xs text-slate-400">Importe extratos OFX de qualquer banco e faça a conciliação automática</p>
+          <p class="text-xs text-slate-400">Reconcilie extratos OFX e conecte seus bancos via Open Finance (Pluggy)</p>
         </div>
-        <div class="flex gap-2">
+        <div class="flex gap-2 flex-wrap">
           <input type="file" id="ofx-file-input" accept=".ofx,.txt" class="hidden" onchange="uploadOfxFile(event)">
-          <button onclick="document.getElementById('ofx-file-input').click()" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-1.5 shadow-sm transition">
-            <i data-lucide="upload" class="w-4 h-4"></i> Importar Extrato OFX
+          <button onclick="document.getElementById('ofx-file-input').click()" class="bg-slate-700 hover:bg-slate-600 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-1.5 transition">
+            <i data-lucide="upload" class="w-4 h-4"></i> Importar OFX
+          </button>
+          <button onclick="autoReconcileAll()" class="bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-1.5 transition">
+            <i data-lucide="zap" class="w-4 h-4"></i> Auto-Conciliar
           </button>
         </div>
       </div>
 
-      <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <div class="cx-card p-4 rounded-2xl">
+          <div class="text-[10px] uppercase tracking-wider text-slate-400 mb-1">Saldo Contábil Total</div>
+          <div class="text-xl font-bold font-mono ${totalBalance >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${formatCurrency(totalBalance)}</div>
+          <div class="text-[10px] text-slate-500 mt-1">${(summary.accounts || []).length} conta(s) ativa(s)</div>
+        </div>
+        <div class="cx-card p-4 rounded-2xl">
+          <div class="text-[10px] uppercase tracking-wider text-slate-400 mb-1">Pendente Conciliação</div>
+          <div class="text-xl font-bold font-mono text-amber-400">${formatCurrency(totalPendingAmt)}</div>
+          <div class="text-[10px] text-slate-500 mt-1">${pending.length} transação(ões)</div>
+        </div>
+        <div class="cx-card p-4 rounded-2xl">
+          <div class="text-[10px] uppercase tracking-wider text-slate-400 mb-1">Conciliadas</div>
+          <div class="text-xl font-bold font-mono text-emerald-400">${reconciled.length}</div>
+          <div class="text-[10px] text-slate-500 mt-1">de ${items.length} importadas</div>
+        </div>
+        <div class="cx-card p-4 rounded-2xl">
+          <div class="text-[10px] uppercase tracking-wider text-slate-400 mb-1">Última Importação</div>
+          <div class="text-sm font-bold text-slate-200">${lastImport ? formatDate(lastImport) : '—'}</div>
+          <div class="text-[10px] text-slate-500 mt-1">extrato mais recente</div>
+        </div>
+      </div>
+
+      ${_buildOpenFinanceSection(ofStatus)}
+
+      <div class="cx-card rounded-2xl overflow-hidden">
+        <div class="flex items-center gap-1 p-3 border-b border-white/5">
+          <button onclick="setOfxFilter('pendente')" class="px-3 py-1.5 rounded-lg text-xs font-semibold transition ${_ofxCurrentFilter === 'pendente' ? 'bg-amber-500/20 text-amber-300' : 'text-slate-400 hover:text-slate-200'}">
+            Pendentes <span class="font-mono">(${pending.length})</span>
+          </button>
+          <button onclick="setOfxFilter('conciliado')" class="px-3 py-1.5 rounded-lg text-xs font-semibold transition ${_ofxCurrentFilter === 'conciliado' ? 'bg-emerald-500/20 text-emerald-300' : 'text-slate-400 hover:text-slate-200'}">
+            Conciliadas <span class="font-mono">(${reconciled.length})</span>
+          </button>
+          <button onclick="setOfxFilter('ignorado')" class="px-3 py-1.5 rounded-lg text-xs font-semibold transition ${_ofxCurrentFilter === 'ignorado' ? 'bg-slate-500/20 text-slate-300' : 'text-slate-400 hover:text-slate-200'}">
+            Ignoradas <span class="font-mono">(${ignored.length})</span>
+          </button>
+        </div>
         <table class="w-full text-left border-collapse">
           <thead>
-            <tr class="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+            <tr class="bg-slate-800/60 text-[11px] font-bold uppercase tracking-wider text-slate-500">
               <th class="py-3 px-4">Data</th>
-              <th class="py-3 px-4">Histórico / Descrição</th>
-              <th class="py-3 px-4">Valor Extrato</th>
-              <th class="py-3 px-4">Status</th>
-              <th class="py-3 px-4 text-right">Ação</th>
+              <th class="py-3 px-4">Histórico</th>
+              <th class="py-3 px-4">Conta</th>
+              <th class="py-3 px-4">Valor</th>
+              <th class="py-3 px-4">Sugestão</th>
+              <th class="py-3 px-4 text-right">Ações</th>
             </tr>
           </thead>
           <tbody>
-            ${rowsHtml || `<tr><td colspan="5" class="py-8 text-center text-slate-400 text-xs">Nenhum extrato OFX importado.</td></tr>`}
+            ${rowsHtml || `<tr><td colspan="6" class="py-8 text-center text-slate-500 text-xs">Nenhuma transação ${_ofxCurrentFilter === 'pendente' ? 'pendente' : _ofxCurrentFilter === 'conciliado' ? 'conciliada' : 'ignorada'}.</td></tr>`}
           </tbody>
         </table>
       </div>
     `;
+    lucide.createIcons();
   } catch (e) {
-    container.innerHTML = `<div class="p-6 text-rose-500">Erro ao carregar OFX: ${e.message}</div>`;
+    container.innerHTML = `<div class="p-6 text-rose-500">Erro ao carregar conciliação: ${e.message}</div>`;
   }
+}
+
+function _buildOfxRow(it) {
+  const isCredit = it.amount >= 0;
+  let actionsHtml = '';
+  if (it.status === 'pendente') {
+    actionsHtml = `
+      <div class="flex items-center justify-end gap-1">
+        <button onclick="openReconcileModal(${it.id})" class="bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1 rounded-lg text-[11px] font-semibold transition">Conciliar</button>
+        <button onclick="quickReconcileOfx(${it.id})" title="Criar lançamento automaticamente" class="bg-slate-600 hover:bg-slate-500 text-white px-2 py-1 rounded-lg text-[11px] transition"><i data-lucide="plus" class="w-3 h-3"></i></button>
+        <button onclick="ignoreOfxTx(${it.id})" title="Ignorar" class="bg-slate-700 hover:bg-slate-600 text-slate-300 px-2 py-1 rounded-lg text-[11px] transition"><i data-lucide="eye-off" class="w-3 h-3"></i></button>
+      </div>`;
+  } else if (it.status === 'conciliado') {
+    actionsHtml = `<span class="text-emerald-400 text-[11px] flex items-center justify-end gap-1"><i data-lucide="check-circle" class="w-3 h-3"></i> Conciliado</span>`;
+  } else {
+    actionsHtml = `<span class="text-slate-500 text-[11px] flex items-center justify-end gap-1"><i data-lucide="eye-off" class="w-3 h-3"></i> Ignorado</span>`;
+  }
+  const suggestionHtml = it.matched_entry_description
+    ? `<span class="text-xs text-blue-400 truncate max-w-[150px] block" title="${it.matched_entry_description}">${it.matched_entry_description}</span>`
+    : it.suggested_category_name
+    ? `<span class="text-xs text-slate-500">${it.suggested_category_name}</span>`
+    : '<span class="text-xs text-slate-600">—</span>';
+  return `
+    <tr class="border-b border-white/5 hover:bg-white/5 text-xs transition">
+      <td class="py-3 px-4 font-mono text-slate-400">${formatDate(it.date)}</td>
+      <td class="py-3 px-4 font-medium text-slate-100"><div class="truncate max-w-[200px]" title="${it.memo || ''}">${it.memo || 'Lançamento OFX'}</div></td>
+      <td class="py-3 px-4 text-slate-400">${it.bank_name || '—'}</td>
+      <td class="py-3 px-4 font-bold font-mono ${isCredit ? 'text-emerald-400' : 'text-rose-400'}">${formatCurrency(it.amount)}</td>
+      <td class="py-3 px-4">${suggestionHtml}</td>
+      <td class="py-3 px-4">${actionsHtml}</td>
+    </tr>`;
+}
+
+function _buildOpenFinanceSection(ofStatus) {
+  const integrations = ofStatus.integrations || [];
+  const intHtml = integrations.map(i => `
+    <div class="flex items-center gap-2 bg-slate-800/50 border border-white/10 rounded-xl px-3 py-2">
+      <div class="w-2 h-2 rounded-full flex-shrink-0 ${i.status === 'synced' ? 'bg-emerald-400' : 'bg-amber-400'}"></div>
+      <div class="flex-1 min-w-0">
+        <div class="text-xs font-semibold text-slate-200">${i.connector_name}</div>
+        <div class="text-[10px] text-slate-500">${i.last_sync ? 'Sync: ' + formatDate(i.last_sync) : 'Nunca sincronizado'}</div>
+      </div>
+      <button onclick="syncOpenFinance('${i.item_id}')" title="Sincronizar" class="bg-blue-600/80 hover:bg-blue-600 text-white p-1.5 rounded-lg transition"><i data-lucide="refresh-cw" class="w-3 h-3"></i></button>
+      <button onclick="disconnectOpenFinance('${i.item_id}')" title="Remover" class="bg-rose-600/80 hover:bg-rose-600 text-white p-1.5 rounded-lg transition"><i data-lucide="unlink" class="w-3 h-3"></i></button>
+    </div>`).join('');
+
+  const connectBtn = ofStatus.configured
+    ? `<button onclick="connectOpenFinance()" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 transition"><i data-lucide="plug" class="w-3.5 h-3.5"></i> Conectar Banco</button>`
+    : `<span class="text-[11px] text-amber-400 flex items-center gap-1"><i data-lucide="alert-triangle" class="w-3.5 h-3.5"></i> Configure PLUGGY_CLIENT_ID nas variáveis de ambiente</span>`;
+
+  return `
+    <div class="cx-card rounded-2xl p-4 mb-4">
+      <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div class="flex items-center gap-2">
+          <i data-lucide="wifi" class="w-4 h-4 text-blue-400"></i>
+          <span class="font-semibold text-sm text-slate-100">Open Finance</span>
+          <span class="text-[10px] font-mono bg-blue-500/15 text-blue-300 border border-blue-400/30 px-1.5 py-0.5 rounded-md">via Pluggy</span>
+          ${ofStatus.configured ? '<span class="text-[10px] text-emerald-400">● Ativo</span>' : '<span class="text-[10px] text-amber-400">● Não configurado</span>'}
+        </div>
+        ${connectBtn}
+      </div>
+      ${intHtml
+        ? `<div class="flex flex-wrap gap-2">${intHtml}</div>`
+        : `<p class="text-xs text-slate-500">Conecte seus bancos para sincronizar extratos automaticamente — sem precisar baixar arquivos OFX.</p>`}
+    </div>`;
+}
+
+function setOfxFilter(filter) {
+  _ofxCurrentFilter = filter;
+  renderOfx(document.getElementById('main-content'));
 }
 
 async function uploadOfxFile(e) {
@@ -895,11 +1008,12 @@ async function uploadOfxFile(e) {
   showToast('Enviando extrato OFX...', 'info');
   try {
     const res = await fetch('/api/ofx/import', { method: 'POST', body: formData });
+    const data = await res.json();
     if (res.ok) {
-      showToast('Extrato OFX importado com sucesso!', 'success');
+      showToast(data.message || 'Extrato OFX importado!', 'success');
       renderOfx(document.getElementById('main-content'));
     } else {
-      showToast('Erro ao importar arquivo OFX.', 'error');
+      showToast(data.detail || 'Erro ao importar.', 'error');
     }
   } catch (err) {
     showToast('Falha no upload.', 'error');
@@ -908,16 +1022,156 @@ async function uploadOfxFile(e) {
 
 async function reconcileOfx(ofxId) {
   try {
-    const res = await fetch(`/api/ofx/${ofxId}/reconcile`, { method: 'POST' });
-    if (res.ok) {
-      showToast('Transação OFX conciliada!', 'success');
-      renderOfx(document.getElementById('main-content'));
-    } else {
-      showToast('Não foi possível conciliar automaticamente.', 'error');
+    const res = await fetch(`/api/ofx/${ofxId}/reconcile`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}' });
+    const data = await res.json();
+    if (res.ok) { showToast(data.message || 'Conciliado!', 'success'); renderOfx(document.getElementById('main-content')); }
+    else showToast(data.detail || 'Erro.', 'error');
+  } catch (e) { showToast('Falha na requisição.', 'error'); }
+}
+
+async function quickReconcileOfx(ofxId) {
+  try {
+    const res = await fetch(`/api/ofx/${ofxId}/reconcile`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}' });
+    const data = await res.json();
+    if (res.ok) { showToast(data.message || 'Lançamento criado e conciliado!', 'success'); renderOfx(document.getElementById('main-content')); }
+    else showToast(data.detail || 'Erro.', 'error');
+  } catch (e) { showToast('Erro.', 'error'); }
+}
+
+async function autoReconcileAll() {
+  showToast('Conciliando automaticamente...', 'info');
+  try {
+    const res = await fetch('/api/ofx/auto-reconcile-all', { method: 'POST' });
+    const data = await res.json();
+    if (res.ok) { showToast(data.message || `${data.reconciled} conciliadas!`, 'success'); renderOfx(document.getElementById('main-content')); }
+    else showToast(data.detail || 'Erro.', 'error');
+  } catch (e) { showToast('Erro.', 'error'); }
+}
+
+async function ignoreOfxTx(ofxId) {
+  try {
+    const res = await fetch(`/api/ofx/${ofxId}/ignore`, { method: 'DELETE' });
+    const data = await res.json();
+    if (res.ok) { showToast('Transação ignorada.', 'info'); renderOfx(document.getElementById('main-content')); }
+    else showToast(data.detail || 'Erro.', 'error');
+  } catch (e) { showToast('Erro.', 'error'); }
+}
+
+async function openReconcileModal(ofxId) {
+  try {
+    const res = await fetch(`/api/ofx/match-suggestions/${ofxId}`);
+    const { ofx, suggestions } = await res.json();
+    const isCredit = ofx.amount >= 0;
+
+    const sugRows = suggestions.map(s => `
+      <tr class="border-b border-white/5 hover:bg-white/5 cursor-pointer text-xs" onclick="confirmReconcile(${ofxId}, ${s.id})">
+        <td class="py-2 px-3 font-mono text-slate-400">${formatDate(s.due_date)}</td>
+        <td class="py-2 px-3 font-medium text-slate-100 max-w-[180px]"><div class="truncate">${s.description}</div></td>
+        <td class="py-2 px-3 font-bold font-mono ${s.type === 'receita' ? 'text-emerald-400' : 'text-rose-400'}">${formatCurrency(s.amount)}</td>
+        <td class="py-2 px-3 text-slate-400">${s.category_name || '—'}</td>
+        <td class="py-2 px-3">
+          <div class="flex items-center gap-1">
+            <div class="h-1.5 rounded-full bg-slate-700 w-14 overflow-hidden">
+              <div class="h-full rounded-full ${s.score >= 0.75 ? 'bg-emerald-500' : s.score >= 0.5 ? 'bg-amber-500' : 'bg-rose-500'}" style="width:${Math.round(s.score*100)}%"></div>
+            </div>
+            <span class="text-[10px] font-mono text-slate-400">${Math.round(s.score*100)}%</span>
+          </div>
+        </td>
+        <td class="py-2 px-3 text-right"><button class="bg-blue-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-lg">Usar</button></td>
+      </tr>`).join('');
+
+    openModal(`
+      <div class="space-y-4">
+        <h3 class="text-base font-bold text-slate-100 flex items-center gap-2">
+          <i data-lucide="git-merge" class="w-4 h-4 text-amber-400"></i> Conciliar Transação
+        </h3>
+        <div class="bg-slate-800/60 rounded-xl p-4 border border-white/10 flex items-center justify-between gap-4">
+          <div>
+            <div class="font-semibold text-slate-100">${ofx.memo || 'Lançamento OFX'}</div>
+            <div class="text-xs text-slate-400">${formatDate(ofx.posted_date)} · ${ofx.bank_name || 'Banco'}</div>
+          </div>
+          <div class="text-xl font-bold font-mono flex-shrink-0 ${isCredit ? 'text-emerald-400' : 'text-rose-400'}">${formatCurrency(ofx.amount)}</div>
+        </div>
+        <div>
+          <div class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Lançamentos Sugeridos</div>
+          ${suggestions.length > 0 ? `
+          <div class="bg-slate-900 rounded-xl overflow-hidden border border-white/10">
+            <table class="w-full">
+              <thead><tr class="text-[10px] font-bold uppercase text-slate-500 border-b border-white/10">
+                <th class="py-2 px-3">Vencimento</th><th class="py-2 px-3">Descrição</th><th class="py-2 px-3">Valor</th>
+                <th class="py-2 px-3">Categoria</th><th class="py-2 px-3">Match</th><th class="py-2 px-3"></th>
+              </tr></thead>
+              <tbody>${sugRows}</tbody>
+            </table>
+          </div>` : `<p class="text-xs text-slate-500 text-center py-4 border border-white/10 rounded-xl">Nenhum lançamento pendente com valor compatível encontrado.</p>`}
+        </div>
+        <div class="flex items-center justify-between pt-2 border-t border-white/10">
+          <span class="text-xs text-slate-500">Sem correspondência? Crie um lançamento automaticamente:</span>
+          <button onclick="quickReconcileOfx(${ofxId}); closeModal();" class="bg-slate-600 hover:bg-slate-500 text-white text-xs font-semibold px-4 py-2 rounded-xl transition">
+            Criar Lançamento
+          </button>
+        </div>
+      </div>`);
+    lucide.createIcons();
+  } catch (e) { showToast('Erro ao carregar sugestões.', 'error'); }
+}
+
+async function confirmReconcile(ofxId, entryId) {
+  closeModal();
+  try {
+    const res = await fetch(`/api/ofx/${ofxId}/reconcile`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ matched_entry_id: entryId })
+    });
+    const data = await res.json();
+    if (res.ok) { showToast(data.message || 'Conciliado!', 'success'); renderOfx(document.getElementById('main-content')); }
+    else showToast(data.detail || 'Erro.', 'error');
+  } catch (e) { showToast('Erro.', 'error'); }
+}
+
+async function connectOpenFinance() {
+  try {
+    const res = await fetch('/api/open-finance/connect-token', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) { showToast(data.detail || 'Erro ao iniciar conexão.', 'error'); return; }
+    if (!window.PluggyConnect) {
+      await new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://cdn.pluggy.ai/pluggy-connect/v2/pluggy-connect.js';
+        s.onload = resolve; s.onerror = reject;
+        document.head.appendChild(s);
+      });
     }
-  } catch (e) {
-    showToast('Falha na requisição.', 'error');
-  }
+    const widget = new window.PluggyConnect({
+      connectToken: data.connect_token,
+      onSuccess: async ({ item }) => {
+        const r = await fetch('/api/open-finance/connect', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ itemId: item.id }) });
+        const d = await r.json();
+        if (r.ok) { showToast(d.message || 'Banco conectado!', 'success'); renderOfx(document.getElementById('main-content')); }
+      },
+      onError: (err) => showToast('Erro ao conectar: ' + (err.message || err), 'error'),
+    });
+    widget.open();
+  } catch (e) { showToast('Falha ao iniciar Open Finance.', 'error'); }
+}
+
+async function syncOpenFinance(itemId) {
+  showToast('Sincronizando...', 'info');
+  try {
+    const res = await fetch(`/api/open-finance/sync/${itemId}`, { method: 'POST' });
+    const data = await res.json();
+    if (res.ok) { showToast(data.message || 'Sincronizado!', 'success'); renderOfx(document.getElementById('main-content')); }
+    else showToast(data.detail || 'Erro na sincronização.', 'error');
+  } catch (e) { showToast('Erro.', 'error'); }
+}
+
+async function disconnectOpenFinance(itemId) {
+  if (!confirm('Remover conexão com este banco?')) return;
+  try {
+    const res = await fetch(`/api/open-finance/disconnect/${itemId}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (res.ok) { showToast(data.message || 'Conexão removida.', 'info'); renderOfx(document.getElementById('main-content')); }
+  } catch (e) { showToast('Erro.', 'error'); }
 }
 
 // ==============================================================================

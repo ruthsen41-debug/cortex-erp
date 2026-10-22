@@ -30,6 +30,7 @@ from .webhooks import router as webhooks_router
 from .notifications import router as notifications_router
 from .system import router as system_router
 from .quotes import router as quotes_router
+from .open_finance import router as open_finance_router
 
 all_routers = [
     auth_router,
@@ -64,4 +65,5 @@ all_routers = [
     notifications_router,
     system_router,
     quotes_router,
+    open_finance_router,
 ]
