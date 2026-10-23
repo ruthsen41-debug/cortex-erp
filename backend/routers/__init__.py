@@ -31,6 +31,7 @@ from .notifications import router as notifications_router
 from .system import router as system_router
 from .quotes import router as quotes_router
 from .open_finance import router as open_finance_router
+from .bb import router as bb_router
 
 all_routers = [
     auth_router,
@@ -66,4 +67,5 @@ all_routers = [
     system_router,
     quotes_router,
     open_finance_router,
+    bb_router,
 ]

@@ -102,3 +102,28 @@ services:
 
       - key: METRICS_TOKEN
         value: ""        # opcional; protege o endpoint /metrics
+
+      # ── Banco do Brasil (ISV — modelo multi-empresa) ─────────────────────────
+      # Obtenha em developers.bb.com.br → Aplicação → Credenciais
+      - key: BB_CLIENT_ID
+        value: ""        # preencha no painel do Render
+
+      - key: BB_CLIENT_SECRET
+        value: ""        # preencha no painel do Render
+
+      - key: BB_APP_KEY
+        value: ""        # Developer Application Key (chave do app no portal BB)
+
+      - key: BB_SANDBOX
+        value: "true"    # mude para "false" quando homologar em produção
+
+      # mTLS — gere com GET /api/bb/gerar-csr, envie ao portal BB e salve o .crt
+      - key: BB_CERT_PATH
+        value: ""        # caminho do certificado assinado pelo BB (.crt)
+
+      - key: BB_KEY_PATH
+        value: ""        # caminho da chave privada gerada pelo CSR (.key)
+
+      # URL base do ERP — usada como redirect_uri no fluxo OAuth
+      - key: ERP_BASE_URL
+        value: https://cortex-erp.onrender.com

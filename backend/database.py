@@ -824,6 +824,21 @@ def init_db() -> None:
     );
     """)
 
+    # Tokens OAuth Banco do Brasil por empresa (modelo ISV)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS bb_oauth_tokens (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL UNIQUE,
+        access_token TEXT NOT NULL,
+        refresh_token TEXT DEFAULT '',
+        expires_at TEXT NOT NULL,
+        expires_ts INTEGER NOT NULL DEFAULT 0,
+        scope TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
     conn.commit()
     migrate_db(conn)
 
@@ -1028,6 +1043,33 @@ def migrate_db(conn: sqlite3.Connection) -> None:
             cur.execute("ALTER TABLE bank_accounts ADD COLUMN pluggy_account_id TEXT DEFAULT ''")
     except Exception:
         pass
+
+    # Colunas extras para cobranças do Banco do Brasil
+    try:
+        pc_cols = [c["name"] for c in cur.execute("PRAGMA table_info(payment_charges)").fetchall()]
+        if "linha_digitavel" not in pc_cols:
+            cur.execute("ALTER TABLE payment_charges ADD COLUMN linha_digitavel TEXT DEFAULT ''")
+        if "codigo_barras" not in pc_cols:
+            cur.execute("ALTER TABLE payment_charges ADD COLUMN codigo_barras TEXT DEFAULT ''")
+        if "numero_boleto_bb" not in pc_cols:
+            cur.execute("ALTER TABLE payment_charges ADD COLUMN numero_boleto_bb TEXT DEFAULT ''")
+    except Exception:
+        pass
+
+    # Tokens OAuth Banco do Brasil por empresa — banco já existente
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS bb_oauth_tokens (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL UNIQUE,
+        access_token TEXT NOT NULL,
+        refresh_token TEXT DEFAULT '',
+        expires_at TEXT NOT NULL,
+        expires_ts INTEGER NOT NULL DEFAULT 0,
+        scope TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
 
     cur.execute("""
     CREATE TABLE IF NOT EXISTS bank_integrations (
