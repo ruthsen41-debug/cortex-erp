@@ -44,11 +44,14 @@ def _oauth_base() -> str:
 def _api_base() -> str:
     return "https://api.hm.bb.com.br" if _sandbox() else "https://api.bb.com.br"
 
+def _extrato_base() -> str:
+    return "https://extratos.mtls.api.hm.bb.com.br/v2" if _sandbox() else "https://extratos.mtls.api.bb.com.br/v2"
+
 def _app_key_param() -> str:
     return f"gw-dev-app-key={_cfg('BB_APP_KEY')}"
 
 # Escopos necessários para o ERP
-BB_SCOPES = "cobrancas.boletos-requisicao pix.write extrato.read"
+BB_SCOPES = "cobrancas.boletos-requisicao pix.write extrato-info"
 
 BB_SANDBOX: bool = _sandbox()
 
@@ -282,6 +285,14 @@ def _to_bb_extrato_date(iso_date: str) -> str:
     d = date.fromisoformat(iso_date)
     return f"{d.day:02d}-{d.month:02d}-{d.year}"
 
+def _to_bb_date_int(iso_date: str) -> int:
+    d = date.fromisoformat(iso_date)
+    return int(f"{d.day:02d}{d.month:02d}{d.year}")
+
+def _parse_bb_date_int(val) -> str:
+    s = str(int(val or 0)).zfill(8)  # DDMMAAAA
+    return f"{s[4:]}-{s[2:4]}-{s[:2]}"
+
 def _normalize_date(raw: str) -> str:
     raw = (raw or "")[:10].strip()
     if not raw:
@@ -442,45 +453,59 @@ def consultar_extrato(
     company_id: int,
     data_inicio: str,
     data_fim: str,
-    indice: int = 1,
+    agencia: int,
+    conta: int,
 ) -> List[Dict[str, Any]]:
-    p1 = _to_bb_extrato_date(data_inicio)
-    p2 = _to_bb_extrato_date(data_fim)
-    url = (
-        f"{_api_base()}/extrato/v2/conta"
-        f"?{_app_key_param()}&dataInicio={p1}&dataFim={p2}&indice={indice}"
-    )
-    with _http_client(timeout=20.0) as c:
-        resp = c.get(url, headers=_auth_headers(company_id))
-    resp.raise_for_status()
-    raw = resp.json()
-    items = raw.get("listaLancamentos") or raw.get("lancamentos") or []
-    result = []
-    for item in items:
-        codigo = (
-            item.get("codigoLancamento")
-            or item.get("identificador")
-            or item.get("id")
-            or ""
+    """
+    Consulta extrato via API BB Extratos v2.
+    Endpoint: /conta-corrente/agencia/{agencia}/conta/{conta}
+    Datas no formato DDMMAAAA (inteiro). Pagina automaticamente até o fim.
+    """
+    dt_inicio = _to_bb_date_int(data_inicio)
+    dt_fim = _to_bb_date_int(data_fim)
+    result: List[Dict[str, Any]] = []
+    pagina = 1
+    while True:
+        url = (
+            f"{_extrato_base()}/conta-corrente/agencia/{agencia}/conta/{conta}"
+            f"?{_app_key_param()}"
+            f"&dataInicioSolicitacao={dt_inicio}"
+            f"&dataFimSolicitacao={dt_fim}"
+            f"&numeroPaginaSolicitacao={pagina}"
+            f"&quantidadeRegistroPaginaSolicitacao=120"
         )
-        raw_date = item.get("dataLancamento") or item.get("data") or data_fim
-        raw_valor = float(item.get("valorLancamento") or item.get("valor") or 0)
-        indicador = (item.get("indicadorDebitoCredito") or "").upper()
-        if indicador == "D" and raw_valor > 0:
-            raw_valor = -raw_valor
-        elif indicador == "C" and raw_valor < 0:
-            raw_valor = abs(raw_valor)
-        result.append({
-            "codigoLancamento": str(codigo),
-            "dataLancamento": _normalize_date(str(raw_date)[:10]),
-            "valorLancamento": raw_valor,
-            "textoLancamento": (
-                item.get("textoLancamento")
-                or item.get("descricao")
-                or "Lançamento BB"
-            ),
-            "indicadorDebitoCredito": indicador or ("C" if raw_valor >= 0 else "D"),
-        })
+        with _http_client(timeout=20.0) as c:
+            resp = c.get(url, headers=_auth_headers(company_id))
+        resp.raise_for_status()
+        raw = resp.json()
+        for item in (raw.get("listaLancamento") or []):
+            tipo = str(item.get("indicadorTipoLancamento") or "")
+            if tipo not in ("1", "2", "3"):  # ignora saldos/limites (SA, SD, LD, etc.)
+                continue
+            indicador = str(item.get("indicadorSinalLancamento") or "").upper()
+            raw_val = float(item.get("valorLancamento") or 0)
+            if indicador == "D" and raw_val > 0:
+                raw_val = -raw_val
+            elif indicador == "C" and raw_val < 0:
+                raw_val = abs(raw_val)
+            doc = item.get("numeroDocumento")
+            fitid = str(doc) if doc else ""
+            data_raw = item.get("dataLancamento")
+            posted = _parse_bb_date_int(data_raw) if data_raw else data_fim
+            desc = (item.get("textoDescricaoSubHistorico") or "").strip()
+            compl = (item.get("textoInformacaoComplementar") or "").strip()
+            memo = f"{desc} {compl}".strip() or "Lançamento BB"
+            result.append({
+                "codigoLancamento": fitid,
+                "dataLancamento": posted,
+                "valorLancamento": raw_val,
+                "textoLancamento": memo,
+                "indicadorDebitoCredito": indicador if indicador in ("C", "D") else ("C" if raw_val >= 0 else "D"),
+            })
+        prox = int(raw.get("numeroPaginaProximo") or 0)
+        if not prox:
+            break
+        pagina = prox
     return result
 
 

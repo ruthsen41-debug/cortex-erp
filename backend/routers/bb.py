@@ -500,7 +500,7 @@ def sync_extrato_bb(dias: int = 30, current_user: Dict[str, Any] = Depends(get_c
     data_inicio = data_fim - timedelta(days=min(dias, 90))
 
     try:
-        lancamentos = consultar_extrato(company_id, data_inicio.isoformat(), data_fim.isoformat())
+        lancamentos = consultar_extrato(company_id, data_inicio.isoformat(), data_fim.isoformat(), agencia, conta)
     except RuntimeError as e:
         conn.close()
         raise HTTPException(status_code=403, detail=str(e))
@@ -509,10 +509,28 @@ def sync_extrato_bb(dias: int = 30, current_user: Dict[str, Any] = Depends(get_c
         raise HTTPException(status_code=502, detail=f"Erro ao buscar extrato do BB: {e}")
 
     bank_acc = cur.execute(
-        "SELECT id FROM bank_accounts WHERE bank_code='001' AND company_id=? AND active=1 LIMIT 1",
+        "SELECT id, agency, account_number FROM bank_accounts WHERE bank_code='001' AND company_id=? AND active=1 LIMIT 1",
         (company_id,)
     ).fetchone()
     bank_acc_id = bank_acc["id"] if bank_acc else 1
+
+    if bank_acc:
+        agencia_raw = bank_acc["agency"] or os.getenv("BB_AGENCIA", "")
+        conta_raw = bank_acc["account_number"] or os.getenv("BB_CONTA", "")
+    else:
+        agencia_raw = os.getenv("BB_AGENCIA", "")
+        conta_raw = os.getenv("BB_CONTA", "")
+    agencia = int(re.sub(r"\D", "", agencia_raw) or "0")
+    conta = int(re.sub(r"\D", "", conta_raw) or "0")
+    if not agencia or not conta:
+        conn.close()
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Conta BB sem agência/número cadastrados. "
+                "Cadastre a conta corrente BB com agência e número, ou defina BB_AGENCIA e BB_CONTA."
+            ),
+        )
 
     categories = rows_to_dicts(cur.execute("SELECT * FROM categories").fetchall())
     open_entries = rows_to_dicts(cur.execute(
