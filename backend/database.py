@@ -809,6 +809,127 @@ def init_db() -> None:
     );
     """)
 
+    # 36. Departamento Pessoal — Funcionários
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS employees (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        matricula TEXT DEFAULT '',
+        name TEXT NOT NULL,
+        cpf TEXT NOT NULL,
+        rg TEXT DEFAULT '',
+        pis_pasep TEXT DEFAULT '',
+        ctps TEXT DEFAULT '',
+        birth_date TEXT DEFAULT '',
+        sexo TEXT DEFAULT 'M',
+        admission_date TEXT NOT NULL,
+        role TEXT NOT NULL,
+        cbo TEXT DEFAULT '111105',
+        department TEXT DEFAULT '',
+        salary REAL NOT NULL,
+        is_prolabore INTEGER DEFAULT 0,
+        dependents INTEGER DEFAULT 0,
+        vt_monthly REAL DEFAULT 0.0,
+        esocial_category TEXT DEFAULT '101',
+        bank_name TEXT DEFAULT '',
+        bank_agency TEXT DEFAULT '',
+        bank_account TEXT DEFAULT '',
+        email TEXT DEFAULT '',
+        phone TEXT DEFAULT '',
+        cep TEXT DEFAULT '',
+        address TEXT DEFAULT '',
+        notes TEXT DEFAULT '',
+        active INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    # 37. Departamento Pessoal — Processamentos de Folha
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS payroll_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        competence TEXT NOT NULL,
+        status TEXT DEFAULT 'processado',
+        -- processado, fechado, cancelado
+        employee_count INTEGER DEFAULT 0,
+        total_gross REAL DEFAULT 0.0,
+        total_discounts REAL DEFAULT 0.0,
+        total_net REAL DEFAULT 0.0,
+        total_fgts REAL DEFAULT 0.0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    # 38. Departamento Pessoal — Itens da Folha por Funcionário
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS payroll_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id INTEGER NOT NULL,
+        employee_id INTEGER NOT NULL,
+        gross_salary REAL NOT NULL,
+        inss REAL DEFAULT 0.0,
+        irrf REAL DEFAULT 0.0,
+        fgts REAL DEFAULT 0.0,
+        vt_discount REAL DEFAULT 0.0,
+        other_discounts REAL DEFAULT 0.0,
+        net_salary REAL NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (run_id) REFERENCES payroll_runs(id) ON DELETE CASCADE,
+        FOREIGN KEY (employee_id) REFERENCES employees(id)
+    );
+    """)
+
+    # 39. Módulo Contábil — Plano de Contas
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS accounting_accounts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        code TEXT NOT NULL,
+        name TEXT NOT NULL,
+        account_type TEXT NOT NULL,
+        -- ativo, passivo, patrimonio_liquido, receita, custo, despesa
+        nature TEXT NOT NULL,
+        -- devedora (saldo normal débito) ou credora (saldo normal crédito)
+        parent_code TEXT DEFAULT '',
+        accepts_entries INTEGER DEFAULT 1,
+        description TEXT DEFAULT '',
+        active INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    # 37. Módulo Contábil — Diário de Lançamentos (cabeçalho)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS accounting_entries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        entry_date TEXT NOT NULL,
+        description TEXT NOT NULL,
+        document_number TEXT DEFAULT '',
+        entry_type TEXT DEFAULT 'manual',
+        -- manual, automatico
+        origin_id INTEGER,
+        total_debit REAL DEFAULT 0.0,
+        total_credit REAL DEFAULT 0.0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    # 38. Módulo Contábil — Linhas das Partidas (débito/crédito)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS accounting_entry_lines (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entry_id INTEGER NOT NULL,
+        account_id INTEGER NOT NULL,
+        debit REAL DEFAULT 0.0,
+        credit REAL DEFAULT 0.0,
+        description TEXT DEFAULT '',
+        FOREIGN KEY (entry_id) REFERENCES accounting_entries(id) ON DELETE CASCADE,
+        FOREIGN KEY (account_id) REFERENCES accounting_accounts(id)
+    );
+    """)
+
     # 36. Notificações do Sistema
     cur.execute("""
     CREATE TABLE IF NOT EXISTS notifications (
@@ -1084,6 +1205,117 @@ def migrate_db(conn: sqlite3.Connection) -> None:
     )
     """)
 
+    # Departamento Pessoal — migração para bancos já existentes
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS employees (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        matricula TEXT DEFAULT '',
+        name TEXT NOT NULL,
+        cpf TEXT NOT NULL,
+        rg TEXT DEFAULT '',
+        pis_pasep TEXT DEFAULT '',
+        ctps TEXT DEFAULT '',
+        birth_date TEXT DEFAULT '',
+        sexo TEXT DEFAULT 'M',
+        admission_date TEXT NOT NULL,
+        role TEXT NOT NULL,
+        cbo TEXT DEFAULT '111105',
+        department TEXT DEFAULT '',
+        salary REAL NOT NULL,
+        is_prolabore INTEGER DEFAULT 0,
+        dependents INTEGER DEFAULT 0,
+        vt_monthly REAL DEFAULT 0.0,
+        esocial_category TEXT DEFAULT '101',
+        bank_name TEXT DEFAULT '',
+        bank_agency TEXT DEFAULT '',
+        bank_account TEXT DEFAULT '',
+        email TEXT DEFAULT '',
+        phone TEXT DEFAULT '',
+        cep TEXT DEFAULT '',
+        address TEXT DEFAULT '',
+        notes TEXT DEFAULT '',
+        active INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS payroll_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        competence TEXT NOT NULL,
+        status TEXT DEFAULT 'processado',
+        employee_count INTEGER DEFAULT 0,
+        total_gross REAL DEFAULT 0.0,
+        total_discounts REAL DEFAULT 0.0,
+        total_net REAL DEFAULT 0.0,
+        total_fgts REAL DEFAULT 0.0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS payroll_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id INTEGER NOT NULL,
+        employee_id INTEGER NOT NULL,
+        gross_salary REAL NOT NULL,
+        inss REAL DEFAULT 0.0,
+        irrf REAL DEFAULT 0.0,
+        fgts REAL DEFAULT 0.0,
+        vt_discount REAL DEFAULT 0.0,
+        other_discounts REAL DEFAULT 0.0,
+        net_salary REAL NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (run_id) REFERENCES payroll_runs(id) ON DELETE CASCADE,
+        FOREIGN KEY (employee_id) REFERENCES employees(id)
+    )
+    """)
+
+    # Módulo Contábil — migração para bancos já existentes
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS accounting_accounts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        code TEXT NOT NULL,
+        name TEXT NOT NULL,
+        account_type TEXT NOT NULL,
+        nature TEXT NOT NULL,
+        parent_code TEXT DEFAULT '',
+        accepts_entries INTEGER DEFAULT 1,
+        description TEXT DEFAULT '',
+        active INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS accounting_entries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        entry_date TEXT NOT NULL,
+        description TEXT NOT NULL,
+        document_number TEXT DEFAULT '',
+        entry_type TEXT DEFAULT 'manual',
+        origin_id INTEGER,
+        total_debit REAL DEFAULT 0.0,
+        total_credit REAL DEFAULT 0.0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS accounting_entry_lines (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entry_id INTEGER NOT NULL,
+        account_id INTEGER NOT NULL,
+        debit REAL DEFAULT 0.0,
+        credit REAL DEFAULT 0.0,
+        description TEXT DEFAULT '',
+        FOREIGN KEY (entry_id) REFERENCES accounting_entries(id) ON DELETE CASCADE,
+        FOREIGN KEY (account_id) REFERENCES accounting_accounts(id)
+    )
+    """)
+    # Seed plano de contas se banco já existia e estava vazio
+    _seed_accounting_accounts(cur)
+
     conn.commit()
 
 
@@ -1110,6 +1342,110 @@ def recalculate_bank_balances(conn: sqlite3.Connection) -> None:
         new_bal = round(init_bal + delta, 2)
         cur.execute("UPDATE bank_accounts SET current_balance = ? WHERE id = ?", (new_bal, acc_id))
     conn.commit()
+
+
+def _seed_accounting_accounts(cur) -> None:
+    """Plano de Contas Contábil padrão seguindo estrutura NBCs/CFC brasileiro."""
+    count = cur.execute("SELECT COUNT(*) FROM accounting_accounts WHERE company_id = 1").fetchone()[0]
+    if count > 0:
+        return
+
+    # (code, name, account_type, nature, parent_code, accepts_entries)
+    accounts = [
+        # ─── ATIVO ───────────────────────────────────────────────────
+        ("1",       "ATIVO",                                    "ativo",             "devedora",  "",     0),
+        ("1.1",     "ATIVO CIRCULANTE",                         "ativo",             "devedora",  "1",    0),
+        ("1.1.01",  "Caixa",                                    "ativo",             "devedora",  "1.1",  1),
+        ("1.1.02",  "Bancos c/ Movimento",                      "ativo",             "devedora",  "1.1",  1),
+        ("1.1.03",  "Aplicações Financeiras",                   "ativo",             "devedora",  "1.1",  1),
+        ("1.1.04",  "Clientes / Contas a Receber",              "ativo",             "devedora",  "1.1",  1),
+        ("1.1.05",  "(-) Prov. p/ Devedores Duvidosos",        "ativo",             "credora",   "1.1",  1),
+        ("1.1.06",  "Estoques",                                 "ativo",             "devedora",  "1.1",  1),
+        ("1.1.07",  "Adiantamentos a Fornecedores",             "ativo",             "devedora",  "1.1",  1),
+        ("1.1.08",  "Tributos a Recuperar",                     "ativo",             "devedora",  "1.1",  1),
+        ("1.1.09",  "Outros Ativos Circulantes",                "ativo",             "devedora",  "1.1",  1),
+        ("1.2",     "ATIVO NÃO CIRCULANTE",                    "ativo",             "devedora",  "1",    0),
+        ("1.2.01",  "Realizável a Longo Prazo",                 "ativo",             "devedora",  "1.2",  1),
+        ("1.2.02",  "Investimentos",                            "ativo",             "devedora",  "1.2",  1),
+        ("1.2.03",  "Imobilizado",                              "ativo",             "devedora",  "1.2",  0),
+        ("1.2.03.01","Móveis e Utensílios",                     "ativo",             "devedora",  "1.2.03", 1),
+        ("1.2.03.02","Equipamentos de Informática",             "ativo",             "devedora",  "1.2.03", 1),
+        ("1.2.03.03","Veículos",                                "ativo",             "devedora",  "1.2.03", 1),
+        ("1.2.03.04","(-) Depreciação Acumulada",               "ativo",             "credora",   "1.2.03", 1),
+        ("1.2.04",  "Intangível",                               "ativo",             "devedora",  "1.2",  0),
+        ("1.2.04.01","Softwares e Licenças",                    "ativo",             "devedora",  "1.2.04", 1),
+        ("1.2.04.02","(-) Amortização Acumulada",               "ativo",             "credora",   "1.2.04", 1),
+        # ─── PASSIVO ─────────────────────────────────────────────────
+        ("2",       "PASSIVO",                                  "passivo",           "credora",   "",     0),
+        ("2.1",     "PASSIVO CIRCULANTE",                       "passivo",           "credora",   "2",    0),
+        ("2.1.01",  "Fornecedores / Contas a Pagar",            "passivo",           "credora",   "2.1",  1),
+        ("2.1.02",  "Obrigações Fiscais",                       "passivo",           "credora",   "2.1",  0),
+        ("2.1.02.01","Simples Nacional a Recolher",             "passivo",           "credora",   "2.1.02", 1),
+        ("2.1.02.02","IRRF a Recolher",                         "passivo",           "credora",   "2.1.02", 1),
+        ("2.1.02.03","ISS a Recolher",                          "passivo",           "credora",   "2.1.02", 1),
+        ("2.1.03",  "Obrigações Trabalhistas",                  "passivo",           "credora",   "2.1",  0),
+        ("2.1.03.01","Salários a Pagar",                        "passivo",           "credora",   "2.1.03", 1),
+        ("2.1.03.02","FGTS a Recolher",                         "passivo",           "credora",   "2.1.03", 1),
+        ("2.1.03.03","INSS a Recolher",                         "passivo",           "credora",   "2.1.03", 1),
+        ("2.1.03.04","Férias a Pagar",                          "passivo",           "credora",   "2.1.03", 1),
+        ("2.1.04",  "Empréstimos e Financiamentos CP",          "passivo",           "credora",   "2.1",  1),
+        ("2.1.05",  "Outras Contas a Pagar",                    "passivo",           "credora",   "2.1",  1),
+        ("2.2",     "PASSIVO NÃO CIRCULANTE",                  "passivo",           "credora",   "2",    0),
+        ("2.2.01",  "Empréstimos e Financiamentos LP",          "passivo",           "credora",   "2.2",  1),
+        # ─── PATRIMÔNIO LÍQUIDO ───────────────────────────────────────
+        ("2.3",     "PATRIMÔNIO LÍQUIDO",                      "patrimonio_liquido", "credora",   "2",    0),
+        ("2.3.01",  "Capital Social",                           "patrimonio_liquido", "credora",  "2.3",  1),
+        ("2.3.02",  "Reserva Legal",                            "patrimonio_liquido", "credora",  "2.3",  1),
+        ("2.3.03",  "Lucros ou Prejuízos Acumulados",          "patrimonio_liquido", "credora",  "2.3",  1),
+        # ─── RECEITAS ─────────────────────────────────────────────────
+        ("3",       "RECEITAS",                                 "receita",           "credora",   "",     0),
+        ("3.1",     "RECEITAS OPERACIONAIS BRUTAS",             "receita",           "credora",   "3",    0),
+        ("3.1.01",  "Venda de Produtos (Mercadorias)",          "receita",           "credora",   "3.1",  1),
+        ("3.1.02",  "Prestação de Serviços",                    "receita",           "credora",   "3.1",  1),
+        ("3.1.03",  "Receitas de Assinaturas / Recorrência",   "receita",           "credora",   "3.1",  1),
+        ("3.2",     "DEDUÇÕES DA RECEITA BRUTA",               "receita",           "devedora",  "3",    0),
+        ("3.2.01",  "Tributos sobre Vendas (DAS / Simples)",   "receita",           "devedora",  "3.2",  1),
+        ("3.2.02",  "Devoluções e Abatimentos",                "receita",           "devedora",  "3.2",  1),
+        ("3.3",     "RECEITAS FINANCEIRAS",                    "receita",           "credora",   "3",    0),
+        ("3.3.01",  "Juros Ativos e Descontos Obtidos",        "receita",           "credora",   "3.3",  1),
+        ("3.3.02",  "Rendimentos de Aplicações Financeiras",   "receita",           "credora",   "3.3",  1),
+        # ─── CUSTOS ───────────────────────────────────────────────────
+        ("4",       "CUSTOS",                                   "custo",             "devedora",  "",     0),
+        ("4.1",     "CUSTO DAS MERCADORIAS / SERVIÇOS",        "custo",             "devedora",  "4",    0),
+        ("4.1.01",  "Custo das Mercadorias Vendidas (CMV)",    "custo",             "devedora",  "4.1",  1),
+        ("4.1.02",  "Custo dos Serviços Prestados (CSP)",      "custo",             "devedora",  "4.1",  1),
+        ("4.1.03",  "Fretes e Transportes sobre Compras",      "custo",             "devedora",  "4.1",  1),
+        # ─── DESPESAS ─────────────────────────────────────────────────
+        ("5",       "DESPESAS",                                 "despesa",           "devedora",  "",     0),
+        ("5.1",     "DESPESAS COM PESSOAL",                    "despesa",           "devedora",  "5",    0),
+        ("5.1.01",  "Salários, Pró-Labore e Retiradas",        "despesa",           "devedora",  "5.1",  1),
+        ("5.1.02",  "Encargos Sociais (FGTS / INSS Patronal)", "despesa",           "devedora",  "5.1",  1),
+        ("5.1.03",  "Benefícios (VT, VA, Plano de Saúde)",     "despesa",           "devedora",  "5.1",  1),
+        ("5.2",     "DESPESAS OPERACIONAIS",                   "despesa",           "devedora",  "5",    0),
+        ("5.2.01",  "Aluguel, Condomínio e IPTU",              "despesa",           "devedora",  "5.2",  1),
+        ("5.2.02",  "Energia Elétrica, Água e Saneamento",     "despesa",           "devedora",  "5.2",  1),
+        ("5.2.03",  "Internet, Telefonia e Cloud / SaaS",      "despesa",           "devedora",  "5.2",  1),
+        ("5.2.04",  "Honorários Contábeis e Jurídicos",        "despesa",           "devedora",  "5.2",  1),
+        ("5.2.05",  "Combustível e Manutenção Veicular",       "despesa",           "devedora",  "5.2",  1),
+        ("5.2.06",  "Material de Escritório e Consumo",        "despesa",           "devedora",  "5.2",  1),
+        ("5.2.07",  "Serviços de Terceiros",                   "despesa",           "devedora",  "5.2",  1),
+        ("5.3",     "DESPESAS COMERCIAIS",                     "despesa",           "devedora",  "5",    0),
+        ("5.3.01",  "Marketing, Tráfego Pago e Publicidade",   "despesa",           "devedora",  "5.3",  1),
+        ("5.3.02",  "Comissões sobre Vendas",                   "despesa",           "devedora",  "5.3",  1),
+        ("5.4",     "DESPESAS FINANCEIRAS",                    "despesa",           "devedora",  "5",    0),
+        ("5.4.01",  "Tarifas Bancárias e IOF",                 "despesa",           "devedora",  "5.4",  1),
+        ("5.4.02",  "Juros e Multas Passivos",                  "despesa",           "devedora",  "5.4",  1),
+        ("5.4.03",  "Descontos Concedidos",                     "despesa",           "devedora",  "5.4",  1),
+        ("5.5",     "OUTRAS DESPESAS",                         "despesa",           "devedora",  "5",    0),
+        ("5.5.01",  "Depreciação e Amortização",               "despesa",           "devedora",  "5.5",  1),
+        ("5.5.02",  "Despesas Diversas",                        "despesa",           "devedora",  "5.5",  1),
+    ]
+    for a in accounts:
+        cur.execute("""
+            INSERT INTO accounting_accounts
+                (company_id, code, name, account_type, nature, parent_code, accepts_entries, active)
+            VALUES (1, ?, ?, ?, ?, ?, ?, 1)
+        """, (a[0], a[1], a[2], a[3], a[4], a[5]))
 
 
 def seed_initial_data(conn: sqlite3.Connection) -> None:
@@ -1364,6 +1700,9 @@ def seed_initial_data(conn: sqlite3.Connection) -> None:
                 INSERT INTO collection_rules (name, trigger_days, channel, message_template, active)
                 VALUES (?, ?, ?, ?, 1)
             """, r)
+
+    # 13. Plano de Contas Contábil Padrão (NBCs / CFC)
+    _seed_accounting_accounts(cur)
 
     recalculate_bank_balances(conn)
     conn.commit()

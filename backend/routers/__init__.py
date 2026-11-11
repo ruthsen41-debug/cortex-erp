@@ -32,6 +32,8 @@ from .system import router as system_router
 from .quotes import router as quotes_router
 from .open_finance import router as open_finance_router
 from .bb import router as bb_router
+from .accounting import router as accounting_router
+from .dp import router as dp_router
 
 all_routers = [
     auth_router,
@@ -68,4 +70,6 @@ all_routers = [
     quotes_router,
     open_finance_router,
     bb_router,
+    accounting_router,
+    dp_router,
 ]

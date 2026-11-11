@@ -9,11 +9,13 @@ try:
     from ..auth import get_current_user, log_audit
     from ..utils import rows_to_dicts, add_months
     from ..schemas.financial import FinancialCreate, FinancialPayRequest, BatchPayRequest, AiLaunchRequest
+    from ..services.accounting_autopost import autopost_payment, autopost_reversal
 except ImportError:
     from database import get_conn, begin_write, recalculate_bank_balances
     from auth import get_current_user, log_audit
     from utils import rows_to_dicts, add_months
     from schemas.financial import FinancialCreate, FinancialPayRequest, BatchPayRequest, AiLaunchRequest
+    from services.accounting_autopost import autopost_payment, autopost_reversal
 
 router = APIRouter(prefix="/api/financial", tags=["Financeiro"])
 
@@ -171,6 +173,9 @@ def create_financial_entry(req: FinancialCreate, current_user: Dict[str, Any] = 
                     entry_id, bank_account_id, payment_date, principal_paid, total_cash_flow, payment_method, notes
                 ) VALUES (?, ?, ?, ?, ?, ?, 'Baixado no ato do lançamento')
             """, (eid, bank_account_id, due_d, amt, amt, payment_method))
+            pay_id = cur.lastrowid
+            conn.commit()
+            autopost_payment(conn, eid, pay_id, company_id)
 
     recalculate_bank_balances(conn)
     log_audit(conn, action="create", entity="financial_entries", entity_id=created_ids[0] if created_ids else None, new_data=req.model_dump(), user_id=current_user.get("id"))
@@ -225,6 +230,9 @@ def pay_financial_entry(entry_id: int, req: FinancialPayRequest, current_user: D
         fine_paid, discount_applied, cash_paid, payment_method,
         req.notes or f"Baixa {'Total' if new_status == 'pago' else 'Parcial'}",
     ))
+    pay_id = cur.lastrowid
+    conn.commit()
+    autopost_payment(conn, entry_id, pay_id, company_id)
 
     recalculate_bank_balances(conn)
     log_audit(conn, action="pay", entity="financial_entries", entity_id=entry_id, new_data=req.model_dump(), user_id=current_user.get("id"))
@@ -247,6 +255,7 @@ def reverse_financial_entry(entry_id: int, current_user: Dict[str, Any] = Depend
     if not cur.execute("SELECT 1 FROM financial_entries WHERE id = ? AND company_id = ?", (entry_id, company_id)).fetchone():
         conn.close()
         raise HTTPException(status_code=404, detail="Lançamento não encontrado.")
+    autopost_reversal(conn, entry_id, company_id)
     cur.execute("DELETE FROM financial_payments WHERE entry_id = ?", (entry_id,))
     cur.execute("""
         UPDATE financial_entries
@@ -283,6 +292,9 @@ def batch_pay_entries(req: BatchPayRequest, current_user: Dict[str, Any] = Depen
             INSERT INTO financial_payments (entry_id, bank_account_id, payment_date, principal_paid, total_cash_flow, payment_method, notes)
             VALUES (?, ?, ?, ?, ?, ?, 'Baixa em Lote')
         """, (eid, b_id, today_iso, rem, rem, req.payment_method or "Pix"))
+        pay_id = cur.lastrowid
+        conn.commit()
+        autopost_payment(conn, eid, pay_id, company_id)
         count += 1
 
     recalculate_bank_balances(conn)
