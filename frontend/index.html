@@ -103,6 +103,10 @@
         <i data-lucide="file-check-2" class="w-4 h-4 text-teal-400"></i>
         <span>Contratos Recorrentes</span>
       </button>
+      <button onclick="switchTab('returns')" id="nav-returns" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
+        <i data-lucide="undo-2" class="w-4 h-4 text-rose-400"></i>
+        <span>Devoluções &amp; RMA</span>
+      </button>
       <button onclick="switchTab('quotes')" id="nav-quotes" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
         <i data-lucide="file-text" class="w-4 h-4 text-yellow-400"></i>
         <span>Pedidos &amp; Orçamentos</span>
@@ -213,6 +217,7 @@
   <script src="/static/dp.js"></script>
   <script src="/static/purchases.js"></script>
   <script src="/static/contracts.js"></script>
+  <script src="/static/returns.js"></script>
   <script src="/static/theme.js"></script>
   <script>
     function toggleSidebar() {

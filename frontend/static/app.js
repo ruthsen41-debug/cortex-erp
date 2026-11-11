@@ -180,6 +180,10 @@ async function switchTab(tab) {
       if (typeof renderContracts === 'function') await renderContracts(main);
       else main.innerHTML = '<div class="p-6 text-slate-400">Módulo de Contratos não carregado.</div>';
       break;
+    case 'returns':
+      if (typeof renderReturns === 'function') await renderReturns(main);
+      else main.innerHTML = '<div class="p-6 text-slate-400">Módulo de Devoluções não carregado.</div>';
+      break;
     default:
       main.innerHTML = `<div class="p-6">Módulo "${tab}" em desenvolvimento.</div>`;
   }
