@@ -111,6 +111,16 @@
         <i data-lucide="building-2" class="w-4 h-4 text-orange-400"></i>
         <span>Configurações da Empresa</span>
       </button>
+
+      <div class="cx-section pt-4 px-3 py-1 font-bold uppercase">Contabilidade &amp; DP</div>
+      <button onclick="switchTab('accounting')" id="nav-accounting" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
+        <i data-lucide="book-marked" class="w-4 h-4 text-violet-400"></i>
+        <span>Módulo Contábil</span>
+      </button>
+      <button onclick="switchTab('dp')" id="nav-dp" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
+        <i data-lucide="users-round" class="w-4 h-4 text-teal-400"></i>
+        <span>Depto. Pessoal &amp; Folha</span>
+      </button>
     </nav>
 
     <div class="p-3 border-t border-white/5 text-xs text-slate-400 flex items-center gap-2">
@@ -191,6 +201,7 @@
 
   <script src="/static/auth.js"></script>
   <script src="/static/app.js"></script>
+  <script src="/static/accounting.js"></script>
   <script src="/static/theme.js"></script>
   <script>
     function toggleSidebar() {

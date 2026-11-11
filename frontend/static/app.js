@@ -164,6 +164,14 @@ async function switchTab(tab) {
     case 'settings':
       await renderSettings(main);
       break;
+    case 'accounting':
+      if (typeof renderAccounting === 'function') await renderAccounting(main);
+      else main.innerHTML = '<div class="p-6 text-slate-400">Módulo contábil não carregado.</div>';
+      break;
+    case 'dp':
+      if (typeof renderDp === 'function') await renderDp(main);
+      else main.innerHTML = '<div class="p-6 text-slate-400">Módulo DP em desenvolvimento.</div>';
+      break;
     default:
       main.innerHTML = `<div class="p-6">Módulo "${tab}" em desenvolvimento.</div>`;
   }
