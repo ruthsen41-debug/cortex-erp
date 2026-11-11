@@ -22,6 +22,52 @@ router = APIRouter(tags=["Portal do Contador & SPED"])
 # ==========================================
 # 1. SPED FISCAL & PACOTE DO CONTADOR (AUTENTICADO)
 # ==========================================
+@router.get("/api/reports/sped-preview")
+def preview_sped_fiscal(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Retorna estatísticas do período sem gerar o arquivo EFD."""
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    company = dict(conn.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone())
+
+    today = date.today()
+    s_date = start_date or date(today.year, today.month, 1).isoformat()
+    e_date = end_date or today.isoformat()
+
+    invoices = rows_to_dicts(conn.execute("""
+        SELECT total_invoice, total_icms, total_pis, total_cofins, model
+        FROM invoices
+        WHERE company_id = ? AND status = 'autorizada'
+        AND substr(issued_at, 1, 10) BETWEEN ? AND ?
+    """, (company_id, s_date, e_date)).fetchall())
+    conn.close()
+
+    tot_invoice = sum(float(i.get("total_invoice") or 0) for i in invoices)
+    tot_icms    = sum(float(i.get("total_icms")    or 0) for i in invoices)
+    tot_pis     = sum(float(i.get("total_pis")     or 0) for i in invoices)
+    tot_cofins  = sum(float(i.get("total_cofins")  or 0) for i in invoices)
+
+    return {
+        "start_date": s_date,
+        "end_date": e_date,
+        "company": {
+            "razao_social": company.get("razao_social"),
+            "cnpj": company.get("cnpj"),
+            "uf": company.get("uf"),
+            "regime_tributario": company.get("regime_tributario"),
+        },
+        "count_nfe": len(invoices),
+        "total_faturamento": round(tot_invoice, 2),
+        "total_icms": round(tot_icms, 2),
+        "total_pis": round(tot_pis, 2),
+        "total_cofins": round(tot_cofins, 2),
+        "total_impostos": round(tot_icms + tot_pis + tot_cofins, 2),
+    }
+
+
 @router.get("/api/reports/sped-fiscal")
 def download_sped_fiscal(
     start_date: Optional[str] = None,
