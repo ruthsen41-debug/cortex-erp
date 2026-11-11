@@ -217,6 +217,30 @@ async function switchTab(tab) {
       if (typeof renderObligations === 'function') await renderObligations(main);
       else main.innerHTML = '<div class="p-6 text-slate-400">Módulo Calendário não carregado.</div>';
       break;
+    case 'lalur':
+      if (typeof renderLalur === 'function') await renderLalur(main);
+      else main.innerHTML = '<div class="p-6 text-slate-400">Módulo LALUR não carregado.</div>';
+      break;
+    case 'honorarios':
+      if (typeof renderHonorarios === 'function') await renderHonorarios(main);
+      else main.innerHTML = '<div class="p-6 text-slate-400">Módulo Honorários não carregado.</div>';
+      break;
+    case 'certificates':
+      if (typeof renderCertificates === 'function') await renderCertificates(main);
+      else main.innerHTML = '<div class="p-6 text-slate-400">Módulo Certificados não carregado.</div>';
+      break;
+    case 'nfe_manifest':
+      if (typeof renderNfeManifest === 'function') await renderNfeManifest(main);
+      else main.innerHTML = '<div class="p-6 text-slate-400">Módulo Manifesto NF-e não carregado.</div>';
+      break;
+    case 'conventions':
+      if (typeof renderConventions === 'function') await renderConventions(main);
+      else main.innerHTML = '<div class="p-6 text-slate-400">Módulo Convenções não carregado.</div>';
+      break;
+    case 'dirbi':
+      if (typeof renderDirbi === 'function') await renderDirbi(main);
+      else main.innerHTML = '<div class="p-6 text-slate-400">Módulo DIRBI não carregado.</div>';
+      break;
     default:
       main.innerHTML = `<div class="p-6">Módulo "${tab}" em desenvolvimento.</div>`;
   }

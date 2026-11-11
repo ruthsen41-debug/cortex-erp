@@ -38,6 +38,12 @@ from .patrimony import router as patrimony_router
 from .simples import router as simples_router
 from .audit import router as audit_router
 from .employee_portal import router as employee_portal_router
+from .lalur import router as lalur_router
+from .honorarios import router as honorarios_router
+from .certificates import router as certificates_router
+from .nfe_manifest import router as nfe_manifest_router
+from .conventions import router as conventions_router
+from .dirbi import router as dirbi_router
 
 all_routers = [
     auth_router,
@@ -80,4 +86,10 @@ all_routers = [
     simples_router,
     audit_router,
     employee_portal_router,
+    lalur_router,
+    honorarios_router,
+    certificates_router,
+    nfe_manifest_router,
+    conventions_router,
+    dirbi_router,
 ]

@@ -1405,6 +1405,147 @@ def migrate_db(conn: sqlite3.Connection) -> None:
     except Exception:
         pass
 
+    # ── LALUR — Livro de Apuração do Lucro Real ───────────────
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS lalur_lancamentos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        tipo TEXT NOT NULL,
+        descricao TEXT NOT NULL,
+        valor REAL NOT NULL,
+        ano INTEGER NOT NULL,
+        trimestre INTEGER,
+        parte_b INTEGER DEFAULT 0,
+        parte_b_descricao TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS lalur_parte_b (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        descricao TEXT NOT NULL,
+        saldo REAL DEFAULT 0.0,
+        ano INTEGER NOT NULL,
+        UNIQUE(company_id, descricao, ano)
+    )
+    """)
+
+    # ── Honorários ────────────────────────────────────────────
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS honorarios_contratos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        client_name TEXT NOT NULL,
+        cnpj_cpf TEXT DEFAULT '',
+        email TEXT DEFAULT '',
+        phone TEXT DEFAULT '',
+        regime TEXT DEFAULT 'simples_nacional',
+        valor_mensal REAL NOT NULL,
+        dia_vencimento INTEGER DEFAULT 10,
+        servicos TEXT DEFAULT '[]',
+        observacoes TEXT DEFAULT '',
+        ativo INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS honorarios_faturas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        contrato_id INTEGER NOT NULL,
+        competencia TEXT NOT NULL,
+        valor REAL NOT NULL,
+        due_date TEXT NOT NULL,
+        status TEXT DEFAULT 'pendente',
+        descricao TEXT DEFAULT '',
+        paid_at TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (contrato_id) REFERENCES honorarios_contratos(id) ON DELETE CASCADE
+    )
+    """)
+
+    # ── Manifesto do Destinatário (NF-e) ─────────────────────
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS nfe_manifest (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        chave TEXT NOT NULL,
+        numero TEXT DEFAULT '',
+        serie TEXT DEFAULT '',
+        data_emissao TEXT DEFAULT '',
+        emit_cnpj TEXT DEFAULT '',
+        emit_nome TEXT DEFAULT '',
+        total_nota REAL DEFAULT 0.0,
+        total_icms REAL DEFAULT 0.0,
+        total_pis REAL DEFAULT 0.0,
+        total_cofins REAL DEFAULT 0.0,
+        status TEXT DEFAULT 'pendente',
+        manifestado_em TEXT,
+        xml_items TEXT DEFAULT '[]',
+        origem TEXT DEFAULT 'upload',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(company_id, chave)
+    )
+    """)
+
+    # ── Certificados Digitais adicionais ─────────────────────
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS digital_certificates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        tipo TEXT DEFAULT 'A1',
+        nome TEXT NOT NULL,
+        titular TEXT DEFAULT '',
+        expiry_date TEXT DEFAULT '',
+        status TEXT DEFAULT 'valido',
+        notes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    # ── DIRBI ─────────────────────────────────────────────────
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS dirbi_lancamentos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        codigo_beneficio TEXT NOT NULL,
+        descricao TEXT NOT NULL,
+        competencia TEXT NOT NULL,
+        valor_beneficio REAL DEFAULT 0.0,
+        base_calculo REAL DEFAULT 0.0,
+        observacao TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(company_id, codigo_beneficio, competencia)
+    )
+    """)
+
+    # ── Convenções Coletivas de Trabalho (CCT) ────────────────
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS cct_convencoes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        categoria TEXT NOT NULL,
+        sindicato_empregados TEXT DEFAULT '',
+        sindicato_empregadores TEXT DEFAULT '',
+        uf TEXT DEFAULT 'SP',
+        municipio TEXT DEFAULT '',
+        data_inicio TEXT NOT NULL,
+        data_fim TEXT NOT NULL,
+        piso_salarial REAL DEFAULT 0.0,
+        reajuste_pct REAL DEFAULT 0.0,
+        jornada_semanal INTEGER DEFAULT 44,
+        intervalo_jornada_min INTEGER DEFAULT 60,
+        adicional_noturno_pct REAL DEFAULT 20.0,
+        adicional_hora_extra_pct REAL DEFAULT 50.0,
+        vale_refeicao_diario REAL DEFAULT 0.0,
+        vale_transporte INTEGER DEFAULT 1,
+        observacoes TEXT DEFAULT '',
+        arquivo_url TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
     conn.commit()
 
 

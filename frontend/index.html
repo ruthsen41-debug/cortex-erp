@@ -146,10 +146,37 @@
         <span>Patrimônio &amp; Ativos Fixos</span>
       </button>
 
+      <button onclick="switchTab('lalur')" id="nav-lalur" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
+        <i data-lucide="book-open" class="w-4 h-4 text-orange-400"></i>
+        <span>LALUR (Lucro Real)</span>
+      </button>
+
+      <div class="cx-section pt-4 px-3 py-1 font-bold uppercase">Escritório Contábil</div>
+      <button onclick="switchTab('honorarios')" id="nav-honorarios" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
+        <i data-lucide="handshake" class="w-4 h-4 text-yellow-400"></i>
+        <span>Honorários Contábeis</span>
+      </button>
+      <button onclick="switchTab('conventions')" id="nav-conventions" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
+        <i data-lucide="scroll-text" class="w-4 h-4 text-teal-400"></i>
+        <span>Convenções Coletivas (CCT)</span>
+      </button>
+      <button onclick="switchTab('nfe_manifest')" id="nav-nfe_manifest" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
+        <i data-lucide="file-search" class="w-4 h-4 text-blue-400"></i>
+        <span>Manifesto do Destinatário</span>
+      </button>
+      <button onclick="switchTab('certificates')" id="nav-certificates" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
+        <i data-lucide="key-round" class="w-4 h-4 text-pink-400"></i>
+        <span>Certificados Digitais</span>
+      </button>
+
       <div class="cx-section pt-4 px-3 py-1 font-bold uppercase">Governança</div>
       <button onclick="switchTab('obligations')" id="nav-obligations" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
         <i data-lucide="calendar-check" class="w-4 h-4 text-sky-400"></i>
         <span>Calendário de Obrigações</span>
+      </button>
+      <button onclick="switchTab('dirbi')" id="nav-dirbi" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
+        <i data-lucide="receipt" class="w-4 h-4 text-amber-400"></i>
+        <span>DIRBI</span>
       </button>
       <button onclick="switchTab('audit')" id="nav-audit" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
         <i data-lucide="shield-check" class="w-4 h-4 text-cyan-400"></i>
@@ -245,6 +272,12 @@
   <script src="/static/simples.js"></script>
   <script src="/static/audit.js"></script>
   <script src="/static/obligations.js"></script>
+  <script src="/static/lalur.js"></script>
+  <script src="/static/honorarios.js"></script>
+  <script src="/static/certificates.js"></script>
+  <script src="/static/nfe_manifest.js"></script>
+  <script src="/static/conventions.js"></script>
+  <script src="/static/dirbi.js"></script>
   <script src="/static/theme.js"></script>
   <script>
     function toggleSidebar() {
