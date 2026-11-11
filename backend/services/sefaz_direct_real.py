@@ -27,7 +27,6 @@ import os
 import ssl
 import tempfile
 from datetime import datetime
-from typing import Optional
 
 import httpx
 from cryptography.hazmat.primitives import hashes, serialization

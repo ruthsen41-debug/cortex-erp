@@ -499,15 +499,6 @@ def sync_extrato_bb(dias: int = 30, current_user: Dict[str, Any] = Depends(get_c
     data_fim = date.today()
     data_inicio = data_fim - timedelta(days=min(dias, 90))
 
-    try:
-        lancamentos = consultar_extrato(company_id, data_inicio.isoformat(), data_fim.isoformat(), agencia, conta)
-    except RuntimeError as e:
-        conn.close()
-        raise HTTPException(status_code=403, detail=str(e))
-    except Exception as e:
-        conn.close()
-        raise HTTPException(status_code=502, detail=f"Erro ao buscar extrato do BB: {e}")
-
     bank_acc = cur.execute(
         "SELECT id, agency, account_number FROM bank_accounts WHERE bank_code='001' AND company_id=? AND active=1 LIMIT 1",
         (company_id,)
@@ -531,6 +522,15 @@ def sync_extrato_bb(dias: int = 30, current_user: Dict[str, Any] = Depends(get_c
                 "Cadastre a conta corrente BB com agência e número, ou defina BB_AGENCIA e BB_CONTA."
             ),
         )
+
+    try:
+        lancamentos = consultar_extrato(company_id, data_inicio.isoformat(), data_fim.isoformat(), agencia, conta)
+    except RuntimeError as e:
+        conn.close()
+        raise HTTPException(status_code=403, detail=str(e))
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=502, detail=f"Erro ao buscar extrato do BB: {e}")
 
     categories = rows_to_dicts(cur.execute("SELECT * FROM categories").fetchall())
     open_entries = rows_to_dicts(cur.execute(

@@ -11,7 +11,6 @@ Fluxo completo:
 """
 import os
 import re
-import ssl
 import base64
 import json
 import secrets

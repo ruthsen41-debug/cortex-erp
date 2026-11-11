@@ -368,12 +368,12 @@ def download_efd_contribuicoes(
     dt_fin = e_date.replace("-","")
     lines = [
         f"|0000|{company.get('regime_tributario','1').upper()[:1]}|{dt_ini}|{dt_fin}|{company.get('razao_social','')}|{cnpj}|{company.get('uf','MT')}||A|1|",
-        f"|0001|1|",
+        "|0001|1|",
         f"|0140|{cnpj}|{company.get('razao_social','')}|||{company.get('uf','MT')}|||",
-        f"|0990|3|",
-        f"|A001|0|",
-        f"|A990|2|",
-        f"|C001|1|",
+        "|0990|3|",
+        "|A001|0|",
+        "|A990|2|",
+        "|C001|1|",
     ]
     for inv in invoices:
         chave = inv.get("chave_nfe","")[:44] or "0"*44
@@ -391,20 +391,20 @@ def download_efd_contribuicoes(
             lines.append(f"|C600||{cof}|7,60|")
     lines += [
         f"|C990|{len([l for l in lines if l.startswith('|C')])+1}|",
-        f"|D001|1|",
-        f"|D990|2|",
-        f"|F001|1|",
-        f"|F990|2|",
-        f"|I001|1|",
-        f"|I990|2|",
-        f"|M001|1|",
-        f"|M990|2|",
-        f"|P001|1|",
-        f"|P990|2|",
-        f"|1001|1|",
-        f"|1900|0|0|0,00|0,00|",
-        f"|1990|2|",
-        f"|9001|1|",
+        "|D001|1|",
+        "|D990|2|",
+        "|F001|1|",
+        "|F990|2|",
+        "|I001|1|",
+        "|I990|2|",
+        "|M001|1|",
+        "|M990|2|",
+        "|P001|1|",
+        "|P990|2|",
+        "|1001|1|",
+        "|1900|0|0|0,00|0,00|",
+        "|1990|2|",
+        "|9001|1|",
         f"|9999|{len(lines)+4}|",
     ]
     content = "\r\n".join(lines)
