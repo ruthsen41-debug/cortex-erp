@@ -1316,6 +1316,95 @@ def migrate_db(conn: sqlite3.Connection) -> None:
     # Seed plano de contas se banco já existia e estava vazio
     _seed_accounting_accounts(cur)
 
+    # ── Patrimônio / Ativos Fixos ─────────────────────────────
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS fixed_assets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        name TEXT NOT NULL,
+        description TEXT DEFAULT '',
+        category TEXT DEFAULT 'maquinas_equipamentos',
+        acquisition_date TEXT NOT NULL,
+        acquisition_value REAL NOT NULL,
+        useful_life_months INTEGER DEFAULT 60,
+        residual_value REAL DEFAULT 0.0,
+        depreciation_method TEXT DEFAULT 'linear',
+        accumulated_depreciation REAL DEFAULT 0.0,
+        net_value REAL NOT NULL,
+        status TEXT DEFAULT 'ativo',
+        notes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS asset_depreciations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        asset_id INTEGER NOT NULL,
+        competencia TEXT NOT NULL,
+        monthly_depreciation REAL DEFAULT 0.0,
+        accumulated_after REAL DEFAULT 0.0,
+        net_value_after REAL DEFAULT 0.0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(asset_id, competencia)
+    )
+    """)
+
+    # ── Simples Nacional ──────────────────────────────────────
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS simples_config (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL UNIQUE,
+        anexo TEXT DEFAULT 'I',
+        faturamento_12m REAL DEFAULT 0.0,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS simples_das_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        competencia TEXT NOT NULL,
+        receita_bruta_mes REAL DEFAULT 0.0,
+        rbt12 REAL DEFAULT 0.0,
+        aliquota_efetiva REAL DEFAULT 0.0,
+        valor_das REAL DEFAULT 0.0,
+        anexo TEXT DEFAULT 'I',
+        status TEXT DEFAULT 'pendente',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(company_id, competencia)
+    )
+    """)
+
+    # ── Auditoria ─────────────────────────────────────────────
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS audit_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        user_id INTEGER,
+        user_name TEXT DEFAULT '',
+        action TEXT NOT NULL,
+        table_name TEXT DEFAULT '',
+        record_id INTEGER,
+        old_data TEXT,
+        new_data TEXT,
+        ip_address TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    # ── Portal do Empregado — coluna extra em employees ───────
+    try:
+        emp_cols = [c["name"] for c in cur.execute("PRAGMA table_info(employees)").fetchall()]
+        if "portal_token" not in emp_cols:
+            cur.execute("ALTER TABLE employees ADD COLUMN portal_token TEXT DEFAULT ''")
+        if "email" not in emp_cols:
+            cur.execute("ALTER TABLE employees ADD COLUMN email TEXT DEFAULT ''")
+        if "telefone" not in emp_cols:
+            cur.execute("ALTER TABLE employees ADD COLUMN telefone TEXT DEFAULT ''")
+    except Exception:
+        pass
+
     conn.commit()
 
 

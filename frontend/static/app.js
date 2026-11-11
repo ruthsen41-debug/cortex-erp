@@ -59,6 +59,19 @@ function closeModal() {
   box.innerHTML = '';
 }
 
+// Generic authenticated fetch helper
+async function apiFetch(url, options = {}) {
+  const token = localStorage.getItem('cortex_token') || '';
+  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(url, { ...options, headers });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 // Dark Mode Toggle
 function toggleDarkMode() {
   const isDark = document.documentElement.classList.toggle('dark');
@@ -187,6 +200,22 @@ async function switchTab(tab) {
     case 'sped':
       if (typeof renderSped === 'function') await renderSped(main);
       else main.innerHTML = '<div class="p-6 text-slate-400">Módulo SPED não carregado.</div>';
+      break;
+    case 'patrimony':
+      if (typeof renderPatrimony === 'function') await renderPatrimony(main);
+      else main.innerHTML = '<div class="p-6 text-slate-400">Módulo Patrimônio não carregado.</div>';
+      break;
+    case 'simples':
+      if (typeof renderSimples === 'function') await renderSimples(main);
+      else main.innerHTML = '<div class="p-6 text-slate-400">Módulo Simples Nacional não carregado.</div>';
+      break;
+    case 'audit':
+      if (typeof renderAudit === 'function') await renderAudit(main);
+      else main.innerHTML = '<div class="p-6 text-slate-400">Módulo Auditoria não carregado.</div>';
+      break;
+    case 'obligations':
+      if (typeof renderObligations === 'function') await renderObligations(main);
+      else main.innerHTML = '<div class="p-6 text-slate-400">Módulo Calendário não carregado.</div>';
       break;
     default:
       main.innerHTML = `<div class="p-6">Módulo "${tab}" em desenvolvimento.</div>`;

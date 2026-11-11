@@ -35,9 +35,13 @@ function btnAmber(onclick, icon, text, extra = '') {
 // ── tabs ─────────────────────────────────────────────────────
 function spedTabs() {
   const tabs = [
-    { id: 'efd',      icon: 'file-code-2',  label: 'EFD ICMS/IPI' },
-    { id: 'pacote',   icon: 'archive',      label: 'Pacote do Contador' },
-    { id: 'portal',   icon: 'link-2',       label: 'Portal Contábil' },
+    { id: 'efd',         icon: 'file-code-2',    label: 'EFD ICMS/IPI' },
+    { id: 'efd_contrib', icon: 'file-text',       label: 'EFD Contribuições' },
+    { id: 'reinf',       icon: 'file-code',       label: 'EFD-Reinf' },
+    { id: 'dctfweb',     icon: 'file-check',      label: 'DCTFWeb' },
+    { id: 'ecf',         icon: 'calculator',      label: 'ECF' },
+    { id: 'pacote',      icon: 'archive',         label: 'Pacote do Contador' },
+    { id: 'portal',      icon: 'link-2',          label: 'Portal Contábil' },
   ];
   return `<div class="flex gap-1 overflow-x-auto pb-1 flex-wrap">
     ${tabs.map(t => `
@@ -55,11 +59,15 @@ function switchSpedTab(id) {
   spedSubTab = id;
   const el = document.getElementById('sped-subtab-content');
   if (!el) return;
-  if (id === 'efd')    renderSpedEfd(el);
-  else if (id === 'pacote') renderSpedPacote(el);
-  else if (id === 'portal') renderSpedPortal(el);
+  if (id === 'efd')          renderSpedEfd(el);
+  else if (id === 'efd_contrib') renderSpedEfdContrib(el);
+  else if (id === 'reinf')   renderSpedReinf(el);
+  else if (id === 'dctfweb') renderSpedDctfweb(el);
+  else if (id === 'ecf')     renderSpedEcf(el);
+  else if (id === 'pacote')  renderSpedPacote(el);
+  else if (id === 'portal')  renderSpedPortal(el);
   if (window.lucide) lucide.createIcons();
-  ['efd', 'pacote', 'portal'].forEach(t => {
+  ['efd','efd_contrib','reinf','dctfweb','ecf','pacote', 'portal'].forEach(t => {
     const btn = document.getElementById(`sped-tab-${t}`);
     if (!btn) return;
     if (t === id) btn.className = btn.className.replace(/bg-white[^\s]*/g, 'bg-amber-500 text-white').replace('dark:bg-slate-900', '').replace('border border-slate-200 dark:border-slate-800', '').replace('text-slate-600 dark:text-slate-300', '').replace('hover:bg-slate-50 dark:hover:bg-slate-800', '');
@@ -305,7 +313,7 @@ async function renderSped(container) {
             <i data-lucide="file-code-2" class="w-5 h-5 text-amber-400"></i>
             SPED Fiscal
           </h2>
-          <p class="text-xs text-slate-500 mt-0.5">EFD ICMS/IPI · Pacote do Contador · Portal Contábil</p>
+          <p class="text-xs text-slate-500 mt-0.5">EFD ICMS/IPI · EFD Contribuições · EFD-Reinf · DCTFWeb · ECF</p>
         </div>
       </div>
       ${spedTabs()}
@@ -313,4 +321,231 @@ async function renderSped(container) {
     </div>`;
   if (window.lucide) lucide.createIcons();
   renderSpedEfd(document.getElementById('sped-subtab-content'));
+}
+
+// ── EFD Contribuições (PIS/COFINS) ───────────────────────────
+async function renderSpedEfdContrib(el) {
+  const today = new Date();
+  const yyyy = today.getFullYear();
+  const mm = String(today.getMonth() + 1).padStart(2, '0');
+  el.innerHTML = `<div class="space-y-5">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+      <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5">
+        <div class="font-semibold text-slate-700 dark:text-slate-200 text-sm mb-4">EFD Contribuições — PIS/COFINS</div>
+        ${lblSped('Data Início')}<input type="date" id="efdcont-start" class="${inputSped()} mb-3" value="${yyyy}-${mm}-01" />
+        ${lblSped('Data Fim')}<input type="date" id="efdcont-end" class="${inputSped()} mb-4" value="${yyyy}-${mm}-${new Date(yyyy,today.getMonth()+1,0).getDate()}" />
+        <div class="flex gap-2 flex-wrap">
+          ${btnAmber('spedContribPreview()', 'bar-chart-2', 'Pré-visualizar')}
+          ${btnAmber('spedContribDownload()', 'download', 'Download .txt')}
+        </div>
+      </div>
+      <div id="efdcont-result" class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5">
+        <div class="text-xs text-slate-400 text-center py-8">Clique em Pré-visualizar para ver os KPIs do período.</div>
+      </div>
+    </div>
+  </div>`;
+  if (window.lucide) lucide.createIcons();
+}
+
+async function spedContribPreview() {
+  const s = document.getElementById('efdcont-start')?.value;
+  const e = document.getElementById('efdcont-end')?.value;
+  const data = await apiFetch(`/api/reports/efd-contribuicoes-preview?start_date=${s}&end_date=${e}`).catch(() => null);
+  const el = document.getElementById('efdcont-result');
+  if (!el) return;
+  if (!data) { el.innerHTML = '<div class="text-rose-400 text-xs text-center py-8">Erro ao carregar.</div>'; return; }
+  el.innerHTML = `<div class="space-y-3">
+    <div class="font-semibold text-sm text-slate-700 dark:text-slate-200">EFD Contribuições — Período ${s} a ${e}</div>
+    ${[
+      ['Receita Bruta', fBRL5(data.total_receita), 'text-blue-400'],
+      ['PIS Saída', fBRL5(data.pis_saida), 'text-rose-400'],
+      ['COFINS Saída', fBRL5(data.cofins_saida), 'text-rose-400'],
+      ['Total Compras', fBRL5(data.total_compras), 'text-slate-400'],
+      ['PIS Crédito Est.', fBRL5(data.pis_credito_estimado), 'text-emerald-400'],
+      ['COFINS Crédito Est.', fBRL5(data.cofins_credito_estimado), 'text-emerald-400'],
+      ['PIS a Recolher', fBRL5(data.pis_a_recolher), 'text-amber-400'],
+      ['COFINS a Recolher', fBRL5(data.cofins_a_recolher), 'text-amber-400'],
+    ].map(([l,v,c])=>`<div class="flex justify-between border-b border-slate-100 dark:border-slate-800 py-1.5 last:border-0"><span class="text-xs text-slate-400">${l}</span><span class="font-mono font-semibold text-xs ${c}">${v}</span></div>`).join('')}
+    <div class="text-[10px] text-slate-400 pt-1">Apuração: <strong>${data.tipo_apuracao}</strong> · ${data.count_nfe} NF-e</div>
+  </div>`;
+}
+
+async function spedContribDownload() {
+  const s = document.getElementById('efdcont-start')?.value;
+  const e = document.getElementById('efdcont-end')?.value;
+  const url = `/api/reports/efd-contribuicoes?start_date=${s}&end_date=${e}`;
+  const a = document.createElement('a'); a.href = url; a.click();
+}
+
+// ── EFD-Reinf ─────────────────────────────────────────────────
+async function renderSpedReinf(el) {
+  const today = new Date();
+  const comp = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`;
+  el.innerHTML = `<div class="space-y-5">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+      <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5">
+        <div class="font-semibold text-slate-700 dark:text-slate-200 text-sm mb-4">EFD-Reinf — Retenções na Fonte</div>
+        ${lblSped('Competência (AAAA-MM)')}
+        <input type="month" id="reinf-comp" class="${inputSped()} mb-4" value="${comp}" />
+        ${btnAmber('reinfPreview()', 'bar-chart-2', 'Pré-visualizar')}
+      </div>
+      <div id="reinf-result" class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5">
+        <div class="text-xs text-slate-400 text-center py-8">Selecione a competência e clique em Pré-visualizar.</div>
+      </div>
+    </div>
+    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5">
+      <div class="font-semibold text-sm text-slate-700 dark:text-slate-200 mb-3">Eventos EFD-Reinf</div>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        ${[
+          ['R-1000','Informações do Contribuinte','Obrigatório no início'],
+          ['R-2010','Serviços Tomados (INSS)','Retenções de PJ'],
+          ['R-4010','Pagamentos PF (IRRF)','Rendimentos à PF'],
+          ['R-4020','Pagamentos PJ','Retenções CSLL/PIS/COFINS'],
+          ['R-9000','Fechamento','Encerra os periódicos'],
+          ['R-1070','Proc. Judicial/Admin.','Suspensão do crédito'],
+        ].map(([ev,name,desc])=>`
+          <div class="border border-slate-100 dark:border-slate-800 rounded-xl p-3">
+            <div class="font-mono font-bold text-xs text-indigo-400">${ev}</div>
+            <div class="font-semibold text-xs text-slate-700 dark:text-slate-200 mt-1">${name}</div>
+            <div class="text-[10px] text-slate-400">${desc}</div>
+          </div>`).join('')}
+      </div>
+    </div>
+  </div>`;
+  if (window.lucide) lucide.createIcons();
+}
+
+async function reinfPreview() {
+  const comp = document.getElementById('reinf-comp')?.value;
+  const data = await apiFetch(`/api/reports/efd-reinf-preview?competencia=${comp}`).catch(() => null);
+  const el = document.getElementById('reinf-result');
+  if (!el) return;
+  if (!data) { el.innerHTML = '<div class="text-rose-400 text-xs text-center py-8">Erro ao carregar.</div>'; return; }
+  const eventos = Object.entries(data.eventos || {});
+  el.innerHTML = `<div class="space-y-2">
+    <div class="font-semibold text-sm text-slate-700 dark:text-slate-200">EFD-Reinf — ${comp}</div>
+    <div class="text-xs text-slate-400">${data.razao_social} · ${data.cnpj}</div>
+    ${eventos.map(([k,v])=>`<div class="flex items-start gap-2 border-b border-slate-100 dark:border-slate-800 py-2 last:border-0">
+      <span class="font-mono text-[10px] font-bold text-indigo-400 w-14 shrink-0">${k}</span>
+      <div class="flex-1 text-xs"><div class="text-slate-600 dark:text-slate-300">${v.descricao}</div>
+        ${v.valor !== undefined ? `<div class="text-slate-400">R$ ${parseFloat(v.valor||0).toLocaleString('pt-BR')}</div>` : ''}
+        ${v.ir_retido !== undefined ? `<div class="text-slate-400">IR: R$ ${parseFloat(v.ir_retido||0).toLocaleString('pt-BR')}</div>` : ''}
+        ${v.status ? `<div class="text-amber-400">${v.status}</div>` : ''}
+      </div>
+    </div>`).join('')}
+    <div class="bg-indigo-500/10 border border-indigo-500/20 rounded-xl p-3 text-xs text-indigo-400">
+      Total retenções estimadas: <strong>${fBRL5(data.total_retencoes_estimadas)}</strong> · Vence: ${data.vencimento?.split('-').reverse().join('/')||'-'}
+    </div>
+  </div>`;
+}
+
+// ── DCTFWeb ───────────────────────────────────────────────────
+async function renderSpedDctfweb(el) {
+  const today = new Date();
+  const comp = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`;
+  el.innerHTML = `<div class="space-y-5">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+      <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5">
+        <div class="font-semibold text-slate-700 dark:text-slate-200 text-sm mb-4">DCTFWeb — Declaração de Débitos</div>
+        ${lblSped('Competência (AAAA-MM)')}<input type="month" id="dctf-comp" class="${inputSped()} mb-4" value="${comp}" />
+        ${btnAmber('dctfPreview()', 'bar-chart-2', 'Pré-visualizar')}
+      </div>
+      <div id="dctf-result" class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5">
+        <div class="text-xs text-slate-400 text-center py-8">Selecione a competência e clique em Pré-visualizar.</div>
+      </div>
+    </div>
+  </div>`;
+  if (window.lucide) lucide.createIcons();
+}
+
+async function dctfPreview() {
+  const comp = document.getElementById('dctf-comp')?.value;
+  const data = await apiFetch(`/api/reports/dctfweb-preview?competencia=${comp}`).catch(() => null);
+  const el = document.getElementById('dctf-result');
+  if (!el) return;
+  if (!data) { el.innerHTML = '<div class="text-rose-400 text-xs text-center py-8">Erro ao carregar.</div>'; return; }
+  const debitos = Object.entries(data.debitos || {});
+  el.innerHTML = `<div class="space-y-2">
+    <div class="font-semibold text-sm text-slate-700 dark:text-slate-200">DCTFWeb — ${comp}</div>
+    <div class="text-xs text-slate-400">${data.razao_social} · ${data.cnpj}</div>
+    <div class="font-semibold text-xs text-slate-500 mt-3 mb-1">Débitos</div>
+    ${debitos.map(([k,v])=>`<div class="flex justify-between border-b border-slate-100 dark:border-slate-800 py-1.5 last:border-0">
+      <span class="text-xs text-slate-400">${k.replace(/_/g,' ')}</span>
+      <span class="font-mono text-xs font-bold text-rose-400">${fBRL5(v)}</span>
+    </div>`).join('')}
+    <div class="flex justify-between py-2 border-t border-slate-200 dark:border-slate-700">
+      <span class="text-sm font-bold text-slate-600 dark:text-slate-200">Total Débitos</span>
+      <span class="font-mono font-bold text-rose-400">${fBRL5(data.total_debitos)}</span>
+    </div>
+    <div class="flex justify-between py-1"><span class="text-xs text-slate-400">FGTS (separado)</span><span class="font-mono text-xs">${fBRL5(data.total_fgts)}</span></div>
+    <div class="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 text-xs space-y-1 mt-2">
+      <div class="text-blue-400">Venc. DARF: <strong>${data.vencimento_darf?.split('-').reverse().join('/')||'-'}</strong></div>
+      <div class="text-slate-400">Venc. FGTS: ${data.vencimento_fgts?.split('-').reverse().join('/')||'-'}</div>
+      <div class="text-slate-400 text-[10px]">${data.observacao}</div>
+    </div>
+  </div>`;
+}
+
+// ── ECF ───────────────────────────────────────────────────────
+async function renderSpedEcf(el) {
+  const year = new Date().getFullYear();
+  el.innerHTML = `<div class="space-y-5">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+      <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5">
+        <div class="font-semibold text-slate-700 dark:text-slate-200 text-sm mb-4">ECF — Escrituração Contábil Fiscal (IRPJ/CSLL)</div>
+        ${lblSped('Ano-Calendário')}<input type="number" id="ecf-year" class="${inputSped()} mb-4" value="${year - 1}" min="2020" max="${year}" />
+        ${btnAmber('ecfPreview()', 'bar-chart-2', 'Pré-visualizar')}
+      </div>
+      <div id="ecf-result" class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5">
+        <div class="text-xs text-slate-400 text-center py-8">Selecione o ano e clique em Pré-visualizar.</div>
+      </div>
+    </div>
+    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5">
+      <div class="font-semibold text-sm text-slate-700 dark:text-slate-200 mb-3">Blocos ECF (Layout RFB)</div>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+        ${[['0','Abertura','Identificação da empresa'],['C','Lucro Contábil','Resultado antes ajustes'],
+          ['E','LALUR','Adições / Exclusões'],['J','IRPJ / CSLL','Cálculo final'],
+          ['K','Mapeamento','Plano Referencial'],['L','Lucro Real','Base definitiva'],
+          ['M','CSLL','Apuração separada'],['P','Lucro Presumido','Para LP/SN'],
+        ].map(([b,n,d])=>`<div class="border border-slate-100 dark:border-slate-800 rounded-xl p-3">
+          <div class="font-mono font-bold text-fuchsia-400 text-sm">Bloco ${b}</div>
+          <div class="font-semibold text-slate-700 dark:text-slate-200 mt-1">${n}</div>
+          <div class="text-slate-400 text-[10px]">${d}</div>
+        </div>`).join('')}
+      </div>
+    </div>
+  </div>`;
+  if (window.lucide) lucide.createIcons();
+}
+
+async function ecfPreview() {
+  const year = parseInt(document.getElementById('ecf-year')?.value) || new Date().getFullYear() - 1;
+  const data = await apiFetch(`/api/reports/ecf-preview?year=${year}`).catch(() => null);
+  const el = document.getElementById('ecf-result');
+  if (!el) return;
+  if (!data) { el.innerHTML = '<div class="text-rose-400 text-xs text-center py-8">Erro ao carregar.</div>'; return; }
+  el.innerHTML = `<div class="space-y-2">
+    <div class="font-semibold text-sm text-slate-700 dark:text-slate-200">ECF ${year}</div>
+    <div class="text-xs text-slate-400">${data.razao_social} · ${data.cnpj}</div>
+    <div class="text-xs font-semibold text-fuchsia-400">Regime: ${data.regime}</div>
+    ${[
+      ['Receita Bruta', fBRL5(data.receita_bruta_total), 'text-blue-400'],
+      ['Despesas Totais', fBRL5(data.total_despesas), 'text-rose-400'],
+      ['Lucro Bruto Contábil', fBRL5(data.lucro_bruto_contabil), 'text-emerald-400'],
+      ['Base IRPJ', fBRL5(data.base_calculo_irpj), 'text-slate-400'],
+      ['IRPJ 15%', fBRL5(data.irpj_normal_15pct), 'text-fuchsia-400'],
+      ['IRPJ Adicional 10%', fBRL5(data.irpj_adicional_10pct), 'text-fuchsia-400'],
+      ['CSLL 9%', fBRL5(data.csll_total), 'text-fuchsia-400'],
+    ].map(([l,v,c])=>`<div class="flex justify-between border-b border-slate-100 dark:border-slate-800 py-1.5 last:border-0">
+      <span class="text-xs text-slate-400">${l}</span><span class="font-mono text-xs font-bold ${c}">${v}</span>
+    </div>`).join('')}
+    <div class="flex justify-between py-2 border-t border-slate-200 dark:border-slate-700">
+      <span class="text-sm font-bold text-slate-600 dark:text-slate-200">Total IRPJ + CSLL</span>
+      <span class="font-mono font-bold text-fuchsia-400">${fBRL5(data.total_impostos_federais)}</span>
+    </div>
+    <div class="bg-fuchsia-500/10 border border-fuchsia-500/20 rounded-xl p-3 text-xs text-fuchsia-400">
+      Prazo entrega: <strong>${data.prazo_entrega?.split('-').reverse().join('/')||'-'}</strong>
+      <div class="text-slate-400 text-[10px] mt-1">${data.observacao}</div>
+    </div>
+  </div>`;
 }

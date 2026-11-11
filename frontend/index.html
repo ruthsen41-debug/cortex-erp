@@ -135,7 +135,25 @@
       </button>
       <button onclick="switchTab('sped')" id="nav-sped" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
         <i data-lucide="file-code-2" class="w-4 h-4 text-amber-400"></i>
-        <span>SPED Fiscal (EFD)</span>
+        <span>SPED / EFD / ECF</span>
+      </button>
+      <button onclick="switchTab('simples')" id="nav-simples" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
+        <i data-lucide="landmark" class="w-4 h-4 text-green-400"></i>
+        <span>Simples Nacional &amp; DAS</span>
+      </button>
+      <button onclick="switchTab('patrimony')" id="nav-patrimony" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
+        <i data-lucide="building" class="w-4 h-4 text-purple-400"></i>
+        <span>Patrimônio &amp; Ativos Fixos</span>
+      </button>
+
+      <div class="cx-section pt-4 px-3 py-1 font-bold uppercase">Governança</div>
+      <button onclick="switchTab('obligations')" id="nav-obligations" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
+        <i data-lucide="calendar-check" class="w-4 h-4 text-sky-400"></i>
+        <span>Calendário de Obrigações</span>
+      </button>
+      <button onclick="switchTab('audit')" id="nav-audit" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
+        <i data-lucide="shield-check" class="w-4 h-4 text-cyan-400"></i>
+        <span>Auditoria do Sistema</span>
       </button>
     </nav>
 
@@ -223,6 +241,10 @@
   <script src="/static/contracts.js"></script>
   <script src="/static/returns.js"></script>
   <script src="/static/sped.js"></script>
+  <script src="/static/patrimony.js"></script>
+  <script src="/static/simples.js"></script>
+  <script src="/static/audit.js"></script>
+  <script src="/static/obligations.js"></script>
   <script src="/static/theme.js"></script>
   <script>
     function toggleSidebar() {
