@@ -44,6 +44,11 @@ function dpTabs() {
     { id: 'afastamentos', icon: 'calendar-x',     label: 'Afastamentos' },
     { id: 'atestados',    icon: 'file-heart',      label: 'Atestados' },
     { id: 'cat',          icon: 'triangle-alert',  label: 'CAT' },
+    { id: 'ponto',        icon: 'clock',           label: 'Ponto' },
+    { id: 'banco_horas',  icon: 'timer',           label: 'Banco de Horas' },
+    { id: 'cargos',       icon: 'briefcase',       label: 'Cargos & Depts' },
+    { id: 'historico',    icon: 'trending-up',     label: 'Histórico Salarial' },
+    { id: 'obrigacoes',   icon: 'file-check',      label: 'Obrigações' },
   ];
   return `<div class="flex gap-1 overflow-x-auto pb-1 flex-wrap">
     ${tabs.map(t => `
@@ -94,6 +99,11 @@ async function switchDpTab(tab, noRebuildTabs = false) {
     case 'afastamentos': await renderAfastamentos(body); break;
     case 'atestados':    await renderAtestados(body); break;
     case 'cat':          await renderCat(body); break;
+    case 'ponto':        await renderPonto(body); break;
+    case 'banco_horas':  await renderBancoHoras(body); break;
+    case 'cargos':       await renderCargos(body); break;
+    case 'historico':    await renderHistoricoSalarial(body); break;
+    case 'obrigacoes':   renderObrigacoes(body); break;
   }
   if (window.lucide) lucide.createIcons();
 }
@@ -1454,4 +1464,810 @@ async function catDelete(id) {
     switchDpTab('cat');
     if (typeof showToast === 'function') showToast('CAT excluída.', 'success');
   } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ── PONTO ELETRÔNICO ─────────────────────────────────────────────────────────
+
+let pontoEmpId = null;
+let pontoMes = new Date().toISOString().slice(0, 7);
+
+async function renderPonto(el) {
+  const empOpts = dpEmployees.filter(e => e.active).map(e =>
+    `<option value="${e.id}">${e.name}</option>`).join('');
+  el.innerHTML = `
+    <div class="flex flex-wrap gap-3 mb-5 items-end">
+      <div>
+        ${labelCls('Funcionário')}
+        <select id="ponto-emp" class="${inputCls()}" onchange="pontoLoad()" style="min-width:200px">
+          <option value="">Selecione...</option>${empOpts}
+        </select>
+      </div>
+      <div>
+        ${labelCls('Mês')}
+        <input type="month" id="ponto-mes" value="${pontoMes}" class="${inputCls()}" onchange="pontoLoad()">
+      </div>
+      <button onclick="pontoOpenModal()" class="bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-2">
+        <i data-lucide="plus" class="w-3.5 h-3.5"></i> Lançar
+      </button>
+      <button onclick="pontoEspelho()" class="bg-slate-600 hover:bg-slate-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-2">
+        <i data-lucide="printer" class="w-3.5 h-3.5"></i> Espelho
+      </button>
+    </div>
+    <div id="ponto-kpis" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5"></div>
+    <div id="ponto-table"></div>
+    <div id="ponto-modal" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" style="display:none!important">
+      <div class="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl p-6 w-full max-w-lg">
+        <h3 class="font-bold text-slate-800 dark:text-slate-100 mb-4">Lançar Ponto</h3>
+        <input type="hidden" id="ponto-rec-id">
+        <div class="grid grid-cols-2 gap-3 mb-3">
+          <div>${labelCls('Data')}<input type="date" id="ponto-data" class="${inputCls()}"></div>
+          <div>${labelCls('Ocorrência')}
+            <select id="ponto-ocorrencia" class="${inputCls()}">
+              <option value="normal">Normal</option>
+              <option value="falta_justificada">Falta Justificada</option>
+              <option value="falta_injustificada">Falta Injustificada</option>
+              <option value="feriado">Feriado</option>
+              <option value="folga">Folga</option>
+              <option value="afastamento">Afastamento</option>
+              <option value="meio_periodo">Meio Período</option>
+            </select>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3 mb-3">
+          <div>${labelCls('Entrada')}<input type="time" id="ponto-entrada" class="${inputCls()}"></div>
+          <div>${labelCls('Saída Almoço')}<input type="time" id="ponto-saida-alm" class="${inputCls()}"></div>
+          <div>${labelCls('Retorno Almoço')}<input type="time" id="ponto-ret-alm" class="${inputCls()}"></div>
+          <div>${labelCls('Saída')}<input type="time" id="ponto-saida" class="${inputCls()}"></div>
+        </div>
+        <div class="mb-3">${labelCls('Justificativa')}<input type="text" id="ponto-justif" class="${inputCls()}" placeholder="Opcional"></div>
+        <div class="flex justify-end gap-2">
+          <button onclick="pontoCloseModal()" class="text-xs px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300">Cancelar</button>
+          <button onclick="pontoSave()" class="bg-violet-600 text-white text-xs font-semibold px-4 py-2 rounded-xl">Salvar</button>
+        </div>
+      </div>
+    </div>`;
+  if (window.lucide) lucide.createIcons();
+  if (pontoEmpId) {
+    document.getElementById('ponto-emp').value = pontoEmpId;
+    await pontoLoad();
+  }
+}
+
+async function pontoLoad() {
+  const empSel = document.getElementById('ponto-emp');
+  const mesSel = document.getElementById('ponto-mes');
+  if (!empSel || !mesSel) return;
+  pontoEmpId = empSel.value ? parseInt(empSel.value) : null;
+  pontoMes = mesSel.value;
+  if (!pontoEmpId) return;
+  try {
+    const rows = await apiFetch(`/api/dp/ponto?employee_id=${pontoEmpId}&mes=${pontoMes}`);
+    const kpiEl = document.getElementById('ponto-kpis');
+    const tblEl = document.getElementById('ponto-table');
+    if (!kpiEl || !tblEl) return;
+    const totalDias = rows.filter(r => r.tipo_ocorrencia === 'normal' || r.tipo_ocorrencia === 'meio_periodo').length;
+    const totalExtra = rows.reduce((s, r) => s + (r.horas_extras || 0), 0);
+    const totalFalt = rows.filter(r => r.tipo_ocorrencia === 'falta_justificada' || r.tipo_ocorrencia === 'falta_injustificada').length;
+    kpiEl.innerHTML = [
+      kpiDP('Dias Trabalhados', totalDias, pontoMes, 'calendar-check', 'text-emerald-600'),
+      kpiDP('Horas Extras', totalExtra.toFixed(2) + 'h', 'no mês', 'clock', 'text-blue-600'),
+      kpiDP('Faltas', totalFalt, 'no mês', 'calendar-x', 'text-rose-500'),
+    ].join('');
+    const ocorClass = {
+      normal: 'text-emerald-600', falta_justificada: 'text-amber-500', falta_injustificada: 'text-rose-500',
+      feriado: 'text-blue-500', folga: 'text-purple-500', afastamento: 'text-orange-500', meio_periodo: 'text-teal-500',
+    };
+    const trs = rows.map(r => `
+      <tr class="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/40">
+        <td class="px-3 py-2 text-xs">${fDate2(r.data)}</td>
+        <td class="px-3 py-2 text-xs font-mono">${r.entrada || '-'}</td>
+        <td class="px-3 py-2 text-xs font-mono">${r.saida_almoco || '-'}</td>
+        <td class="px-3 py-2 text-xs font-mono">${r.retorno_almoco || '-'}</td>
+        <td class="px-3 py-2 text-xs font-mono">${r.saida || '-'}</td>
+        <td class="px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200">${(r.horas_trabalhadas || 0).toFixed(2)}h</td>
+        <td class="px-3 py-2 text-xs text-blue-600 font-semibold">${(r.horas_extras || 0) > 0 ? '+' + r.horas_extras.toFixed(2) + 'h' : '-'}</td>
+        <td class="px-3 py-2 text-xs text-rose-500">${(r.horas_faltantes || 0) > 0 ? '-' + r.horas_faltantes.toFixed(2) + 'h' : '-'}</td>
+        <td class="px-3 py-2 text-xs font-semibold ${ocorClass[r.tipo_ocorrencia] || ''}">${r.tipo_ocorrencia}</td>
+        <td class="px-3 py-2 text-xs">${r.aprovado ? '✓' : ''}</td>
+        <td class="px-3 py-2 text-xs whitespace-nowrap">
+          <button onclick="pontoEdit(${JSON.stringify(r).replace(/"/g,'&quot;')})" class="text-indigo-500 hover:underline mr-2">Editar</button>
+          <button onclick="pontoDelete(${r.id})" class="text-rose-500 hover:underline">Excluir</button>
+        </td>
+      </tr>`).join('');
+    tblEl.innerHTML = `${card2(`<div class="overflow-x-auto"><table class="w-full text-sm">
+      <thead><tr class="text-xs text-slate-400 uppercase border-b border-slate-100 dark:border-slate-800">
+        <th class="px-3 py-2 text-left">Data</th><th class="px-3 py-2">Entrada</th><th class="px-3 py-2">S.Almoço</th>
+        <th class="px-3 py-2">R.Almoço</th><th class="px-3 py-2">Saída</th><th class="px-3 py-2">H.Trab</th>
+        <th class="px-3 py-2">H.Extra</th><th class="px-3 py-2">H.Falt</th><th class="px-3 py-2">Ocorrência</th>
+        <th class="px-3 py-2">Aprov</th><th class="px-3 py-2">Ações</th>
+      </tr></thead>
+      <tbody>${trs || '<tr><td colspan="11" class="px-3 py-6 text-center text-slate-400 text-xs">Nenhum registro.</td></tr>'}</tbody>
+    </table></div>`)}`;
+    if (window.lucide) lucide.createIcons();
+  } catch (e) { console.error(e); }
+}
+
+function pontoOpenModal() {
+  document.getElementById('ponto-rec-id').value = '';
+  document.getElementById('ponto-data').value = new Date().toISOString().slice(0,10);
+  ['ponto-entrada','ponto-saida-alm','ponto-ret-alm','ponto-saida'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  document.getElementById('ponto-ocorrencia').value = 'normal';
+  document.getElementById('ponto-justif').value = '';
+  document.getElementById('ponto-modal').style.display = 'flex';
+}
+
+function pontoEdit(r) {
+  document.getElementById('ponto-rec-id').value = r.id;
+  document.getElementById('ponto-data').value = r.data || '';
+  document.getElementById('ponto-entrada').value = r.entrada || '';
+  document.getElementById('ponto-saida-alm').value = r.saida_almoco || '';
+  document.getElementById('ponto-ret-alm').value = r.retorno_almoco || '';
+  document.getElementById('ponto-saida').value = r.saida || '';
+  document.getElementById('ponto-ocorrencia').value = r.tipo_ocorrencia || 'normal';
+  document.getElementById('ponto-justif').value = r.justificativa || '';
+  document.getElementById('ponto-modal').style.display = 'flex';
+}
+
+function pontoCloseModal() {
+  document.getElementById('ponto-modal').style.display = 'none';
+}
+
+async function pontoSave() {
+  if (!pontoEmpId) { alert('Selecione um funcionário primeiro.'); return; }
+  const body = {
+    employee_id: pontoEmpId,
+    data: document.getElementById('ponto-data').value,
+    entrada: document.getElementById('ponto-entrada').value,
+    saida_almoco: document.getElementById('ponto-saida-alm').value,
+    retorno_almoco: document.getElementById('ponto-ret-alm').value,
+    saida: document.getElementById('ponto-saida').value,
+    tipo_ocorrencia: document.getElementById('ponto-ocorrencia').value,
+    justificativa: document.getElementById('ponto-justif').value,
+  };
+  try {
+    await apiFetch('/api/dp/ponto', { method: 'POST', body: JSON.stringify(body) });
+    pontoCloseModal();
+    pontoLoad();
+    if (typeof showToast === 'function') showToast('Ponto salvo.', 'success');
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+async function pontoDelete(id) {
+  if (!confirm('Excluir este registro?')) return;
+  try {
+    await apiFetch(`/api/dp/ponto/${id}`, { method: 'DELETE' });
+    pontoLoad();
+    if (typeof showToast === 'function') showToast('Excluído.', 'success');
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+async function pontoEspelho() {
+  if (!pontoEmpId) { alert('Selecione um funcionário.'); return; }
+  try {
+    const d = await apiFetch(`/api/dp/ponto/espelho/${pontoEmpId}/${pontoMes}`);
+    const trs = (d.registros || []).map(r => `
+      <tr><td>${fDate2(r.data)}</td><td>${r.entrada||'-'}</td><td>${r.saida_almoco||'-'}</td>
+      <td>${r.retorno_almoco||'-'}</td><td>${r.saida||'-'}</td>
+      <td>${(r.horas_trabalhadas||0).toFixed(2)}h</td><td>${r.tipo_ocorrencia}</td></tr>`).join('');
+    const w = window.open('', '_blank');
+    w.document.write(`<html><head><title>Espelho de Ponto</title>
+      <style>body{font-family:sans-serif;padding:20px}table{width:100%;border-collapse:collapse}
+      th,td{border:1px solid #ccc;padding:6px 10px;text-align:left}th{background:#f5f5f5}</style></head>
+      <body><h2>Espelho de Ponto — ${d.employee_name} — ${pontoMes}</h2>
+      <p>Total trabalhado: <b>${d.total_horas_trabalhadas}h</b> | Extras: <b>${d.total_horas_extras}h</b> | Faltas: <b>${d.total_faltas}</b> | Banco: <b>${d.saldo_banco}h</b></p>
+      <table><thead><tr><th>Data</th><th>Entrada</th><th>S.Almoço</th><th>R.Almoço</th><th>Saída</th><th>H.Trab</th><th>Ocorrência</th></tr></thead>
+      <tbody>${trs}</tbody></table></body></html>`);
+    w.document.close();
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ── BANCO DE HORAS ───────────────────────────────────────────────────────────
+
+let bhEmpId = null;
+
+async function renderBancoHoras(el) {
+  const empOpts = dpEmployees.filter(e => e.active).map(e =>
+    `<option value="${e.id}">${e.name}</option>`).join('');
+  el.innerHTML = `
+    <div class="flex gap-3 items-end mb-5">
+      <div>
+        ${labelCls('Funcionário')}
+        <select id="bh-emp" class="${inputCls()}" onchange="bhLoad()" style="min-width:220px">
+          <option value="">Selecione...</option>${empOpts}
+        </select>
+      </div>
+    </div>
+    <div id="bh-saldo"></div>
+    <div id="bh-hist"></div>
+    <div id="bh-modal" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" style="display:none!important">
+      <div class="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl p-6 w-full max-w-sm">
+        <h3 class="font-bold text-slate-800 dark:text-slate-100 mb-4">Compensar Horas</h3>
+        <div class="mb-3">${labelCls('Data')}<input type="date" id="bh-data" class="${inputCls()}" value="${new Date().toISOString().slice(0,10)}"></div>
+        <div class="mb-3">${labelCls('Horas a compensar')}<input type="number" id="bh-horas" class="${inputCls()}" placeholder="ex: 2.5" step="0.5" min="0.5"></div>
+        <div class="mb-4">${labelCls('Observação')}<input type="text" id="bh-obs" class="${inputCls()}"></div>
+        <div class="flex justify-end gap-2">
+          <button onclick="bhCloseModal()" class="text-xs px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700">Cancelar</button>
+          <button onclick="bhSave()" class="bg-violet-600 text-white text-xs font-semibold px-4 py-2 rounded-xl">Compensar</button>
+        </div>
+      </div>
+    </div>`;
+  if (bhEmpId) {
+    document.getElementById('bh-emp').value = bhEmpId;
+    await bhLoad();
+  }
+}
+
+async function bhLoad() {
+  const sel = document.getElementById('bh-emp');
+  if (!sel) return;
+  bhEmpId = sel.value ? parseInt(sel.value) : null;
+  if (!bhEmpId) return;
+  try {
+    const d = await apiFetch(`/api/dp/banco-horas?employee_id=${bhEmpId}`);
+    const saldoEl = document.getElementById('bh-saldo');
+    const histEl = document.getElementById('bh-hist');
+    const saldo = d.saldo || 0;
+    const cor = saldo >= 0 ? 'text-emerald-600' : 'text-rose-500';
+    const bg = saldo >= 0 ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200' : 'bg-rose-50 dark:bg-rose-900/20 border-rose-200';
+    saldoEl.innerHTML = `
+      <div class="rounded-2xl border p-5 mb-4 ${bg} flex items-center justify-between">
+        <div>
+          <div class="text-xs font-semibold text-slate-500 mb-1">Saldo Atual</div>
+          <div class="text-3xl font-extrabold ${cor}">${saldo >= 0 ? '+' : ''}${saldo.toFixed(2)}h</div>
+          <div class="text-xs text-slate-400 mt-1">${Math.floor(Math.abs(saldo))}h ${Math.round((Math.abs(saldo) % 1) * 60)}min</div>
+        </div>
+        <button onclick="bhOpenModal()" class="bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold px-4 py-2 rounded-xl">
+          Compensar Horas
+        </button>
+      </div>`;
+    const rows = (d.historico || []).map(r => {
+      const tipoColor = r.tipo === 'credito' ? 'text-emerald-600' : r.tipo === 'compensacao' ? 'text-amber-500' : 'text-rose-500';
+      return `<tr class="border-b border-slate-100 dark:border-slate-800">
+        <td class="px-3 py-2 text-xs">${fDate2(r.data)}</td>
+        <td class="px-3 py-2 text-xs font-semibold ${tipoColor}">${r.tipo}</td>
+        <td class="px-3 py-2 text-xs font-semibold ${r.horas >= 0 ? 'text-emerald-600' : 'text-rose-500'}">${r.horas >= 0 ? '+' : ''}${(r.horas || 0).toFixed(2)}h</td>
+        <td class="px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200">${(r.saldo_acumulado || 0).toFixed(2)}h</td>
+        <td class="px-3 py-2 text-xs text-slate-500">${r.observacao || '-'}</td>
+      </tr>`;
+    }).join('');
+    histEl.innerHTML = `${card2(`<div class="overflow-x-auto"><table class="w-full text-sm">
+      <thead><tr class="text-xs text-slate-400 uppercase border-b border-slate-100 dark:border-slate-800">
+        <th class="px-3 py-2 text-left">Data</th><th class="px-3 py-2">Tipo</th>
+        <th class="px-3 py-2">Horas</th><th class="px-3 py-2">Saldo</th><th class="px-3 py-2">Observação</th>
+      </tr></thead>
+      <tbody>${rows || '<tr><td colspan="5" class="px-3 py-6 text-center text-slate-400 text-xs">Nenhum lançamento.</td></tr>'}</tbody>
+    </table></div>`)}`;
+    if (window.lucide) lucide.createIcons();
+  } catch (e) { console.error(e); }
+}
+
+function bhOpenModal() { document.getElementById('bh-modal').style.display = 'flex'; }
+function bhCloseModal() { document.getElementById('bh-modal').style.display = 'none'; }
+
+async function bhSave() {
+  if (!bhEmpId) return;
+  const body = {
+    employee_id: bhEmpId,
+    data: document.getElementById('bh-data').value,
+    horas: parseFloat(document.getElementById('bh-horas').value || 0),
+    observacao: document.getElementById('bh-obs').value,
+  };
+  try {
+    await apiFetch('/api/dp/banco-horas/compensar', { method: 'POST', body: JSON.stringify(body) });
+    bhCloseModal();
+    bhLoad();
+    if (typeof showToast === 'function') showToast('Compensação registrada.', 'success');
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ── CARGOS & DEPARTAMENTOS ───────────────────────────────────────────────────
+
+let cargosSubTab = 'cargos';
+
+async function renderCargos(el) {
+  el.innerHTML = `
+    <div class="flex gap-2 mb-5">
+      <button onclick="cargosTab('cargos')" id="ct-cargos"
+        class="px-4 py-2 rounded-xl text-xs font-semibold bg-violet-600 text-white">Cargos</button>
+      <button onclick="cargosTab('depts')" id="ct-depts"
+        class="px-4 py-2 rounded-xl text-xs font-semibold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">Departamentos</button>
+    </div>
+    <div id="cargos-body"></div>
+    <div id="cargo-modal" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" style="display:none!important">
+      <div class="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl p-6 w-full max-w-md">
+        <h3 id="cargo-modal-title" class="font-bold text-slate-800 dark:text-slate-100 mb-4">Novo Cargo</h3>
+        <input type="hidden" id="cargo-id">
+        <div class="grid grid-cols-2 gap-3 mb-3">
+          <div class="col-span-2">${labelCls('Nome do Cargo')}<input type="text" id="cargo-nome" class="${inputCls()}"></div>
+          <div>${labelCls('CBO')}<input type="text" id="cargo-cbo" class="${inputCls()}" placeholder="ex: 2124-20"></div>
+          <div>${labelCls('Nível')}<input type="text" id="cargo-nivel" class="${inputCls()}" placeholder="ex: Júnior"></div>
+          <div>${labelCls('Salário Base (R$)')}<input type="number" id="cargo-sal-base" class="${inputCls()}" step="0.01"></div>
+          <div>${labelCls('Salário Máx (R$)')}<input type="number" id="cargo-sal-max" class="${inputCls()}" step="0.01"></div>
+        </div>
+        <div class="mb-4">${labelCls('Descrição')}<input type="text" id="cargo-desc" class="${inputCls()}"></div>
+        <div class="flex justify-end gap-2">
+          <button onclick="cargoCloseModal()" class="text-xs px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700">Cancelar</button>
+          <button onclick="cargoSave()" class="bg-violet-600 text-white text-xs font-semibold px-4 py-2 rounded-xl">Salvar</button>
+        </div>
+      </div>
+    </div>
+    <div id="dept-modal" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" style="display:none!important">
+      <div class="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl p-6 w-full max-w-sm">
+        <h3 id="dept-modal-title" class="font-bold text-slate-800 dark:text-slate-100 mb-4">Novo Departamento</h3>
+        <input type="hidden" id="dept-id">
+        <div class="mb-3">${labelCls('Nome')}<input type="text" id="dept-nome" class="${inputCls()}"></div>
+        <div class="mb-3">${labelCls('Código')}<input type="text" id="dept-codigo" class="${inputCls()}"></div>
+        <div class="mb-4">${labelCls('Responsável')}
+          <select id="dept-resp" class="${inputCls()}">
+            <option value="">Nenhum</option>
+            ${dpEmployees.filter(e => e.active).map(e => `<option value="${e.id}">${e.name}</option>`).join('')}
+          </select>
+        </div>
+        <div class="flex justify-end gap-2">
+          <button onclick="deptCloseModal()" class="text-xs px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700">Cancelar</button>
+          <button onclick="deptSave()" class="bg-violet-600 text-white text-xs font-semibold px-4 py-2 rounded-xl">Salvar</button>
+        </div>
+      </div>
+    </div>`;
+  cargosSubTab = 'cargos';
+  await cargosLoadBody();
+}
+
+async function cargosTab(t) {
+  cargosSubTab = t;
+  ['cargos','depts'].forEach(id => {
+    const btn = document.getElementById(`ct-${id}`);
+    if (btn) {
+      btn.className = id === t
+        ? 'px-4 py-2 rounded-xl text-xs font-semibold bg-violet-600 text-white'
+        : 'px-4 py-2 rounded-xl text-xs font-semibold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800';
+    }
+  });
+  await cargosLoadBody();
+}
+
+async function cargosLoadBody() {
+  const body = document.getElementById('cargos-body');
+  if (!body) return;
+  if (cargosSubTab === 'cargos') {
+    const rows = await apiFetch('/api/dp/job-positions');
+    const trs = rows.map(r => `
+      <tr class="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/40">
+        <td class="px-3 py-2 text-sm font-medium text-slate-800 dark:text-slate-200">${r.nome}</td>
+        <td class="px-3 py-2 text-xs font-mono">${r.cbo || '-'}</td>
+        <td class="px-3 py-2 text-xs">${r.nivel || '-'}</td>
+        <td class="px-3 py-2 text-xs text-emerald-600 font-semibold">${fBRL2(r.salario_base)}</td>
+        <td class="px-3 py-2 text-xs text-blue-600 font-semibold">${fBRL2(r.salario_maximo)}</td>
+        <td class="px-3 py-2"><span class="text-[10px] font-bold ${r.ativo ? 'text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20' : 'text-slate-400 bg-slate-100 dark:bg-slate-800'} px-2 py-0.5 rounded-full">${r.ativo ? 'ATIVO' : 'INATIVO'}</span></td>
+        <td class="px-3 py-2 whitespace-nowrap">
+          <button onclick="cargoEdit(${JSON.stringify(r).replace(/"/g,'&quot;')})" class="text-indigo-500 hover:underline text-xs mr-2">Editar</button>
+          <button onclick="cargoDelete(${r.id})" class="text-rose-500 hover:underline text-xs">Excluir</button>
+        </td>
+      </tr>`).join('');
+    body.innerHTML = `
+      <div class="flex justify-end mb-3">
+        <button onclick="cargoOpenModal()" class="bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-2">
+          <i data-lucide="plus" class="w-3.5 h-3.5"></i> Novo Cargo
+        </button>
+      </div>
+      ${card2(`<div class="overflow-x-auto"><table class="w-full text-sm">
+        <thead><tr class="text-xs text-slate-400 uppercase border-b border-slate-100 dark:border-slate-800">
+          <th class="px-3 py-2 text-left">Cargo</th><th class="px-3 py-2">CBO</th><th class="px-3 py-2">Nível</th>
+          <th class="px-3 py-2">Sal. Base</th><th class="px-3 py-2">Sal. Máx</th><th class="px-3 py-2">Status</th><th class="px-3 py-2">Ações</th>
+        </tr></thead>
+        <tbody>${trs || '<tr><td colspan="7" class="px-3 py-6 text-center text-slate-400 text-xs">Nenhum cargo cadastrado.</td></tr>'}</tbody>
+      </table></div>`)}`;
+  } else {
+    const rows = await apiFetch('/api/dp/departments');
+    const trs = rows.map(r => `
+      <tr class="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/40">
+        <td class="px-3 py-2 text-sm font-medium text-slate-800 dark:text-slate-200">${r.nome}</td>
+        <td class="px-3 py-2 text-xs font-mono">${r.codigo || '-'}</td>
+        <td class="px-3 py-2 text-xs">${r.responsavel_nome || '-'}</td>
+        <td class="px-3 py-2 whitespace-nowrap">
+          <button onclick="deptEdit(${JSON.stringify(r).replace(/"/g,'&quot;')})" class="text-indigo-500 hover:underline text-xs mr-2">Editar</button>
+          <button onclick="deptDelete(${r.id})" class="text-rose-500 hover:underline text-xs">Excluir</button>
+        </td>
+      </tr>`).join('');
+    body.innerHTML = `
+      <div class="flex justify-end mb-3">
+        <button onclick="deptOpenModal()" class="bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-2">
+          <i data-lucide="plus" class="w-3.5 h-3.5"></i> Novo Departamento
+        </button>
+      </div>
+      ${card2(`<div class="overflow-x-auto"><table class="w-full text-sm">
+        <thead><tr class="text-xs text-slate-400 uppercase border-b border-slate-100 dark:border-slate-800">
+          <th class="px-3 py-2 text-left">Departamento</th><th class="px-3 py-2">Código</th>
+          <th class="px-3 py-2">Responsável</th><th class="px-3 py-2">Ações</th>
+        </tr></thead>
+        <tbody>${trs || '<tr><td colspan="4" class="px-3 py-6 text-center text-slate-400 text-xs">Nenhum departamento.</td></tr>'}</tbody>
+      </table></div>`)}`;
+  }
+  if (window.lucide) lucide.createIcons();
+}
+
+function cargoOpenModal() {
+  document.getElementById('cargo-modal-title').textContent = 'Novo Cargo';
+  ['cargo-id','cargo-nome','cargo-cbo','cargo-nivel','cargo-desc'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('cargo-sal-base').value = 0;
+  document.getElementById('cargo-sal-max').value = 0;
+  document.getElementById('cargo-modal').style.display = 'flex';
+}
+function cargoEdit(r) {
+  document.getElementById('cargo-modal-title').textContent = 'Editar Cargo';
+  document.getElementById('cargo-id').value = r.id;
+  document.getElementById('cargo-nome').value = r.nome || '';
+  document.getElementById('cargo-cbo').value = r.cbo || '';
+  document.getElementById('cargo-nivel').value = r.nivel || '';
+  document.getElementById('cargo-sal-base').value = r.salario_base || 0;
+  document.getElementById('cargo-sal-max').value = r.salario_maximo || 0;
+  document.getElementById('cargo-desc').value = r.descricao || '';
+  document.getElementById('cargo-modal').style.display = 'flex';
+}
+function cargoCloseModal() { document.getElementById('cargo-modal').style.display = 'none'; }
+async function cargoSave() {
+  const id = document.getElementById('cargo-id').value;
+  const body = {
+    nome: document.getElementById('cargo-nome').value,
+    cbo: document.getElementById('cargo-cbo').value,
+    nivel: document.getElementById('cargo-nivel').value,
+    salario_base: parseFloat(document.getElementById('cargo-sal-base').value || 0),
+    salario_maximo: parseFloat(document.getElementById('cargo-sal-max').value || 0),
+    descricao: document.getElementById('cargo-desc').value,
+  };
+  try {
+    if (id) await apiFetch(`/api/dp/job-positions/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+    else await apiFetch('/api/dp/job-positions', { method: 'POST', body: JSON.stringify(body) });
+    cargoCloseModal();
+    cargosLoadBody();
+    if (typeof showToast === 'function') showToast('Cargo salvo.', 'success');
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+async function cargoDelete(id) {
+  if (!confirm('Excluir este cargo?')) return;
+  await apiFetch(`/api/dp/job-positions/${id}`, { method: 'DELETE' });
+  cargosLoadBody();
+}
+
+function deptOpenModal() {
+  document.getElementById('dept-modal-title').textContent = 'Novo Departamento';
+  ['dept-id','dept-nome','dept-codigo'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('dept-resp').value = '';
+  document.getElementById('dept-modal').style.display = 'flex';
+}
+function deptEdit(r) {
+  document.getElementById('dept-modal-title').textContent = 'Editar Departamento';
+  document.getElementById('dept-id').value = r.id;
+  document.getElementById('dept-nome').value = r.nome || '';
+  document.getElementById('dept-codigo').value = r.codigo || '';
+  document.getElementById('dept-resp').value = r.responsavel_id || '';
+  document.getElementById('dept-modal').style.display = 'flex';
+}
+function deptCloseModal() { document.getElementById('dept-modal').style.display = 'none'; }
+async function deptSave() {
+  const id = document.getElementById('dept-id').value;
+  const body = {
+    nome: document.getElementById('dept-nome').value,
+    codigo: document.getElementById('dept-codigo').value,
+    responsavel_id: document.getElementById('dept-resp').value || null,
+  };
+  try {
+    if (id) await apiFetch(`/api/dp/departments/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+    else await apiFetch('/api/dp/departments', { method: 'POST', body: JSON.stringify(body) });
+    deptCloseModal();
+    cargosLoadBody();
+    if (typeof showToast === 'function') showToast('Departamento salvo.', 'success');
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+async function deptDelete(id) {
+  if (!confirm('Excluir este departamento?')) return;
+  await apiFetch(`/api/dp/departments/${id}`, { method: 'DELETE' });
+  cargosLoadBody();
+}
+
+// ── HISTÓRICO SALARIAL ───────────────────────────────────────────────────────
+
+let histEmpId = null;
+
+async function renderHistoricoSalarial(el) {
+  const empOpts = dpEmployees.map(e =>
+    `<option value="${e.id}">${e.name}</option>`).join('');
+  el.innerHTML = `
+    <div class="flex gap-3 items-end mb-5">
+      <div>
+        ${labelCls('Funcionário')}
+        <select id="hist-emp" class="${inputCls()}" onchange="histLoad()" style="min-width:220px">
+          <option value="">Selecione...</option>${empOpts}
+        </select>
+      </div>
+      <button onclick="histOpenModal()" class="bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-2">
+        <i data-lucide="plus" class="w-3.5 h-3.5"></i> Reajuste / Promoção
+      </button>
+    </div>
+    <div id="hist-timeline"></div>
+    <div id="hist-modal" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" style="display:none!important">
+      <div class="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl p-6 w-full max-w-md">
+        <h3 class="font-bold text-slate-800 dark:text-slate-100 mb-4">Registrar Alteração Salarial</h3>
+        <div class="mb-3">
+          ${labelCls('Funcionário')}
+          <select id="hist-modal-emp" class="${inputCls()}">
+            <option value="">Selecione...</option>
+            ${dpEmployees.filter(e => e.active).map(e => `<option value="${e.id}">${e.name}</option>`).join('')}
+          </select>
+        </div>
+        <div class="grid grid-cols-2 gap-3 mb-3">
+          <div>${labelCls('Data de Vigência')}<input type="date" id="hist-data" class="${inputCls()}"></div>
+          <div>${labelCls('Tipo')}
+            <select id="hist-tipo" class="${inputCls()}">
+              <option value="admissao">Admissão</option>
+              <option value="reajuste" selected>Reajuste</option>
+              <option value="promocao">Promoção</option>
+              <option value="transferencia">Transferência</option>
+              <option value="correcao">Correção</option>
+            </select>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3 mb-3">
+          <div>${labelCls('Novo Salário (R$)')}<input type="number" id="hist-sal-novo" class="${inputCls()}" step="0.01" oninput="histCalcPct()"></div>
+          <div>${labelCls('Variação (%)')} <div id="hist-pct" class="mt-1 text-sm font-semibold text-slate-600 dark:text-slate-300">-</div></div>
+        </div>
+        <div class="mb-3">${labelCls('Novo Cargo (opcional)')}<input type="text" id="hist-cargo-novo" class="${inputCls()}"></div>
+        <div class="mb-4">${labelCls('Motivo')}<input type="text" id="hist-motivo" class="${inputCls()}"></div>
+        <div class="flex justify-end gap-2">
+          <button onclick="histCloseModal()" class="text-xs px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700">Cancelar</button>
+          <button onclick="histSave()" class="bg-violet-600 text-white text-xs font-semibold px-4 py-2 rounded-xl">Salvar</button>
+        </div>
+      </div>
+    </div>`;
+  if (histEmpId) {
+    document.getElementById('hist-emp').value = histEmpId;
+    await histLoad();
+  }
+}
+
+async function histLoad() {
+  const sel = document.getElementById('hist-emp');
+  if (!sel) return;
+  histEmpId = sel.value ? parseInt(sel.value) : null;
+  if (!histEmpId) return;
+  const timeline = document.getElementById('hist-timeline');
+  try {
+    const rows = await apiFetch(`/api/dp/employees/${histEmpId}/salary-history`);
+    const tipoStyle = {
+      admissao: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700',
+      reajuste: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700',
+      promocao: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700',
+      transferencia: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700',
+      correcao: 'bg-slate-100 dark:bg-slate-800 text-slate-600',
+    };
+    const cards = rows.map(r => {
+      const pct = r.percentual || 0;
+      const pctStr = pct > 0 ? `+${pct.toFixed(2)}%` : pct < 0 ? `${pct.toFixed(2)}%` : '0%';
+      return `
+        <div class="relative pl-8 pb-4">
+          <div class="absolute left-2 top-2 w-3 h-3 rounded-full ${r.tipo === 'admissao' ? 'bg-emerald-500' : r.tipo === 'promocao' ? 'bg-purple-500' : 'bg-blue-500'}"></div>
+          <div class="absolute left-2.5 top-5 bottom-0 w-0.5 bg-slate-200 dark:bg-slate-700"></div>
+          <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-xs">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="text-xs font-semibold text-slate-500">${fDate2(r.data_vigencia)}</span>
+              <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${tipoStyle[r.tipo] || tipoStyle.correcao}">${r.tipo}</span>
+              <span class="ml-auto text-xs font-bold ${pct >= 0 ? 'text-emerald-600' : 'text-rose-500'}">${pctStr}</span>
+            </div>
+            <div class="flex items-center gap-3">
+              <span class="text-sm text-slate-400 line-through">${fBRL2(r.salario_anterior)}</span>
+              <span class="text-slate-400">→</span>
+              <span class="text-sm font-extrabold text-slate-800 dark:text-slate-100">${fBRL2(r.salario_novo)}</span>
+            </div>
+            ${r.motivo ? `<div class="text-xs text-slate-500 mt-1">${r.motivo}</div>` : ''}
+            ${r.cargo_novo ? `<div class="text-xs text-purple-500 mt-1">Cargo: ${r.cargo_novo}</div>` : ''}
+          </div>
+        </div>`;
+    }).join('');
+    timeline.innerHTML = cards || '<div class="text-center text-slate-400 text-xs py-8">Nenhum histórico registrado.</div>';
+  } catch (e) { console.error(e); }
+}
+
+function histOpenModal() {
+  document.getElementById('hist-data').value = new Date().toISOString().slice(0,10);
+  document.getElementById('hist-sal-novo').value = '';
+  document.getElementById('hist-tipo').value = 'reajuste';
+  document.getElementById('hist-cargo-novo').value = '';
+  document.getElementById('hist-motivo').value = '';
+  document.getElementById('hist-pct').textContent = '-';
+  if (histEmpId) document.getElementById('hist-modal-emp').value = histEmpId;
+  document.getElementById('hist-modal').style.display = 'flex';
+}
+
+function histCloseModal() { document.getElementById('hist-modal').style.display = 'none'; }
+
+function histCalcPct() {
+  const empId = parseInt(document.getElementById('hist-modal-emp').value);
+  const emp = dpEmployees.find(e => e.id === empId);
+  if (!emp) return;
+  const novo = parseFloat(document.getElementById('hist-sal-novo').value || 0);
+  const ant = parseFloat(emp.salary || 0);
+  const pct = ant > 0 ? ((novo - ant) / ant * 100).toFixed(2) : 0;
+  const el = document.getElementById('hist-pct');
+  el.textContent = `${pct >= 0 ? '+' : ''}${pct}%`;
+  el.className = `mt-1 text-sm font-semibold ${pct >= 0 ? 'text-emerald-600' : 'text-rose-500'}`;
+}
+
+async function histSave() {
+  const empId = document.getElementById('hist-modal-emp').value;
+  if (!empId) { alert('Selecione o funcionário.'); return; }
+  const body = {
+    data_vigencia: document.getElementById('hist-data').value,
+    salario_novo: parseFloat(document.getElementById('hist-sal-novo').value),
+    tipo: document.getElementById('hist-tipo').value,
+    cargo_novo: document.getElementById('hist-cargo-novo').value,
+    motivo: document.getElementById('hist-motivo').value,
+  };
+  try {
+    await apiFetch(`/api/dp/employees/${empId}/salary-history`, { method: 'POST', body: JSON.stringify(body) });
+    histCloseModal();
+    histEmpId = parseInt(empId);
+    document.getElementById('hist-emp').value = histEmpId;
+    histLoad();
+    const idx = dpEmployees.findIndex(e => e.id === histEmpId);
+    if (idx >= 0) dpEmployees[idx].salary = body.salario_novo;
+    if (typeof showToast === 'function') showToast('Histórico registrado.', 'success');
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+// ── OBRIGAÇÕES ACESSÓRIAS ────────────────────────────────────────────────────
+
+function renderObrigacoes(el) {
+  const anoAtual = new Date().getFullYear();
+  const mesAtual = new Date().toISOString().slice(0, 7);
+  el.innerHTML = `
+    <h2 class="font-bold text-slate-800 dark:text-slate-100 text-lg mb-5">Obrigações Acessórias</h2>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+      ${obrigCard('RAIS', 'Relação Anual de Informações Sociais', 'number', anoAtual, 'Gerar RAIS', 'obrigExec("rais", document.getElementById("v-rais").value)', 'v-rais', 'emerald')}
+      ${obrigCard('CAGED', 'Cadastro Geral de Empregados e Desempregados', 'month', mesAtual, 'Gerar CAGED', 'obrigExec("caged", document.getElementById("v-caged").value)', 'v-caged', 'blue')}
+      ${obrigCard('DIRF', 'Declaração do Imposto de Renda Retido na Fonte', 'number', anoAtual, 'Gerar DIRF', 'obrigExec("dirf", document.getElementById("v-dirf").value)', 'v-dirf', 'purple')}
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+      ${obrigCard('GPS/INSS', 'Guia da Previdência Social', 'month', mesAtual, 'Calcular GPS', 'obrigExec("gps", document.getElementById("v-gps").value)', 'v-gps', 'amber')}
+      ${obrigCard('DARF/IRRF', 'Documento de Arrecadação de Receitas Federais', 'month', mesAtual, 'Calcular DARF', 'obrigExec("darf", document.getElementById("v-darf").value)', 'v-darf', 'rose')}
+    </div>
+    <div id="obrig-result"></div>`;
+}
+
+function obrigCard(title, subtitle, inputType, defaultVal, btnLabel, onClick, inputId, color) {
+  const colorMap = {
+    emerald: 'border-emerald-200 dark:border-emerald-800',
+    blue: 'border-blue-200 dark:border-blue-800',
+    purple: 'border-purple-200 dark:border-purple-800',
+    amber: 'border-amber-200 dark:border-amber-800',
+    rose: 'border-rose-200 dark:border-rose-800',
+  };
+  const btnColor = {
+    emerald: 'bg-emerald-600 hover:bg-emerald-700',
+    blue: 'bg-blue-600 hover:bg-blue-700',
+    purple: 'bg-purple-600 hover:bg-purple-700',
+    amber: 'bg-amber-600 hover:bg-amber-700',
+    rose: 'bg-rose-600 hover:bg-rose-700',
+  };
+  return `
+    <div class="bg-white dark:bg-slate-900 border ${colorMap[color] || ''} rounded-2xl p-4 shadow-xs">
+      <div class="font-bold text-slate-800 dark:text-slate-100 mb-0.5">${title}</div>
+      <div class="text-xs text-slate-500 mb-3">${subtitle}</div>
+      <div class="flex gap-2">
+        <input type="${inputType}" id="${inputId}" value="${defaultVal}" class="${inputCls()} flex-1" ${inputType === 'number' ? 'min="2000" max="2099" step="1"' : ''}>
+        <button onclick="${onClick}" class="${btnColor[color] || 'bg-violet-600 hover:bg-violet-700'} text-white text-xs font-semibold px-3 py-2 rounded-xl whitespace-nowrap">${btnLabel}</button>
+      </div>
+    </div>`;
+}
+
+async function obrigExec(tipo, valor) {
+  const res = document.getElementById('obrig-result');
+  if (!res) return;
+  res.innerHTML = '<div class="text-xs text-slate-400 py-4 text-center">Carregando...</div>';
+  try {
+    const url = tipo === 'rais' ? `/api/dp/rais/${valor}`
+      : tipo === 'caged' ? `/api/dp/caged/${valor}`
+      : tipo === 'dirf' ? `/api/dp/dirf/${valor}`
+      : tipo === 'gps' ? `/api/dp/gps/${valor}`
+      : `/api/dp/darf/${valor}`;
+    const d = await apiFetch(url);
+    let html = '';
+    if (tipo === 'rais') {
+      const trs = (d.trabalhadores || []).map(t => `
+        <tr class="border-b border-slate-100 dark:border-slate-800">
+          <td class="px-3 py-2 text-xs">${t.nome}</td>
+          <td class="px-3 py-2 text-xs font-mono">${t.cpf}</td>
+          <td class="px-3 py-2 text-xs">${fDate2(t.data_admissao)}</td>
+          <td class="px-3 py-2 text-xs">${t.cargo}</td>
+          <td class="px-3 py-2 text-xs font-semibold text-emerald-600">${fBRL2(t.total_remuneracao_ano)}</td>
+          <td class="px-3 py-2 text-xs">${t.meses_trabalhados}</td>
+        </tr>`).join('');
+      html = `<h3 class="font-bold mb-3">RAIS ${d.ano} — ${d.totais?.total_trabalhadores} trabalhadores | Total: ${fBRL2(d.totais?.total_remuneracao)}</h3>
+        ${card2(`<div class="overflow-x-auto"><table class="w-full text-sm">
+          <thead><tr class="text-xs text-slate-400 uppercase border-b border-slate-100 dark:border-slate-800">
+            <th class="px-3 py-2 text-left">Nome</th><th class="px-3 py-2">CPF</th><th class="px-3 py-2">Admissão</th>
+            <th class="px-3 py-2">Cargo</th><th class="px-3 py-2">Total Rem.</th><th class="px-3 py-2">Meses</th>
+          </tr></thead><tbody>${trs}</tbody></table></div>`)}`;
+    } else if (tipo === 'caged') {
+      const trAdm = (d.admissoes || []).map(t => `<tr class="border-b border-slate-100 dark:border-slate-800">
+        <td class="px-3 py-2 text-xs">${t.nome}</td><td class="px-3 py-2 text-xs font-mono">${t.cpf}</td>
+        <td class="px-3 py-2 text-xs">${fDate2(t.data_admissao)}</td><td class="px-3 py-2 text-xs">${t.cargo}</td>
+        <td class="px-3 py-2 text-xs font-semibold text-emerald-600">${fBRL2(t.salario)}</td></tr>`).join('');
+      const trDem = (d.demissoes || []).map(t => `<tr class="border-b border-slate-100 dark:border-slate-800">
+        <td class="px-3 py-2 text-xs">${t.nome}</td><td class="px-3 py-2 text-xs font-mono">${t.cpf}</td>
+        <td class="px-3 py-2 text-xs">${fDate2(t.data_demissao)}</td><td class="px-3 py-2 text-xs">${t.cargo}</td>
+        <td class="px-3 py-2 text-xs font-semibold text-rose-500">${fBRL2(t.salario)}</td></tr>`).join('');
+      html = `<h3 class="font-bold mb-3">CAGED ${d.competencia} — Saldo: ${d.saldo >= 0 ? '+' : ''}${d.saldo}</h3>
+        <div class="mb-4"><div class="font-semibold text-sm text-emerald-600 mb-2">Admissões (${(d.admissoes||[]).length})</div>
+        ${card2(`<table class="w-full text-sm"><thead><tr class="text-xs text-slate-400 uppercase border-b border-slate-100 dark:border-slate-800"><th class="px-3 py-2 text-left">Nome</th><th>CPF</th><th>Data</th><th>Cargo</th><th>Salário</th></tr></thead><tbody>${trAdm || '<tr><td colspan="5" class="px-3 py-4 text-center text-slate-400 text-xs">Nenhuma admissão.</td></tr>'}</tbody></table>`)}</div>
+        <div><div class="font-semibold text-sm text-rose-500 mb-2">Demissões (${(d.demissoes||[]).length})</div>
+        ${card2(`<table class="w-full text-sm"><thead><tr class="text-xs text-slate-400 uppercase border-b border-slate-100 dark:border-slate-800"><th class="px-3 py-2 text-left">Nome</th><th>CPF</th><th>Data</th><th>Cargo</th><th>Salário</th></tr></thead><tbody>${trDem || '<tr><td colspan="5" class="px-3 py-4 text-center text-slate-400 text-xs">Nenhuma demissão.</td></tr>'}</tbody></table>`)}</div>`;
+    } else if (tipo === 'dirf') {
+      const trs = (d.beneficiarios || []).map(b => `<tr class="border-b border-slate-100 dark:border-slate-800">
+        <td class="px-3 py-2 text-xs">${b.nome}</td><td class="px-3 py-2 text-xs font-mono">${b.cpf}</td>
+        <td class="px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200">${fBRL2(b.rendimentos_tributaveis)}</td>
+        <td class="px-3 py-2 text-xs text-rose-500">${fBRL2(b.irrf_retido)}</td>
+        <td class="px-3 py-2 text-xs text-amber-500">${fBRL2(b.deducoes_inss)}</td>
+        <td class="px-3 py-2 text-xs">${b.dependentes}</td></tr>`).join('');
+      html = `<h3 class="font-bold mb-3">DIRF ${d.ano}</h3>
+        ${card2(`<div class="overflow-x-auto"><table class="w-full text-sm">
+          <thead><tr class="text-xs text-slate-400 uppercase border-b border-slate-100 dark:border-slate-800">
+            <th class="px-3 py-2 text-left">Nome</th><th>CPF</th><th>Rendimentos</th><th>IRRF</th><th>INSS</th><th>Dep.</th>
+          </tr></thead><tbody>${trs || '<tr><td colspan="6" class="px-3 py-4 text-center text-slate-400 text-xs">Sem dados.</td></tr>'}</tbody></table></div>`)}`;
+    } else if (tipo === 'gps') {
+      html = `<div class="bg-white dark:bg-slate-900 border border-amber-200 dark:border-amber-800 rounded-2xl p-6 max-w-md">
+        <div class="font-bold text-lg mb-4">GPS/INSS — ${d.competencia}</div>
+        ${[
+          ['Total da Folha', fBRL2(d.total_folha), 'text-slate-700 dark:text-slate-200'],
+          ['INSS Funcionários', fBRL2(d.inss_funcionarios), 'text-amber-600'],
+          ['INSS Patronal (20%)', fBRL2(d.inss_patronal_20pct), 'text-amber-600'],
+          ['RAT Ajustado (3%)', fBRL2(d.rat_ajustado), 'text-amber-600'],
+          ['Terceiros (5,8%)', fBRL2(d.terceiros), 'text-amber-600'],
+        ].map(([l, v, c]) => `<div class="flex justify-between items-center py-2 border-b border-slate-100 dark:border-slate-800">
+          <span class="text-sm text-slate-600 dark:text-slate-400">${l}</span>
+          <span class="text-sm font-semibold ${c}">${v}</span></div>`).join('')}
+        <div class="flex justify-between items-center mt-3">
+          <span class="font-bold text-slate-800 dark:text-slate-100">TOTAL GPS</span>
+          <span class="text-xl font-extrabold text-emerald-600">${fBRL2(d.total_gps)}</span>
+        </div>
+        <div class="text-xs text-slate-500 mt-2">Código: ${d.codigo_pagamento} | Vencimento: ${fDate2(d.vencimento)}</div>
+      </div>`;
+    } else {
+      html = `<div class="bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-800 rounded-2xl p-6 max-w-md">
+        <div class="font-bold text-lg mb-4">DARF/IRRF — ${d.competencia}</div>
+        <div class="flex justify-between items-center py-2 border-b border-slate-100 dark:border-slate-800">
+          <span class="text-sm text-slate-600 dark:text-slate-400">Total IRRF Retido</span>
+          <span class="text-sm font-semibold text-rose-500">${fBRL2(d.total_irrf)}</span>
+        </div>
+        <div class="flex justify-between items-center mt-3">
+          <span class="font-bold text-slate-800 dark:text-slate-100">TOTAL DARF</span>
+          <span class="text-xl font-extrabold text-emerald-600">${fBRL2(d.total_irrf)}</span>
+        </div>
+        <div class="text-xs text-slate-500 mt-2">Código: ${d.codigo_receita} | Período: ${d.periodo_apuracao} | Vencimento: ${fDate2(d.vencimento)}</div>
+      </div>`;
+    }
+    res.innerHTML = `
+      <div class="mb-3 flex justify-end">
+        <button onclick="obrigExportJSON()" class="text-xs px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">
+          Exportar JSON
+        </button>
+      </div>
+      ${html}`;
+    window._lastObrigData = d;
+    if (window.lucide) lucide.createIcons();
+  } catch (e) {
+    res.innerHTML = `<div class="text-rose-500 text-sm py-4">${e.message}</div>`;
+  }
+}
+
+function obrigExportJSON() {
+  if (!window._lastObrigData) return;
+  const blob = new Blob([JSON.stringify(window._lastObrigData, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'cortex_obrigacao.json';
+  a.click();
+  URL.revokeObjectURL(url);
 }

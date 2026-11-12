@@ -1020,6 +1020,111 @@ def init_db() -> None:
     );
     """)
 
+    # 40. DP — Cargos (Plano de Cargos)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS job_positions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        nome TEXT NOT NULL,
+        cbo TEXT DEFAULT '',
+        nivel TEXT DEFAULT '',
+        salario_base REAL DEFAULT 0,
+        salario_maximo REAL DEFAULT 0,
+        descricao TEXT DEFAULT '',
+        ativo INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    # 41. DP — Departamentos
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS departments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        nome TEXT NOT NULL,
+        codigo TEXT DEFAULT '',
+        responsavel_id INTEGER DEFAULT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    # 42. DP — Histórico Salarial
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS salary_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        employee_id INTEGER NOT NULL,
+        data_vigencia TEXT NOT NULL,
+        salario_anterior REAL DEFAULT 0,
+        salario_novo REAL NOT NULL,
+        tipo TEXT DEFAULT 'reajuste',
+        percentual REAL DEFAULT 0,
+        motivo TEXT DEFAULT '',
+        cargo_anterior TEXT DEFAULT '',
+        cargo_novo TEXT DEFAULT '',
+        aprovado_por TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (employee_id) REFERENCES employees(id)
+    );
+    """)
+
+    # 43. DP — Horários de Trabalho
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS work_schedules (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        nome TEXT NOT NULL,
+        tipo TEXT DEFAULT 'fixo',
+        hora_entrada TEXT DEFAULT '08:00',
+        hora_saida TEXT DEFAULT '17:00',
+        hora_entrada_tarde TEXT DEFAULT '',
+        hora_saida_tarde TEXT DEFAULT '',
+        intervalo_min INTEGER DEFAULT 60,
+        horas_diarias REAL DEFAULT 8.0,
+        horas_semanais REAL DEFAULT 44.0,
+        dias_trabalho TEXT DEFAULT '1,2,3,4,5',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    # 44. DP — Registros de Ponto
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS time_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        employee_id INTEGER NOT NULL,
+        data TEXT NOT NULL,
+        entrada TEXT DEFAULT '',
+        saida_almoco TEXT DEFAULT '',
+        retorno_almoco TEXT DEFAULT '',
+        saida TEXT DEFAULT '',
+        horas_trabalhadas REAL DEFAULT 0,
+        horas_extras REAL DEFAULT 0,
+        horas_faltantes REAL DEFAULT 0,
+        tipo_ocorrencia TEXT DEFAULT 'normal',
+        justificativa TEXT DEFAULT '',
+        aprovado INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (employee_id) REFERENCES employees(id)
+    );
+    """)
+
+    # 45. DP — Banco de Horas
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS hour_bank (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        employee_id INTEGER NOT NULL,
+        data TEXT NOT NULL,
+        tipo TEXT DEFAULT 'credito',
+        horas REAL NOT NULL,
+        saldo_acumulado REAL DEFAULT 0,
+        observacao TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (employee_id) REFERENCES employees(id)
+    );
+    """)
+
     conn.commit()
     migrate_db(conn)
 
