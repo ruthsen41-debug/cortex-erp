@@ -1237,6 +1237,184 @@ def init_db() -> None:
     );
     """)
 
+    # ── Média prioridade: Benefícios, Adiantamentos, Pensão, Autônomos, Pró-labore, ASO ──
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS benefit_types (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        nome TEXT NOT NULL,
+        tipo TEXT DEFAULT 'vale_alimentacao',
+        modalidade_desconto TEXT DEFAULT 'percentual',
+        percentual_desconto REAL DEFAULT 0,
+        valor_fixo_desconto REAL DEFAULT 0,
+        limite_pct_salario REAL DEFAULT 0,
+        ativo INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS employee_benefits (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        employee_id INTEGER NOT NULL,
+        benefit_type_id INTEGER NOT NULL,
+        valor_bruto REAL DEFAULT 0,
+        valor_desconto REAL DEFAULT 0,
+        data_inicio TEXT NOT NULL,
+        data_fim TEXT DEFAULT NULL,
+        ativo INTEGER DEFAULT 1,
+        observacoes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (employee_id) REFERENCES employees(id),
+        FOREIGN KEY (benefit_type_id) REFERENCES benefit_types(id)
+    );
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS salary_advances (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        employee_id INTEGER NOT NULL,
+        competencia TEXT NOT NULL,
+        valor REAL NOT NULL,
+        tipo TEXT DEFAULT 'quinzenal',
+        data_pagamento TEXT DEFAULT '',
+        status TEXT DEFAULT 'pago',
+        observacoes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (employee_id) REFERENCES employees(id)
+    );
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS alimony_orders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        employee_id INTEGER NOT NULL,
+        processo TEXT DEFAULT '',
+        beneficiario TEXT NOT NULL,
+        cpf_beneficiario TEXT DEFAULT '',
+        modalidade TEXT DEFAULT 'percentual',
+        percentual REAL DEFAULT 0,
+        valor_fixo REAL DEFAULT 0,
+        base_calculo TEXT DEFAULT 'liquido',
+        banco TEXT DEFAULT '',
+        agencia TEXT DEFAULT '',
+        conta TEXT DEFAULT '',
+        data_inicio TEXT NOT NULL,
+        data_fim TEXT DEFAULT NULL,
+        ativo INTEGER DEFAULT 1,
+        observacoes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (employee_id) REFERENCES employees(id)
+    );
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS autonomous_workers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        nome TEXT NOT NULL,
+        cpf TEXT NOT NULL,
+        pis_pasep TEXT DEFAULT '',
+        cbo TEXT DEFAULT '2521-05',
+        endereco TEXT DEFAULT '',
+        cidade TEXT DEFAULT '',
+        uf TEXT DEFAULT '',
+        cep TEXT DEFAULT '',
+        banco TEXT DEFAULT '',
+        agencia TEXT DEFAULT '',
+        conta TEXT DEFAULT '',
+        ativo INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS rpa_payments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        autonomous_id INTEGER NOT NULL,
+        competencia TEXT NOT NULL,
+        data_pagamento TEXT NOT NULL,
+        descricao_servico TEXT NOT NULL,
+        valor_bruto REAL NOT NULL,
+        inss_retido REAL DEFAULT 0,
+        irrf_retido REAL DEFAULT 0,
+        iss_retido REAL DEFAULT 0,
+        valor_liquido REAL NOT NULL,
+        observacoes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (autonomous_id) REFERENCES autonomous_workers(id)
+    );
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS partners (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        nome TEXT NOT NULL,
+        cpf TEXT NOT NULL,
+        cargo TEXT DEFAULT 'Sócio-Administrador',
+        percentual_sociedade REAL DEFAULT 0,
+        salario_prolabore REAL DEFAULT 0,
+        banco TEXT DEFAULT '',
+        agencia TEXT DEFAULT '',
+        conta TEXT DEFAULT '',
+        ativo INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS prolabore_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        partner_id INTEGER NOT NULL,
+        competencia TEXT NOT NULL,
+        valor_bruto REAL NOT NULL,
+        inss_retido REAL DEFAULT 0,
+        irrf_retido REAL DEFAULT 0,
+        valor_liquido REAL NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (partner_id) REFERENCES partners(id)
+    );
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS medical_exams (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        employee_id INTEGER NOT NULL,
+        tipo TEXT NOT NULL,
+        data_exame TEXT NOT NULL,
+        periodicidade_meses INTEGER DEFAULT 12,
+        data_vencimento TEXT DEFAULT NULL,
+        resultado TEXT DEFAULT 'apto',
+        restricoes TEXT DEFAULT '',
+        medico TEXT DEFAULT '',
+        crm_medico TEXT DEFAULT '',
+        clinica TEXT DEFAULT '',
+        observacoes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (employee_id) REFERENCES employees(id)
+    );
+    """)
+
+    # Seed benefit_types padrão
+    bt_count = cur.execute("SELECT COUNT(*) FROM benefit_types WHERE company_id=1").fetchone()[0]
+    if bt_count == 0:
+        cur.executemany(
+            "INSERT INTO benefit_types (company_id,nome,tipo,modalidade_desconto,percentual_desconto,limite_pct_salario,ativo) VALUES (1,?,?,?,?,?,1)",
+            [
+                ("Vale Alimentação", "vale_alimentacao", "percentual", 20.0, 0.0),
+                ("Vale Transporte",  "vale_transporte",  "percentual",  6.0, 6.0),
+                ("Plano de Saúde",   "plano_saude",      "fixo",        0.0, 0.0),
+            ]
+        )
+
     conn.commit()
     migrate_db(conn)
 

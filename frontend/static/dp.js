@@ -54,6 +54,12 @@ function dpTabs() {
     { id: 'esocial_periodico', icon: 'send',         label: 'eSocial Periódico' },
     { id: 'sefip',             icon: 'building-2',   label: 'SEFIP/GFIP' },
     { id: 'efd_reinf',         icon: 'file-code-2',  label: 'EFD-Reinf' },
+    { id: 'beneficios',        icon: 'heart',         label: 'Benefícios' },
+    { id: 'adiantamentos',     icon: 'banknote',      label: 'Adiantamentos' },
+    { id: 'pensao',            icon: 'scale',         label: 'Pensão Alim.' },
+    { id: 'autonomos',         icon: 'user-check',    label: 'Autônomos/RPA' },
+    { id: 'prolabore',         icon: 'briefcase-business', label: 'Pró-labore' },
+    { id: 'aso',               icon: 'stethoscope',   label: 'Exames (ASO)' },
   ];
   return `<div class="flex gap-1 overflow-x-auto pb-1 flex-wrap">
     ${tabs.map(t => `
@@ -114,6 +120,12 @@ async function switchDpTab(tab, noRebuildTabs = false) {
     case 'esocial_periodico':  await renderEsocialPeriodico(body); break;
     case 'sefip':              await renderSefip(body); break;
     case 'efd_reinf':          await renderEfdReinf(body); break;
+    case 'beneficios':         await renderBeneficios(body); break;
+    case 'adiantamentos':      await renderAdiantamentos(body); break;
+    case 'pensao':             await renderPensao(body); break;
+    case 'autonomos':          await renderAutonomos(body); break;
+    case 'prolabore':          await renderProlabore(body); break;
+    case 'aso':                await renderAso(body); break;
   }
   if (window.lucide) lucide.createIcons();
 }
@@ -2792,4 +2804,953 @@ async function renderEfdReinf(el) {
   };
 
   await window.reinfLoadTomadores();
+}
+
+// ── BENEFÍCIOS ───────────────────────────────────────────────────────────────
+async function renderBeneficios(el) {
+  let bTypes = [], employees = dpEmployees || [], selEmp = '', innerTab = 'tipos';
+  const render = async () => {
+    bTypes = await apiFetch('/api/dp/benefit-types');
+    el.innerHTML = `
+      <div class="flex gap-2 mb-4">
+        <button onclick="window._bfTab('tipos')" class="btn btn-sm ${innerTab==='tipos'?'btn-primary':'btn-secondary'}">Tipos de Benefício</button>
+        <button onclick="window._bfTab('por_funcionario')" class="btn btn-sm ${innerTab==='por_funcionario'?'btn-primary':'btn-secondary'}">Por Funcionário</button>
+      </div>
+      <div id="bf-content"></div>`;
+    window._bfTab = async (t) => { innerTab = t; await render(); };
+    const bc = document.getElementById('bf-content');
+    if (innerTab === 'tipos') {
+      bc.innerHTML = `
+        <div class="flex justify-between items-center mb-3">
+          <h3 class="font-bold text-slate-800 dark:text-slate-100">Tipos de Benefício</h3>
+          <button onclick="window._bfOpenModal(null)" class="btn btn-primary btn-sm">+ Novo Tipo</button>
+        </div>
+        <div class="table-responsive">${card2(`
+          <table class="table table-sm">
+            <thead><tr><th>Nome</th><th>Tipo</th><th>Modalidade</th><th>% Desconto</th><th>Limite %</th><th>Status</th><th>Ações</th></tr></thead>
+            <tbody>${bTypes.map(b=>`<tr>
+              <td>${b.nome}</td>
+              <td><span class="badge badge-info">${b.tipo.replace(/_/g,' ')}</span></td>
+              <td>${b.modalidade_desconto}</td>
+              <td>${b.percentual_desconto||0}%</td>
+              <td>${b.limite_pct_salario>0?b.limite_pct_salario+'%':'—'}</td>
+              <td><span class="badge ${b.ativo?'badge-success':'badge-secondary'}">${b.ativo?'Ativo':'Inativo'}</span></td>
+              <td>
+                <button onclick="window._bfOpenModal(${JSON.stringify(b).replace(/"/g,'&quot;')})" class="btn btn-sm btn-secondary">Editar</button>
+                <button onclick="window._bfDelete(${b.id},'${b.nome.replace(/'/g,"\\'")}','tipo')" class="btn btn-sm btn-danger">Excluir</button>
+              </td>
+            </tr>`).join('')}</tbody>
+          </table>`)}
+        </div>
+        <div id="bf-modal" class="modal-overlay" style="display:none">
+          <div class="modal-box">
+            <h3 id="bf-modal-title">Tipo de Benefício</h3>
+            <input type="hidden" id="bf-id">
+            <div class="form-row">
+              <div class="form-group"><label>Nome</label><input id="bf-nome" class="form-control" placeholder="Vale Alimentação"></div>
+              <div class="form-group"><label>Tipo</label>
+                <select id="bf-tipo" class="form-control">
+                  <option value="vale_alimentacao">Vale Alimentação</option>
+                  <option value="vale_transporte">Vale Transporte</option>
+                  <option value="plano_saude">Plano de Saúde</option>
+                  <option value="plano_odonto">Plano Odontológico</option>
+                  <option value="outros">Outros</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label>Modalidade de Desconto</label>
+                <select id="bf-modalidade" class="form-control">
+                  <option value="percentual">Percentual sobre valor</option>
+                  <option value="fixo">Valor fixo</option>
+                </select>
+              </div>
+              <div class="form-group"><label>% Desconto</label><input id="bf-pct" type="number" step="0.01" class="form-control" placeholder="20"></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label>Valor Fixo Desconto (R$)</label><input id="bf-fixo" type="number" step="0.01" class="form-control" placeholder="0"></div>
+              <div class="form-group"><label>Limite % do Salário</label><input id="bf-limite" type="number" step="0.01" class="form-control" placeholder="6"></div>
+            </div>
+            <div class="d-flex gap-2 justify-content-end mt-3">
+              <button onclick="document.getElementById('bf-modal').style.display='none'" class="btn btn-secondary">Cancelar</button>
+              <button onclick="window._bfSave()" class="btn btn-primary">Salvar</button>
+            </div>
+          </div>
+        </div>`;
+      window._bfOpenModal = (b) => {
+        document.getElementById('bf-modal-title').textContent = b ? 'Editar Tipo' : 'Novo Tipo';
+        document.getElementById('bf-id').value = b ? b.id : '';
+        document.getElementById('bf-nome').value = b ? b.nome : '';
+        document.getElementById('bf-tipo').value = b ? b.tipo : 'vale_alimentacao';
+        document.getElementById('bf-modalidade').value = b ? b.modalidade_desconto : 'percentual';
+        document.getElementById('bf-pct').value = b ? b.percentual_desconto : '';
+        document.getElementById('bf-fixo').value = b ? b.valor_fixo_desconto : '';
+        document.getElementById('bf-limite').value = b ? b.limite_pct_salario : '';
+        document.getElementById('bf-modal').style.display = 'flex';
+      };
+      window._bfSave = async () => {
+        const id = document.getElementById('bf-id').value;
+        const body = {
+          nome: document.getElementById('bf-nome').value.trim(),
+          tipo: document.getElementById('bf-tipo').value,
+          modalidade_desconto: document.getElementById('bf-modalidade').value,
+          percentual_desconto: parseFloat(document.getElementById('bf-pct').value||0),
+          valor_fixo_desconto: parseFloat(document.getElementById('bf-fixo').value||0),
+          limite_pct_salario: parseFloat(document.getElementById('bf-limite').value||0),
+        };
+        try {
+          if (id) await apiFetch(`/api/dp/benefit-types/${id}`, {method:'PUT',body:JSON.stringify(body)});
+          else await apiFetch('/api/dp/benefit-types', {method:'POST',body:JSON.stringify(body)});
+          document.getElementById('bf-modal').style.display = 'none';
+          showToast('Salvo!','success'); await render();
+        } catch(e) { showToast('Erro: '+e.message,'error'); }
+      };
+    } else {
+      // Por funcionário
+      const empOpts = employees.map(e=>`<option value="${e.id}" ${selEmp==e.id?'selected':''}>${e.name}</option>`).join('');
+      let empBenefits = [];
+      if (selEmp) {
+        try { empBenefits = await apiFetch(`/api/dp/employees/${selEmp}/benefits`); } catch {}
+      }
+      const totBruto = empBenefits.reduce((s,b)=>s+parseFloat(b.valor_bruto||0),0);
+      const totDesc = empBenefits.reduce((s,b)=>s+parseFloat(b.valor_desconto||0),0);
+      bc.innerHTML = `
+        <div class="flex gap-3 items-center mb-4">
+          <select class="form-control" style="max-width:280px" onchange="selEmp=this.value;window._bfTab('por_funcionario')">
+            <option value="">— Selecione o Funcionário —</option>${empOpts}
+          </select>
+          ${selEmp?`<button onclick="window._bfEmpModal()" class="btn btn-primary btn-sm">+ Conceder Benefício</button>`:''}
+        </div>
+        ${selEmp?`
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+          ${kpiDP('Benefícios',empBenefits.length,'ativos','heart','text-pink-600')}
+          ${kpiDP('Total Bruto Empresa',fBRL2(totBruto),'custo empresa','building','text-blue-600')}
+          ${kpiDP('Total Desconto',fBRL2(totDesc),'desconto funcionário','minus-circle','text-orange-600')}
+          ${kpiDP('Custo Líquido',fBRL2(totBruto-totDesc),'empresa arca','trending-up','text-emerald-600')}
+        </div>
+        ${card2(`<table class="table table-sm">
+          <thead><tr><th>Benefício</th><th>Valor Bruto</th><th>Desconto</th><th>Início</th><th>Fim</th><th>Status</th><th>Ações</th></tr></thead>
+          <tbody>${empBenefits.map(b=>`<tr>
+            <td>${b.benefit_nome||b.benefit_type_id}</td>
+            <td>${fBRL2(b.valor_bruto)}</td>
+            <td>${fBRL2(b.valor_desconto)}</td>
+            <td>${fDate2(b.data_inicio)}</td>
+            <td>${b.data_fim?fDate2(b.data_fim):'—'}</td>
+            <td><span class="badge ${b.ativo?'badge-success':'badge-secondary'}">${b.ativo?'Ativo':'Inativo'}</span></td>
+            <td><button onclick="window._bfDelete(${b.id},'${(b.benefit_nome||'').replace(/'/g,"\\'")}','emp')" class="btn btn-sm btn-danger">Remover</button></td>
+          </tr>`).join('')}</tbody>
+        </table>`)}` : '<p class="text-muted">Selecione um funcionário para ver seus benefícios.</p>'}
+        <div id="bf-emp-modal" class="modal-overlay" style="display:none">
+          <div class="modal-box">
+            <h3>Conceder Benefício</h3>
+            <div class="form-group"><label>Tipo de Benefício</label>
+              <select id="bfe-tipo" class="form-control" onchange="window._bfCalcDesc()">
+                ${bTypes.map(b=>`<option value="${b.id}" data-pct="${b.percentual_desconto}" data-fixo="${b.valor_fixo_desconto}" data-mod="${b.modalidade_desconto}" data-lim="${b.limite_pct_salario}">${b.nome}</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label>Valor Bruto (R$)</label><input id="bfe-bruto" type="number" step="0.01" class="form-control" oninput="window._bfCalcDesc()" placeholder="500"></div>
+              <div class="form-group"><label>Desconto Calculado (R$)</label><input id="bfe-desc" type="number" step="0.01" class="form-control" readonly></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label>Data Início</label><input id="bfe-inicio" type="date" class="form-control"></div>
+              <div class="form-group"><label>Data Fim (opcional)</label><input id="bfe-fim" type="date" class="form-control"></div>
+            </div>
+            <div class="d-flex gap-2 justify-content-end mt-3">
+              <button onclick="document.getElementById('bf-emp-modal').style.display='none'" class="btn btn-secondary">Cancelar</button>
+              <button onclick="window._bfEmpSave()" class="btn btn-primary">Salvar</button>
+            </div>
+          </div>
+        </div>`;
+      window._bfCalcDesc = () => {
+        const sel = document.getElementById('bfe-tipo');
+        if (!sel) return;
+        const opt = sel.options[sel.selectedIndex];
+        const bruto = parseFloat(document.getElementById('bfe-bruto')?.value||0);
+        const mod = opt.dataset.mod;
+        let desc = mod==='fixo' ? parseFloat(opt.dataset.fixo||0) : bruto * parseFloat(opt.dataset.pct||0) / 100;
+        const empSalary = (employees.find(e=>e.id==selEmp)||{salary:0}).salary;
+        const lim = parseFloat(opt.dataset.lim||0);
+        if (lim>0 && empSalary>0) desc = Math.min(desc, empSalary * lim / 100);
+        const el2 = document.getElementById('bfe-desc');
+        if (el2) el2.value = desc.toFixed(2);
+      };
+      window._bfEmpModal = () => {
+        document.getElementById('bfe-bruto').value = '';
+        document.getElementById('bfe-desc').value = '';
+        document.getElementById('bfe-inicio').value = new Date().toISOString().slice(0,10);
+        document.getElementById('bfe-fim').value = '';
+        document.getElementById('bf-emp-modal').style.display = 'flex';
+      };
+      window._bfEmpSave = async () => {
+        const body = {
+          benefit_type_id: parseInt(document.getElementById('bfe-tipo').value),
+          valor_bruto: parseFloat(document.getElementById('bfe-bruto').value||0),
+          data_inicio: document.getElementById('bfe-inicio').value,
+          data_fim: document.getElementById('bfe-fim').value||null,
+        };
+        try {
+          await apiFetch(`/api/dp/employees/${selEmp}/benefits`, {method:'POST',body:JSON.stringify(body)});
+          document.getElementById('bf-emp-modal').style.display = 'none';
+          showToast('Benefício concedido!','success'); await render();
+        } catch(e) { showToast('Erro: '+e.message,'error'); }
+      };
+    }
+    window._bfDelete = async (id, nome, ctx) => {
+      if (!confirm(`Excluir "${nome}"?`)) return;
+      try {
+        const url = ctx==='tipo' ? `/api/dp/benefit-types/${id}` : `/api/dp/employee-benefits/${id}`;
+        await apiFetch(url, {method:'DELETE'});
+        showToast('Excluído.','success'); await render();
+      } catch(e) { showToast('Erro: '+e.message,'error'); }
+    };
+    if (window.lucide) lucide.createIcons();
+  };
+  await render();
+}
+
+// ── ADIANTAMENTOS ─────────────────────────────────────────────────────────────
+async function renderAdiantamentos(el) {
+  const hoje = new Date().toISOString().slice(0,7);
+  let comp = hoje;
+  const render = async () => {
+    const rows = await apiFetch(`/api/dp/advances?competencia=${comp}`);
+    const total = rows.reduce((s,r)=>s+parseFloat(r.valor||0),0);
+    const emps = [...new Set(rows.map(r=>r.employee_id))].length;
+    const max = rows.length ? Math.max(...rows.map(r=>parseFloat(r.valor||0))) : 0;
+    const media = rows.length ? total/rows.length : 0;
+    el.innerHTML = `
+      <div class="flex items-center gap-3 mb-4">
+        <label class="text-sm font-semibold text-slate-600 dark:text-slate-300">Competência:</label>
+        <input type="month" value="${comp}" class="form-control" style="max-width:160px" onchange="comp=this.value;render()">
+        <button onclick="window._advOpenModal()" class="btn btn-primary btn-sm">+ Adiantamento</button>
+      </div>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+        ${kpiDP('Total Adiantamentos',fBRL2(total),'no mês','banknote','text-blue-600')}
+        ${kpiDP('Funcionários',emps,'com adiantamento','users','text-violet-600')}
+        ${kpiDP('Maior Adiantamento',fBRL2(max),'no mês','trending-up','text-orange-600')}
+        ${kpiDP('Média',fBRL2(media),'por adiantamento','calculator','text-emerald-600')}
+      </div>
+      ${card2(`<table class="table table-sm">
+        <thead><tr><th>Funcionário</th><th>Salário</th><th>Valor</th><th>% Sal.</th><th>Tipo</th><th>Data Pgto</th><th>Ações</th></tr></thead>
+        <tbody>${rows.map(r=>`<tr>
+          <td>${r.employee_name||''}</td>
+          <td>${fBRL2(r.employee_salary)}</td>
+          <td>${fBRL2(r.valor)}</td>
+          <td>${r.employee_salary>0?(parseFloat(r.valor)/parseFloat(r.employee_salary)*100).toFixed(1)+'%':'—'}</td>
+          <td>${r.tipo}</td>
+          <td>${r.data_pagamento||'—'}</td>
+          <td><button onclick="window._advDelete(${r.id})" class="btn btn-sm btn-danger">Excluir</button></td>
+        </tr>`).join('')}</tbody>
+      </table>`)}
+      <div id="adv-modal" class="modal-overlay" style="display:none">
+        <div class="modal-box">
+          <h3>Novo Adiantamento</h3>
+          <div class="form-row">
+            <div class="form-group"><label>Funcionário</label>
+              <select id="adv-emp" class="form-control" onchange="window._advCalcPct()">
+                <option value="">Selecione</option>
+                ${(dpEmployees||[]).filter(e=>e.active).map(e=>`<option value="${e.id}" data-salary="${e.salary}">${e.name}</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-group"><label>Competência</label><input id="adv-comp" type="month" value="${comp}" class="form-control"></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Valor (R$)</label><input id="adv-valor" type="number" step="0.01" class="form-control" oninput="window._advCalcPct()" placeholder="500"></div>
+            <div class="form-group"><label>% do Salário</label><input id="adv-pct" class="form-control" readonly placeholder="—"></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Tipo</label>
+              <select id="adv-tipo" class="form-control"><option value="quinzenal">Quinzenal</option><option value="avulso">Avulso</option></select>
+            </div>
+            <div class="form-group"><label>Data Pagamento</label><input id="adv-data" type="date" class="form-control" value="${new Date().toISOString().slice(0,10)}"></div>
+          </div>
+          <div id="adv-warn" class="alert alert-warning" style="display:none">⚠️ Valor excede 40% do salário.</div>
+          <div class="d-flex gap-2 justify-content-end mt-3">
+            <button onclick="document.getElementById('adv-modal').style.display='none'" class="btn btn-secondary">Cancelar</button>
+            <button onclick="window._advSave()" class="btn btn-primary">Salvar</button>
+          </div>
+        </div>
+      </div>`;
+    window._advCalcPct = () => {
+      const sel = document.getElementById('adv-emp');
+      if (!sel) return;
+      const salary = parseFloat(sel.options[sel.selectedIndex]?.dataset?.salary||0);
+      const valor = parseFloat(document.getElementById('adv-valor')?.value||0);
+      const pct = salary>0 ? (valor/salary*100).toFixed(1)+'%' : '—';
+      const pctEl = document.getElementById('adv-pct');
+      if (pctEl) { pctEl.value = pct; pctEl.style.color = (salary>0&&valor>salary*0.4)?'red':''; }
+      const warnEl = document.getElementById('adv-warn');
+      if (warnEl) warnEl.style.display = (salary>0&&valor>salary*0.4)?'':'none';
+    };
+    window._advOpenModal = () => {
+      document.getElementById('adv-emp').value = '';
+      document.getElementById('adv-valor').value = '';
+      document.getElementById('adv-pct').value = '';
+      document.getElementById('adv-modal').style.display = 'flex';
+    };
+    window._advSave = async () => {
+      const body = {
+        employee_id: parseInt(document.getElementById('adv-emp').value),
+        competencia: document.getElementById('adv-comp').value,
+        valor: parseFloat(document.getElementById('adv-valor').value||0),
+        tipo: document.getElementById('adv-tipo').value,
+        data_pagamento: document.getElementById('adv-data').value,
+      };
+      if (!body.employee_id||!body.valor) { showToast('Preencha funcionário e valor.','error'); return; }
+      try {
+        await apiFetch('/api/dp/advances', {method:'POST',body:JSON.stringify(body)});
+        document.getElementById('adv-modal').style.display = 'none';
+        showToast('Adiantamento lançado!','success'); await render();
+      } catch(e) { showToast('Erro: '+e.message,'error'); }
+    };
+    window._advDelete = async (id) => {
+      if (!confirm('Excluir adiantamento?')) return;
+      try { await apiFetch(`/api/dp/advances/${id}`,{method:'DELETE'}); showToast('Excluído.','success'); await render(); }
+      catch(e) { showToast('Erro: '+e.message,'error'); }
+    };
+    if (window.lucide) lucide.createIcons();
+  };
+  await render();
+}
+
+// ── PENSÃO ALIMENTÍCIA ────────────────────────────────────────────────────────
+async function renderPensao(el) {
+  const render = async () => {
+    const rows = await apiFetch('/api/dp/alimony');
+    const ativas = rows.filter(r=>r.ativo).length;
+    const funcs = [...new Set(rows.filter(r=>r.ativo).map(r=>r.employee_id))].length;
+    el.innerHTML = `
+      <div class="flex justify-between items-center mb-4">
+        <div class="grid grid-cols-3 gap-4">
+          ${kpiDP('Ordens Ativas',ativas,'','scale','text-blue-600')}
+          ${kpiDP('Funcionários',funcs,'com desconto','users','text-violet-600')}
+        </div>
+        <button onclick="window._pensaoOpenModal(null)" class="btn btn-primary btn-sm">+ Nova Ordem</button>
+      </div>
+      ${card2(`<table class="table table-sm">
+        <thead><tr><th>Funcionário</th><th>Processo</th><th>Beneficiário</th><th>Modalidade</th><th>Valor/%</th><th>Base</th><th>Conta</th><th>Status</th><th>Ações</th></tr></thead>
+        <tbody>${rows.map(r=>`<tr>
+          <td>${r.employee_name||''}</td>
+          <td style="font-size:.8rem">${r.processo||'—'}</td>
+          <td>${r.beneficiario}</td>
+          <td>${r.modalidade==='percentual'?'% sobre '+r.base_calculo:'Fixo'}</td>
+          <td>${r.modalidade==='percentual'?r.percentual+'%':fBRL2(r.valor_fixo)}</td>
+          <td>${r.base_calculo}</td>
+          <td style="font-size:.75rem">${r.banco?r.banco+' Ag.'+r.agencia+' C/C '+r.conta:'—'}</td>
+          <td><span class="badge ${r.ativo?'badge-success':'badge-secondary'}">${r.ativo?'Ativa':'Encerrada'}</span></td>
+          <td>
+            <button onclick="window._pensaoOpenModal(${JSON.stringify(r).replace(/"/g,'&quot;')})" class="btn btn-sm btn-secondary">Editar</button>
+            <button onclick="window._pensaoDelete(${r.id})" class="btn btn-sm btn-danger">Excluir</button>
+          </td>
+        </tr>`).join('')}</tbody>
+      </table>`)}
+      <div id="pensao-modal" class="modal-overlay" style="display:none">
+        <div class="modal-box" style="max-width:600px">
+          <h3 id="pensao-modal-title">Nova Ordem de Pensão</h3>
+          <input type="hidden" id="pensao-id">
+          <div class="form-row">
+            <div class="form-group"><label>Funcionário</label>
+              <select id="pensao-emp" class="form-control">
+                ${(dpEmployees||[]).map(e=>`<option value="${e.id}">${e.name}</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-group"><label>Nº Processo</label><input id="pensao-proc" class="form-control" placeholder="0001234-00.2024.8.00.0000"></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Nome do Beneficiário</label><input id="pensao-benef" class="form-control" placeholder="Maria Silva"></div>
+            <div class="form-group"><label>CPF do Beneficiário</label><input id="pensao-cpf" class="form-control" placeholder="000.000.000-00"></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Modalidade</label>
+              <select id="pensao-mod" class="form-control">
+                <option value="percentual">Percentual</option>
+                <option value="fixo">Valor Fixo</option>
+              </select>
+            </div>
+            <div class="form-group"><label>Base de Cálculo</label>
+              <select id="pensao-base" class="form-control">
+                <option value="liquido">Salário Líquido</option>
+                <option value="bruto">Salário Bruto</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Percentual (%)</label><input id="pensao-pct" type="number" step="0.01" class="form-control" placeholder="30"></div>
+            <div class="form-group"><label>Valor Fixo (R$)</label><input id="pensao-fixo" type="number" step="0.01" class="form-control" placeholder="0"></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Banco</label><input id="pensao-banco" class="form-control" placeholder="001 - Banco do Brasil"></div>
+            <div class="form-group"><label>Agência</label><input id="pensao-ag" class="form-control" placeholder="0001"></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Conta</label><input id="pensao-conta" class="form-control" placeholder="12345-6"></div>
+            <div class="form-group"><label>Data Início</label><input id="pensao-inicio" type="date" class="form-control"></div>
+          </div>
+          <div class="d-flex gap-2 justify-content-end mt-3">
+            <button onclick="document.getElementById('pensao-modal').style.display='none'" class="btn btn-secondary">Cancelar</button>
+            <button onclick="window._pensaoSave()" class="btn btn-primary">Salvar</button>
+          </div>
+        </div>
+      </div>`;
+    window._pensaoOpenModal = (r) => {
+      document.getElementById('pensao-modal-title').textContent = r ? 'Editar Ordem' : 'Nova Ordem de Pensão';
+      document.getElementById('pensao-id').value = r ? r.id : '';
+      document.getElementById('pensao-emp').value = r ? r.employee_id : '';
+      document.getElementById('pensao-proc').value = r ? (r.processo||'') : '';
+      document.getElementById('pensao-benef').value = r ? r.beneficiario : '';
+      document.getElementById('pensao-cpf').value = r ? (r.cpf_beneficiario||'') : '';
+      document.getElementById('pensao-mod').value = r ? r.modalidade : 'percentual';
+      document.getElementById('pensao-base').value = r ? r.base_calculo : 'liquido';
+      document.getElementById('pensao-pct').value = r ? r.percentual : '';
+      document.getElementById('pensao-fixo').value = r ? r.valor_fixo : '';
+      document.getElementById('pensao-banco').value = r ? (r.banco||'') : '';
+      document.getElementById('pensao-ag').value = r ? (r.agencia||'') : '';
+      document.getElementById('pensao-conta').value = r ? (r.conta||'') : '';
+      document.getElementById('pensao-inicio').value = r ? (r.data_inicio||'') : new Date().toISOString().slice(0,10);
+      document.getElementById('pensao-modal').style.display = 'flex';
+    };
+    window._pensaoSave = async () => {
+      const id = document.getElementById('pensao-id').value;
+      const body = {
+        employee_id: parseInt(document.getElementById('pensao-emp').value),
+        processo: document.getElementById('pensao-proc').value,
+        beneficiario: document.getElementById('pensao-benef').value.trim(),
+        cpf_beneficiario: document.getElementById('pensao-cpf').value,
+        modalidade: document.getElementById('pensao-mod').value,
+        base_calculo: document.getElementById('pensao-base').value,
+        percentual: parseFloat(document.getElementById('pensao-pct').value||0),
+        valor_fixo: parseFloat(document.getElementById('pensao-fixo').value||0),
+        banco: document.getElementById('pensao-banco').value,
+        agencia: document.getElementById('pensao-ag').value,
+        conta: document.getElementById('pensao-conta').value,
+        data_inicio: document.getElementById('pensao-inicio').value,
+      };
+      try {
+        if (id) await apiFetch(`/api/dp/alimony/${id}`,{method:'PUT',body:JSON.stringify(body)});
+        else await apiFetch('/api/dp/alimony',{method:'POST',body:JSON.stringify(body)});
+        document.getElementById('pensao-modal').style.display = 'none';
+        showToast('Salvo!','success'); await render();
+      } catch(e) { showToast('Erro: '+e.message,'error'); }
+    };
+    window._pensaoDelete = async (id) => {
+      if (!confirm('Excluir ordem de pensão?')) return;
+      try { await apiFetch(`/api/dp/alimony/${id}`,{method:'DELETE'}); showToast('Excluída.','success'); await render(); }
+      catch(e) { showToast('Erro: '+e.message,'error'); }
+    };
+    if (window.lucide) lucide.createIcons();
+  };
+  await render();
+}
+
+// ── AUTÔNOMOS / RPA ───────────────────────────────────────────────────────────
+async function renderAutonomos(el) {
+  let innerTab = 'cadastro';
+  const hoje = new Date().toISOString().slice(0,7);
+  let comp = hoje;
+  const render = async () => {
+    el.innerHTML = `
+      <div class="flex gap-2 mb-4">
+        <button onclick="window._awTab('cadastro')" class="btn btn-sm ${innerTab==='cadastro'?'btn-primary':'btn-secondary'}">Cadastro</button>
+        <button onclick="window._awTab('rpa')" class="btn btn-sm ${innerTab==='rpa'?'btn-primary':'btn-secondary'}">Pagamentos RPA</button>
+      </div>
+      <div id="aw-content"></div>`;
+    window._awTab = (t) => { innerTab = t; render(); };
+    const bc = document.getElementById('aw-content');
+    if (innerTab === 'cadastro') {
+      const workers = await apiFetch('/api/dp/autonomous');
+      bc.innerHTML = `
+        <div class="flex justify-between items-center mb-3">
+          <h3 class="font-bold text-slate-800 dark:text-slate-100">Autônomos Cadastrados</h3>
+          <button onclick="window._awOpenModal(null)" class="btn btn-primary btn-sm">+ Novo Autônomo</button>
+        </div>
+        ${card2(`<table class="table table-sm">
+          <thead><tr><th>Nome</th><th>CPF</th><th>CBO</th><th>Cidade</th><th>Status</th><th>Ações</th></tr></thead>
+          <tbody>${workers.map(w=>`<tr>
+            <td>${w.nome}</td>
+            <td style="font-family:monospace">${w.cpf}</td>
+            <td>${w.cbo||'—'}</td>
+            <td>${w.cidade||'—'} ${w.uf||''}</td>
+            <td><span class="badge ${w.ativo?'badge-success':'badge-secondary'}">${w.ativo?'Ativo':'Inativo'}</span></td>
+            <td>
+              <button onclick="window._awOpenModal(${JSON.stringify(w).replace(/"/g,'&quot;')})" class="btn btn-sm btn-secondary">Editar</button>
+              <button onclick="openAuthed('/api/dp/esocial/s2300/${w.id}','S-2300-${w.id}.xml')" class="btn btn-sm btn-secondary">S-2300</button>
+            </td>
+          </tr>`).join('')}</tbody>
+        </table>`)}
+        <div id="aw-modal" class="modal-overlay" style="display:none">
+          <div class="modal-box">
+            <h3 id="aw-modal-title">Novo Autônomo</h3>
+            <input type="hidden" id="aw-id">
+            <div class="form-row">
+              <div class="form-group"><label>Nome</label><input id="aw-nome" class="form-control"></div>
+              <div class="form-group"><label>CPF</label><input id="aw-cpf" class="form-control" placeholder="000.000.000-00"></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label>PIS/PASEP</label><input id="aw-pis" class="form-control"></div>
+              <div class="form-group"><label>CBO</label><input id="aw-cbo" class="form-control" value="2521-05"></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label>Endereço</label><input id="aw-end" class="form-control"></div>
+              <div class="form-group"><label>Cidade</label><input id="aw-cid" class="form-control"></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label>UF</label><input id="aw-uf" class="form-control" maxlength="2"></div>
+              <div class="form-group"><label>Banco / Ag / CC</label><input id="aw-banco" class="form-control" placeholder="001 / 0001 / 12345-6"></div>
+            </div>
+            <div class="d-flex gap-2 justify-content-end mt-3">
+              <button onclick="document.getElementById('aw-modal').style.display='none'" class="btn btn-secondary">Cancelar</button>
+              <button onclick="window._awSave()" class="btn btn-primary">Salvar</button>
+            </div>
+          </div>
+        </div>`;
+      window._awOpenModal = (w) => {
+        document.getElementById('aw-modal-title').textContent = w ? 'Editar Autônomo' : 'Novo Autônomo';
+        document.getElementById('aw-id').value = w ? w.id : '';
+        document.getElementById('aw-nome').value = w ? w.nome : '';
+        document.getElementById('aw-cpf').value = w ? w.cpf : '';
+        document.getElementById('aw-pis').value = w ? (w.pis_pasep||'') : '';
+        document.getElementById('aw-cbo').value = w ? (w.cbo||'2521-05') : '2521-05';
+        document.getElementById('aw-end').value = w ? (w.endereco||'') : '';
+        document.getElementById('aw-cid').value = w ? (w.cidade||'') : '';
+        document.getElementById('aw-uf').value = w ? (w.uf||'') : '';
+        const bancoStr = w ? `${w.banco||''} / ${w.agencia||''} / ${w.conta||''}` : '';
+        document.getElementById('aw-banco').value = bancoStr.trim() === '/ /' ? '' : bancoStr;
+        document.getElementById('aw-modal').style.display = 'flex';
+      };
+      window._awSave = async () => {
+        const id = document.getElementById('aw-id').value;
+        const banco_raw = document.getElementById('aw-banco').value.split('/');
+        const body = {
+          nome: document.getElementById('aw-nome').value.trim(),
+          cpf: document.getElementById('aw-cpf').value.trim(),
+          pis_pasep: document.getElementById('aw-pis').value.trim(),
+          cbo: document.getElementById('aw-cbo').value.trim(),
+          endereco: document.getElementById('aw-end').value.trim(),
+          cidade: document.getElementById('aw-cid').value.trim(),
+          uf: document.getElementById('aw-uf').value.trim(),
+          banco: (banco_raw[0]||'').trim(),
+          agencia: (banco_raw[1]||'').trim(),
+          conta: (banco_raw[2]||'').trim(),
+          ativo: 1,
+        };
+        try {
+          if (id) await apiFetch(`/api/dp/autonomous/${id}`,{method:'PUT',body:JSON.stringify(body)});
+          else await apiFetch('/api/dp/autonomous',{method:'POST',body:JSON.stringify(body)});
+          document.getElementById('aw-modal').style.display = 'none';
+          showToast('Salvo!','success'); await render();
+        } catch(e) { showToast('Erro: '+e.message,'error'); }
+      };
+    } else {
+      // RPA payments
+      const workers = await apiFetch('/api/dp/autonomous');
+      const payments = await apiFetch(`/api/dp/rpa?competencia=${comp}`);
+      const totBruto = payments.reduce((s,p)=>s+parseFloat(p.valor_bruto||0),0);
+      const totInss = payments.reduce((s,p)=>s+parseFloat(p.inss_retido||0),0);
+      const totIrrf = payments.reduce((s,p)=>s+parseFloat(p.irrf_retido||0),0);
+      const totLiq = payments.reduce((s,p)=>s+parseFloat(p.valor_liquido||0),0);
+      bc.innerHTML = `
+        <div class="flex gap-3 items-center mb-4">
+          <input type="month" value="${comp}" class="form-control" style="max-width:160px" onchange="comp=this.value;render()">
+          <button onclick="window._rpaOpenModal()" class="btn btn-primary btn-sm">+ Registrar RPA</button>
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+          ${kpiDP('Pagamentos',payments.length,'no mês','receipt','text-violet-600')}
+          ${kpiDP('Total Bruto',fBRL2(totBruto),'','banknote','text-blue-600')}
+          ${kpiDP('INSS Retido',fBRL2(totInss),'11%','shield','text-orange-600')}
+          ${kpiDP('IRRF Retido',fBRL2(totIrrf),'tabela progressiva','percent','text-red-600')}
+          ${kpiDP('Total Líquido',fBRL2(totLiq),'a pagar','trending-down','text-emerald-600')}
+        </div>
+        ${card2(`<table class="table table-sm">
+          <thead><tr><th>Nome</th><th>Descrição</th><th>Bruto</th><th>INSS</th><th>IRRF</th><th>ISS</th><th>Líquido</th><th>Data</th><th>Ações</th></tr></thead>
+          <tbody>${payments.map(p=>`<tr>
+            <td>${p.nome||''}</td>
+            <td style="font-size:.8rem">${p.descricao_servico||''}</td>
+            <td>${fBRL2(p.valor_bruto)}</td>
+            <td>${fBRL2(p.inss_retido)}</td>
+            <td>${fBRL2(p.irrf_retido)}</td>
+            <td>${fBRL2(p.iss_retido)}</td>
+            <td class="font-semibold text-emerald-600">${fBRL2(p.valor_liquido)}</td>
+            <td>${p.data_pagamento||'—'}</td>
+            <td>
+              <button onclick="openAuthed('/api/dp/rpa/${p.id}/recibo')" class="btn btn-sm btn-secondary">RPA</button>
+              <button onclick="openAuthed('/api/dp/esocial/s2300/${p.autonomous_id}','S-2300.xml')" class="btn btn-sm btn-secondary">S-2300</button>
+              <button onclick="window._rpaDelete(${p.id})" class="btn btn-sm btn-danger">×</button>
+            </td>
+          </tr>`).join('')}</tbody>
+        </table>`)}
+        <div id="rpa-modal" class="modal-overlay" style="display:none">
+          <div class="modal-box">
+            <h3>Registrar Pagamento RPA</h3>
+            <div class="form-row">
+              <div class="form-group"><label>Autônomo</label>
+                <select id="rpa-aut" class="form-control">
+                  ${workers.map(w=>`<option value="${w.id}">${w.nome} — ${w.cpf}</option>`).join('')}
+                </select>
+              </div>
+              <div class="form-group"><label>Competência</label><input id="rpa-comp" type="month" value="${comp}" class="form-control"></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label>Data Pagamento</label><input id="rpa-data" type="date" class="form-control" value="${new Date().toISOString().slice(0,10)}"></div>
+              <div class="form-group"><label>ISS Retido (R$)</label><input id="rpa-iss" type="number" step="0.01" value="0" class="form-control"></div>
+            </div>
+            <div class="form-group"><label>Descrição do Serviço</label><input id="rpa-desc" class="form-control" placeholder="Consultoria em TI — Implantação de sistema"></div>
+            <div class="form-row">
+              <div class="form-group"><label>Valor Bruto (R$)</label><input id="rpa-bruto" type="number" step="0.01" class="form-control" oninput="window._rpaCalc()" placeholder="1000"></div>
+              <div class="form-group"><label>INSS 11% (calculado)</label><input id="rpa-inss-calc" class="form-control" readonly></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label>IRRF (calculado)</label><input id="rpa-irrf-calc" class="form-control" readonly></div>
+              <div class="form-group"><label>Líquido (calculado)</label><input id="rpa-liq-calc" class="form-control" readonly></div>
+            </div>
+            <div class="d-flex gap-2 justify-content-end mt-3">
+              <button onclick="document.getElementById('rpa-modal').style.display='none'" class="btn btn-secondary">Cancelar</button>
+              <button onclick="window._rpaSave()" class="btn btn-primary">Salvar</button>
+            </div>
+          </div>
+        </div>`;
+      window._rpaCalc = () => {
+        const bruto = parseFloat(document.getElementById('rpa-bruto')?.value||0);
+        const inss = Math.min(bruto*0.11, 897.32);
+        const baseIrrf = bruto - inss;
+        let irrf = 0;
+        const brackets = [[2824,0,0],[3751.05,7.5,211.80],[4664.68,15,492.78],[5871.22,22.5,843.34],[Infinity,27.5,1137.74]];
+        for (const [lim,aliq,ded] of brackets) { if (baseIrrf<=lim){ irrf=Math.max(0,baseIrrf*aliq/100-ded); break; } }
+        const iss = parseFloat(document.getElementById('rpa-iss')?.value||0);
+        const liq = bruto - inss - irrf - iss;
+        const set = (id,v) => { const el=document.getElementById(id); if(el) el.value=v.toFixed(2); };
+        set('rpa-inss-calc', inss); set('rpa-irrf-calc', irrf); set('rpa-liq-calc', liq);
+      };
+      window._rpaOpenModal = () => {
+        document.getElementById('rpa-bruto').value = '';
+        ['rpa-inss-calc','rpa-irrf-calc','rpa-liq-calc'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+        document.getElementById('rpa-modal').style.display = 'flex';
+      };
+      window._rpaSave = async () => {
+        const body = {
+          autonomous_id: parseInt(document.getElementById('rpa-aut').value),
+          competencia: document.getElementById('rpa-comp').value,
+          data_pagamento: document.getElementById('rpa-data').value,
+          descricao_servico: document.getElementById('rpa-desc').value.trim(),
+          valor_bruto: parseFloat(document.getElementById('rpa-bruto').value||0),
+          iss_retido: parseFloat(document.getElementById('rpa-iss').value||0),
+        };
+        try {
+          await apiFetch('/api/dp/rpa',{method:'POST',body:JSON.stringify(body)});
+          document.getElementById('rpa-modal').style.display = 'none';
+          showToast('RPA registrado!','success'); await render();
+        } catch(e) { showToast('Erro: '+e.message,'error'); }
+      };
+      window._rpaDelete = async (id) => {
+        if (!confirm('Excluir pagamento RPA?')) return;
+        try { await apiFetch(`/api/dp/rpa/${id}`,{method:'DELETE'}); showToast('Excluído.','success'); await render(); }
+        catch(e) { showToast('Erro: '+e.message,'error'); }
+      };
+    }
+    if (window.lucide) lucide.createIcons();
+  };
+  await render();
+}
+
+// ── PRÓ-LABORE ────────────────────────────────────────────────────────────────
+async function renderProlabore(el) {
+  let innerTab = 'socios';
+  const hoje = new Date().toISOString().slice(0,7);
+  let comp = hoje;
+  const render = async () => {
+    el.innerHTML = `
+      <div class="flex gap-2 mb-4">
+        <button onclick="window._plTab('socios')" class="btn btn-sm ${innerTab==='socios'?'btn-primary':'btn-secondary'}">Sócios</button>
+        <button onclick="window._plTab('folha')" class="btn btn-sm ${innerTab==='folha'?'btn-primary':'btn-secondary'}">Folha de Pró-labore</button>
+      </div>
+      <div id="pl-content"></div>`;
+    window._plTab = (t) => { innerTab = t; render(); };
+    const bc = document.getElementById('pl-content');
+    if (innerTab === 'socios') {
+      const partners = await apiFetch('/api/dp/partners');
+      bc.innerHTML = `
+        <div class="flex justify-between items-center mb-3">
+          <h3 class="font-bold text-slate-800 dark:text-slate-100">Quadro Societário</h3>
+          <button onclick="window._plOpenModal(null)" class="btn btn-primary btn-sm">+ Novo Sócio</button>
+        </div>
+        ${card2(`<table class="table table-sm">
+          <thead><tr><th>Nome</th><th>CPF</th><th>Cargo</th><th>% Sociedade</th><th>Pró-labore</th><th>Status</th><th>Ações</th></tr></thead>
+          <tbody>${partners.map(p=>`<tr>
+            <td>${p.nome}</td>
+            <td style="font-family:monospace">${p.cpf}</td>
+            <td>${p.cargo||'—'}</td>
+            <td>${p.percentual_sociedade||0}%</td>
+            <td class="font-semibold text-emerald-600">${fBRL2(p.salario_prolabore)}</td>
+            <td><span class="badge ${p.ativo?'badge-success':'badge-secondary'}">${p.ativo?'Ativo':'Inativo'}</span></td>
+            <td>
+              <button onclick="window._plOpenModal(${JSON.stringify(p).replace(/"/g,'&quot;')})" class="btn btn-sm btn-secondary">Editar</button>
+              <button onclick="window._plDeletePartner(${p.id})" class="btn btn-sm btn-danger">Excluir</button>
+            </td>
+          </tr>`).join('')}</tbody>
+        </table>`)}
+        <div id="pl-modal" class="modal-overlay" style="display:none">
+          <div class="modal-box">
+            <h3 id="pl-modal-title">Novo Sócio</h3>
+            <input type="hidden" id="pl-id">
+            <div class="form-row">
+              <div class="form-group"><label>Nome Completo</label><input id="pl-nome" class="form-control"></div>
+              <div class="form-group"><label>CPF</label><input id="pl-cpf" class="form-control" placeholder="000.000.000-00"></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label>Cargo</label><input id="pl-cargo" class="form-control" value="Sócio-Administrador"></div>
+              <div class="form-group"><label>% Sociedade</label><input id="pl-pct" type="number" step="0.01" class="form-control" placeholder="50"></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label>Pró-labore (R$)</label><input id="pl-valor" type="number" step="0.01" class="form-control" placeholder="3000"></div>
+              <div class="form-group"><label>Banco / Ag / CC</label><input id="pl-banco" class="form-control" placeholder="001 / 0001 / 12345-6"></div>
+            </div>
+            <div class="d-flex gap-2 justify-content-end mt-3">
+              <button onclick="document.getElementById('pl-modal').style.display='none'" class="btn btn-secondary">Cancelar</button>
+              <button onclick="window._plSavePartner()" class="btn btn-primary">Salvar</button>
+            </div>
+          </div>
+        </div>`;
+      window._plOpenModal = (p) => {
+        document.getElementById('pl-modal-title').textContent = p ? 'Editar Sócio' : 'Novo Sócio';
+        document.getElementById('pl-id').value = p ? p.id : '';
+        document.getElementById('pl-nome').value = p ? p.nome : '';
+        document.getElementById('pl-cpf').value = p ? p.cpf : '';
+        document.getElementById('pl-cargo').value = p ? (p.cargo||'Sócio-Administrador') : 'Sócio-Administrador';
+        document.getElementById('pl-pct').value = p ? p.percentual_sociedade : '';
+        document.getElementById('pl-valor').value = p ? p.salario_prolabore : '';
+        const bancoStr = p ? `${p.banco||''} / ${p.agencia||''} / ${p.conta||''}` : '';
+        document.getElementById('pl-banco').value = bancoStr.trim()==='/ /'?'':bancoStr;
+        document.getElementById('pl-modal').style.display = 'flex';
+      };
+      window._plSavePartner = async () => {
+        const id = document.getElementById('pl-id').value;
+        const banco_raw = document.getElementById('pl-banco').value.split('/');
+        const body = {
+          nome: document.getElementById('pl-nome').value.trim(),
+          cpf: document.getElementById('pl-cpf').value.trim(),
+          cargo: document.getElementById('pl-cargo').value.trim(),
+          percentual_sociedade: parseFloat(document.getElementById('pl-pct').value||0),
+          salario_prolabore: parseFloat(document.getElementById('pl-valor').value||0),
+          banco: (banco_raw[0]||'').trim(),
+          agencia: (banco_raw[1]||'').trim(),
+          conta: (banco_raw[2]||'').trim(),
+          ativo: 1,
+        };
+        try {
+          if (id) await apiFetch(`/api/dp/partners/${id}`,{method:'PUT',body:JSON.stringify(body)});
+          else await apiFetch('/api/dp/partners',{method:'POST',body:JSON.stringify(body)});
+          document.getElementById('pl-modal').style.display = 'none';
+          showToast('Salvo!','success'); await render();
+        } catch(e) { showToast('Erro: '+e.message,'error'); }
+      };
+      window._plDeletePartner = async (id) => {
+        if (!confirm('Excluir sócio?')) return;
+        try { await apiFetch(`/api/dp/partners/${id}`,{method:'DELETE'}); showToast('Excluído.','success'); await render(); }
+        catch(e) { showToast('Erro: '+e.message,'error'); }
+      };
+    } else {
+      // Folha Pró-labore
+      let runs = [];
+      try { runs = await apiFetch(`/api/dp/prolabore?competencia=${comp}`); } catch {}
+      const totBruto = runs.reduce((s,r)=>s+parseFloat(r.valor_bruto||0),0);
+      const totInss = runs.reduce((s,r)=>s+parseFloat(r.inss_retido||0),0);
+      const totIrrf = runs.reduce((s,r)=>s+parseFloat(r.irrf_retido||0),0);
+      const totLiq = runs.reduce((s,r)=>s+parseFloat(r.valor_liquido||0),0);
+      bc.innerHTML = `
+        <div class="flex gap-3 items-center mb-4">
+          <input type="month" value="${comp}" class="form-control" style="max-width:160px" onchange="comp=this.value;render()">
+          <button onclick="window._plCalcular()" class="btn btn-primary btn-sm">Calcular</button>
+          ${runs.length?`<button onclick="window._plContabil()" class="btn btn-secondary btn-sm">Partidas Contábeis</button>`:''}
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+          ${kpiDP('Total Bruto',fBRL2(totBruto),'','banknote','text-blue-600')}
+          ${kpiDP('INSS 11%',fBRL2(totInss),'','shield','text-orange-600')}
+          ${kpiDP('IRRF',fBRL2(totIrrf),'','percent','text-red-600')}
+          ${kpiDP('Total Líquido',fBRL2(totLiq),'','trending-up','text-emerald-600')}
+        </div>
+        ${runs.length ? card2(`<table class="table table-sm">
+          <thead><tr><th>Sócio</th><th>Cargo</th><th>Bruto</th><th>INSS 11%</th><th>IRRF</th><th>Líquido</th><th>Recibo</th></tr></thead>
+          <tbody>${runs.map(r=>`<tr>
+            <td>${r.nome||''}</td>
+            <td>${r.cargo||''}</td>
+            <td>${fBRL2(r.valor_bruto)}</td>
+            <td>${fBRL2(r.inss_retido)}</td>
+            <td>${fBRL2(r.irrf_retido)}</td>
+            <td class="font-semibold text-emerald-600">${fBRL2(r.valor_liquido)}</td>
+            <td><button onclick="openAuthed('/api/dp/prolabore/${r.id}/recibo')" class="btn btn-sm btn-secondary">Recibo</button></td>
+          </tr>`).join('')}</tbody>
+        </table>`) : '<p class="text-muted text-sm">Clique em "Calcular" para gerar a folha de pró-labore.</p>'}
+        <div id="pl-contabil-modal" class="modal-overlay" style="display:none">
+          <div class="modal-box"><h3>Partidas Contábeis — Pró-labore ${comp}</h3><div id="pl-partidas-content"></div>
+            <div class="d-flex justify-content-end mt-3"><button onclick="document.getElementById('pl-contabil-modal').style.display='none'" class="btn btn-secondary">Fechar</button></div>
+          </div>
+        </div>`;
+      window._plCalcular = async () => {
+        try {
+          await apiFetch(`/api/dp/prolabore/calcular/${comp}`,{method:'POST',body:'{}',headers:{'Content-Type':'application/json'}});
+          showToast('Pró-labore calculado!','success'); await render();
+        } catch(e) { showToast('Erro: '+e.message,'error'); }
+      };
+      window._plContabil = async () => {
+        try {
+          const data = await apiFetch(`/api/dp/prolabore/contabil/${comp}`);
+          const html = `<table class="table table-sm"><thead><tr><th>Tipo</th><th>Conta</th><th>Descrição</th><th>Valor</th></tr></thead><tbody>
+            ${data.partidas.map(p=>`<tr>
+              <td><span class="badge ${p.tipo==='debito'?'badge-danger':'badge-success'}">${p.tipo.toUpperCase()}</span></td>
+              <td style="font-family:monospace">${p.conta}</td>
+              <td>${p.descricao}</td>
+              <td>${fBRL2(p.valor)}</td>
+            </tr>`).join('')}</tbody></table>`;
+          document.getElementById('pl-partidas-content').innerHTML = html;
+          document.getElementById('pl-contabil-modal').style.display = 'flex';
+        } catch(e) { showToast('Erro: '+e.message,'error'); }
+      };
+    }
+    if (window.lucide) lucide.createIcons();
+  };
+  await render();
+}
+
+// ── EXAMES MÉDICOS (ASO) ──────────────────────────────────────────────────────
+async function renderAso(el) {
+  const render = async () => {
+    const [exams, vencimentos] = await Promise.all([
+      apiFetch('/api/dp/medical-exams').catch(()=>[]),
+      apiFetch('/api/dp/medical-exams/vencimentos?dias=30').catch(()=>[]),
+    ]);
+    const hoje = new Date().toISOString().slice(0,10);
+    const vencidos = exams.filter(e=>e.data_vencimento&&e.data_vencimento<hoje).length;
+    const aVencer = vencimentos.filter(e=>e.dias_restantes>=0).length;
+    const inaptos = exams.filter(e=>e.resultado==='inapto').length;
+    const anoAtual = new Date().getFullYear();
+    const totalAno = exams.filter(e=>(e.data_exame||'').startsWith(anoAtual)).length;
+    el.innerHTML = `
+      ${vencidos>0?`<div class="alert alert-danger mb-3">⚠️ ${vencidos} ASO(s) VENCIDO(S) — ação imediata necessária!</div>`:''}
+      ${aVencer>0&&vencidos===0?`<div class="alert alert-warning mb-3">⚠️ ${aVencer} ASO(s) vencem nos próximos 30 dias.</div>`:''}
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+        ${kpiDP('A Vencer (30d)',aVencer,'próximos 30 dias','clock','text-amber-600')}
+        ${kpiDP('Vencidos',vencidos,'requer ação','alert-circle','text-red-600')}
+        ${kpiDP('Inaptos',inaptos,'funcionários','x-circle','text-orange-600')}
+        ${kpiDP('Total '+anoAtual,totalAno,'exames no ano','stethoscope','text-violet-600')}
+      </div>
+      <div class="flex justify-between items-center mb-3">
+        <h3 class="font-bold text-slate-800 dark:text-slate-100">Exames Médicos (ASO)</h3>
+        <button onclick="window._asoOpenModal(null)" class="btn btn-primary btn-sm">+ Novo ASO</button>
+      </div>
+      ${card2(`<table class="table table-sm">
+        <thead><tr><th>Funcionário</th><th>Tipo</th><th>Data Exame</th><th>Vencimento</th><th>Dias</th><th>Resultado</th><th>Médico</th><th>Ações</th></tr></thead>
+        <tbody>${exams.map(e=>{
+          const dv = e.data_vencimento;
+          const dias = dv ? Math.round((new Date(dv)-new Date(hoje))/(86400000)) : null;
+          const badgeCls = dias===null?'badge-secondary':dias>30?'badge-success':dias>=0?'badge-warning':'badge-danger';
+          const diasStr = dias===null?'—':dias<=0?'VENCIDO':dias+' dias';
+          const resCls = e.resultado==='apto'?'badge-success':e.resultado==='inapto'?'badge-danger':'badge-warning';
+          return `<tr>
+            <td>${e.employee_name||''}</td>
+            <td>${e.tipo}</td>
+            <td>${fDate2(e.data_exame)}</td>
+            <td>${dv?fDate2(dv):'—'}</td>
+            <td><span class="badge ${badgeCls}">${diasStr}</span></td>
+            <td><span class="badge ${resCls}">${e.resultado}</span></td>
+            <td style="font-size:.8rem">${e.medico||'—'} ${e.crm_medico?'CRM '+e.crm_medico:''}</td>
+            <td>
+              <button onclick="window._asoOpenModal(${JSON.stringify(e).replace(/"/g,'&quot;')})" class="btn btn-sm btn-secondary">Editar</button>
+              <button onclick="openAuthed('/api/dp/esocial/s2220/${e.id}','S-2220-${e.id}.xml')" class="btn btn-sm btn-secondary">S-2220</button>
+              <button onclick="window._asoDelete(${e.id})" class="btn btn-sm btn-danger">×</button>
+            </td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table>`)}
+      <div id="aso-modal" class="modal-overlay" style="display:none">
+        <div class="modal-box" style="max-width:600px">
+          <h3 id="aso-modal-title">Novo ASO</h3>
+          <input type="hidden" id="aso-id">
+          <div class="form-row">
+            <div class="form-group"><label>Funcionário</label>
+              <select id="aso-emp" class="form-control">
+                ${(dpEmployees||[]).map(e=>`<option value="${e.id}">${e.name}</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-group"><label>Tipo</label>
+              <select id="aso-tipo" class="form-control">
+                <option value="admissional">Admissional</option>
+                <option value="periodico">Periódico</option>
+                <option value="retorno_trabalho">Retorno ao Trabalho</option>
+                <option value="mudanca_funcao">Mudança de Função</option>
+                <option value="demissional">Demissional</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Data do Exame</label><input id="aso-data" type="date" class="form-control" value="${hoje}"></div>
+            <div class="form-group"><label>Periodicidade (meses)</label><input id="aso-per" type="number" value="12" class="form-control"></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Resultado</label>
+              <select id="aso-res" class="form-control">
+                <option value="apto">Apto</option>
+                <option value="inapto">Inapto</option>
+                <option value="apto_restricao">Apto com Restrições</option>
+              </select>
+            </div>
+            <div class="form-group"><label>Restrições</label><input id="aso-rest" class="form-control" placeholder="Sem restrições"></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Médico Responsável</label><input id="aso-med" class="form-control"></div>
+            <div class="form-group"><label>CRM</label><input id="aso-crm" class="form-control" placeholder="123456"></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Clínica</label><input id="aso-clinica" class="form-control"></div>
+            <div class="form-group"><label>Observações</label><input id="aso-obs" class="form-control"></div>
+          </div>
+          <div class="d-flex gap-2 justify-content-end mt-3">
+            <button onclick="document.getElementById('aso-modal').style.display='none'" class="btn btn-secondary">Cancelar</button>
+            <button onclick="window._asoSave()" class="btn btn-primary">Salvar</button>
+          </div>
+        </div>
+      </div>`;
+    window._asoOpenModal = (e) => {
+      document.getElementById('aso-modal-title').textContent = e ? 'Editar ASO' : 'Novo ASO';
+      document.getElementById('aso-id').value = e ? e.id : '';
+      document.getElementById('aso-emp').value = e ? e.employee_id : '';
+      document.getElementById('aso-tipo').value = e ? e.tipo : 'admissional';
+      document.getElementById('aso-data').value = e ? (e.data_exame||hoje) : hoje;
+      document.getElementById('aso-per').value = e ? (e.periodicidade_meses||12) : 12;
+      document.getElementById('aso-res').value = e ? (e.resultado||'apto') : 'apto';
+      document.getElementById('aso-rest').value = e ? (e.restricoes||'') : '';
+      document.getElementById('aso-med').value = e ? (e.medico||'') : '';
+      document.getElementById('aso-crm').value = e ? (e.crm_medico||'') : '';
+      document.getElementById('aso-clinica').value = e ? (e.clinica||'') : '';
+      document.getElementById('aso-obs').value = e ? (e.observacoes||'') : '';
+      document.getElementById('aso-modal').style.display = 'flex';
+    };
+    window._asoSave = async () => {
+      const id = document.getElementById('aso-id').value;
+      const body = {
+        employee_id: parseInt(document.getElementById('aso-emp').value),
+        tipo: document.getElementById('aso-tipo').value,
+        data_exame: document.getElementById('aso-data').value,
+        periodicidade_meses: parseInt(document.getElementById('aso-per').value||12),
+        resultado: document.getElementById('aso-res').value,
+        restricoes: document.getElementById('aso-rest').value,
+        medico: document.getElementById('aso-med').value,
+        crm_medico: document.getElementById('aso-crm').value,
+        clinica: document.getElementById('aso-clinica').value,
+        observacoes: document.getElementById('aso-obs').value,
+      };
+      try {
+        if (id) await apiFetch(`/api/dp/medical-exams/${id}`,{method:'PUT',body:JSON.stringify(body)});
+        else await apiFetch('/api/dp/medical-exams',{method:'POST',body:JSON.stringify(body)});
+        document.getElementById('aso-modal').style.display = 'none';
+        showToast('ASO salvo!','success'); await render();
+      } catch(e) { showToast('Erro: '+e.message,'error'); }
+    };
+    window._asoDelete = async (id) => {
+      if (!confirm('Excluir exame?')) return;
+      try { await apiFetch(`/api/dp/medical-exams/${id}`,{method:'DELETE'}); showToast('Excluído.','success'); await render(); }
+      catch(e) { showToast('Erro: '+e.message,'error'); }
+    };
+    if (window.lucide) lucide.createIcons();
+  };
+  await render();
 }
