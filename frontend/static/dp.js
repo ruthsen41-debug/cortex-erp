@@ -60,6 +60,11 @@ function dpTabs() {
     { id: 'autonomos',         icon: 'user-check',    label: 'Autônomos/RPA' },
     { id: 'prolabore',         icon: 'briefcase-business', label: 'Pró-labore' },
     { id: 'aso',               icon: 'stethoscope',   label: 'Exames (ASO)' },
+    { id: 'ppp',               icon: 'shield-alert',  label: 'PPP / LTCAT' },
+    { id: 'contabil_dp',       icon: 'book-open',     label: 'Integração Contábil' },
+    { id: 'estagiarios',       icon: 'graduation-cap',label: 'Estágio & Aprendiz' },
+    { id: 'fgts',              icon: 'piggy-bank',    label: 'Extrato FGTS' },
+    { id: 'employee_portal',   icon: 'circle-user',   label: 'Portal' },
   ];
   return `<div class="flex gap-1 overflow-x-auto pb-1 flex-wrap">
     ${tabs.map(t => `
@@ -126,6 +131,11 @@ async function switchDpTab(tab, noRebuildTabs = false) {
     case 'autonomos':          await renderAutonomos(body); break;
     case 'prolabore':          await renderProlabore(body); break;
     case 'aso':                await renderAso(body); break;
+    case 'ppp':                await renderPpp(body); break;
+    case 'contabil_dp':        await renderContabilDp(body); break;
+    case 'estagiarios':        await renderEstagiarios(body); break;
+    case 'fgts':               await renderFgts(body); break;
+    case 'employee_portal':    await renderPortalFuncionario(body); break;
   }
   if (window.lucide) lucide.createIcons();
 }
@@ -3754,3 +3764,637 @@ async function renderAso(el) {
   };
   await render();
 }
+
+
+// ── PPP / LTCAT ──────────────────────────────────────────────────
+async function renderPpp(el) {
+  let envs = [], agents = [], ltcats = [], ppps = [];
+  try {
+    [envs, agents, ltcats, ppps] = await Promise.all([
+      apiFetch('/api/dp/work-environments'),
+      apiFetch('/api/dp/risk-agents'),
+      apiFetch('/api/dp/ltcat'),
+      apiFetch('/api/dp/ppp'),
+    ]);
+  } catch(e) { el.innerHTML = `<p class="text-red-500">Erro: ${e.message}</p>`; return; }
+
+  let pppTab = 'ambientes';
+  const render = () => {
+    const tabs2 = [['ambientes','Ambientes'],['agentes','Agentes de Risco'],['ltcat','LTCAT'],['ppps','PPP Funcionários']];
+    el.innerHTML = `
+      <div class="flex gap-2 mb-4 flex-wrap">
+        ${tabs2.map(([id,lbl]) => `<button onclick="window._pppTab('${id}')"
+          class="px-3 py-1.5 rounded-xl text-xs font-semibold transition ${pppTab===id ? 'bg-violet-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'}">${lbl}</button>`).join('')}
+      </div>
+      <div id="ppp-body"></div>
+      <div id="ppp-modal" class="modal-overlay" style="display:none"><div class="modal-box" id="ppp-modal-inner"></div></div>`;
+
+    window._pppTab = (t) => { pppTab = t; render(); };
+    const body = document.getElementById('ppp-body');
+
+    if (pppTab === 'ambientes') {
+      body.innerHTML = `
+        <div class="flex justify-between mb-3"><h3 class="font-bold text-slate-800 dark:text-slate-100">Ambientes de Trabalho</h3>
+          <button onclick="window._pppEnvModal()" class="btn btn-primary text-xs">+ Novo Ambiente</button></div>
+        <div class="table-responsive"><table class="table"><thead><tr><th>Nome</th><th>Local</th><th>Setor</th><th>Atividade</th><th>Ações</th></tr></thead>
+        <tbody>${envs.length ? envs.map(e => `<tr><td>${e.nome}</td><td>${e.local_trabalho||'—'}</td><td>${e.setor||'—'}</td><td>${e.atividade_economica||'—'}</td>
+          <td><button onclick="window._pppEnvDel(${e.id},'${(e.nome||'').replace(/'/g,"\\'")}')"\n            class="btn btn-sm btn-danger">Excluir</button></td></tr>`).join('') : '<tr><td colspan="5" class="text-center text-muted">Nenhum ambiente cadastrado.</td></tr>'}</tbody></table></div>`;
+
+      window._pppEnvModal = (env={}) => {
+        document.getElementById('ppp-modal-inner').innerHTML = `
+          <h3 class="${env.id ? 'Editar' : 'Novo'} Ambiente">Ambiente de Trabalho</h3>
+          <div class="form-row"><div class="form-group"><label>Nome *</label><input id="penv-nome" class="${inputCls}" value="${env.nome||''}"></div>
+          <div class="form-group"><label>Local</label><input id="penv-local" class="${inputCls}" value="${env.local_trabalho||''}"></div></div>
+          <div class="form-row"><div class="form-group"><label>Setor</label><input id="penv-setor" class="${inputCls}" value="${env.setor||''}"></div>
+          <div class="form-group"><label>Atividade Econômica</label><input id="penv-ativ" class="${inputCls}" value="${env.atividade_economica||''}"></div></div>
+          <div class="d-flex gap-2 justify-content-end mt-3">
+            <button class="btn btn-secondary" onclick="document.getElementById('ppp-modal').style.display='none'">Cancelar</button>
+            <button class="btn btn-primary" onclick="window._pppEnvSave(${env.id||0})">Salvar</button></div>`;
+        document.getElementById('ppp-modal').style.display = 'flex';
+      };
+      window._pppEnvSave = async (id) => {
+        const b = { nome: document.getElementById('penv-nome').value, local_trabalho: document.getElementById('penv-local').value, setor: document.getElementById('penv-setor').value, atividade_economica: document.getElementById('penv-ativ').value };
+        try {
+          if (id) await apiFetch(`/api/dp/work-environments/${id}`, {method:'PUT',body:JSON.stringify(b)});
+          else { const r = await apiFetch('/api/dp/work-environments', {method:'POST',body:JSON.stringify(b)}); envs.push(r); }
+          document.getElementById('ppp-modal').style.display = 'none';
+          envs = await apiFetch('/api/dp/work-environments'); showToast('Salvo!','success'); render();
+        } catch(e) { showToast('Erro: '+e.message,'error'); }
+      };
+      window._pppEnvDel = async (id, nome) => {
+        if (!confirm(`Excluir "${nome}"?`)) return;
+        await apiFetch(`/api/dp/work-environments/${id}`, {method:'DELETE'});
+        envs = envs.filter(e => e.id !== id); render();
+      };
+
+    } else if (pppTab === 'agentes') {
+      const tipoColors = {fisico:'badge-warning',quimico:'badge-danger',biologico:'badge-success',ergonomico:'badge-info',mecanico:'badge-secondary'};
+      body.innerHTML = `
+        <div class="flex justify-between mb-3"><h3 class="font-bold text-slate-800 dark:text-slate-100">Agentes de Risco</h3>
+          <button onclick="window._pppAgtModal()" class="btn btn-primary text-xs">+ Novo Agente</button></div>
+        <div class="table-responsive"><table class="table"><thead><tr><th>Nome</th><th>Tipo</th><th>Ambiente</th><th>NR-15</th><th>Intensidade</th><th>EPI</th><th>Cód. eSocial</th><th>Ações</th></tr></thead>
+        <tbody>${agents.length ? agents.map(a => `<tr>
+          <td>${a.nome}</td>
+          <td><span class="badge ${tipoColors[a.tipo]||'badge-secondary'}">${a.tipo}</span></td>
+          <td>${a.ambiente_nome||'—'}</td><td>${a.nr15_codigo||'—'}</td><td>${a.intensidade||'—'}</td><td>${a.epi||'—'}</td><td>${a.esocial_cod_agente||'—'}</td>
+          <td><button onclick="window._pppAgtDel(${a.id},'${(a.nome||'').replace(/'/g,"\\'")}')"\n            class="btn btn-sm btn-danger">Excluir</button></td></tr>`).join('') : '<tr><td colspan="8" class="text-center text-muted">Nenhum agente cadastrado.</td></tr>'}</tbody></table></div>`;
+
+      window._pppAgtModal = () => {
+        document.getElementById('ppp-modal-inner').innerHTML = `
+          <h3>Novo Agente de Risco</h3>
+          <div class="form-row">
+            <div class="form-group"><label>Ambiente</label><select id="pagt-env" class="${inputCls}"><option value="">— selecione —</option>${envs.map(e => `<option value="${e.id}">${e.nome}</option>`).join('')}</select></div>
+            <div class="form-group"><label>Tipo</label><select id="pagt-tipo" class="${inputCls}"><option value="fisico">Físico</option><option value="quimico">Químico</option><option value="biologico">Biológico</option><option value="ergonomico">Ergonômico</option><option value="mecanico">Mecânico</option></select></div>
+          </div>
+          <div class="form-row"><div class="form-group"><label>Nome *</label><input id="pagt-nome" class="${inputCls}" placeholder="Ex: Ruído acima de 85dB"></div>
+          <div class="form-group"><label>Código NR-15</label><input id="pagt-nr15" class="${inputCls}" placeholder="Ex: 15.1.A"></div></div>
+          <div class="form-row"><div class="form-group"><label>Intensidade</label><input id="pagt-int" class="${inputCls}" placeholder="Ex: 92 dB(A)"></div>
+          <div class="form-group"><label>EPI Utilizado</label><input id="pagt-epi" class="${inputCls}" placeholder="Ex: Protetor auricular CA-123"></div></div>
+          <div class="form-row"><div class="form-group"><label>Código eSocial</label><input id="pagt-esoc" class="${inputCls}" placeholder="Ex: 01.01.001"></div>
+          <div class="form-group"><label>EPC</label><input id="pagt-epc" class="${inputCls}"></div></div>
+          <div class="d-flex gap-2 justify-content-end mt-3">
+            <button class="btn btn-secondary" onclick="document.getElementById('ppp-modal').style.display='none'">Cancelar</button>
+            <button class="btn btn-primary" onclick="window._pppAgtSave()">Salvar</button></div>`;
+        document.getElementById('ppp-modal').style.display = 'flex';
+      };
+      window._pppAgtSave = async () => {
+        const b = { work_environment_id: document.getElementById('pagt-env').value||null, tipo: document.getElementById('pagt-tipo').value, nome: document.getElementById('pagt-nome').value, nr15_codigo: document.getElementById('pagt-nr15').value, intensidade: document.getElementById('pagt-int').value, epi: document.getElementById('pagt-epi').value, esocial_cod_agente: document.getElementById('pagt-esoc').value, epc: document.getElementById('pagt-epc').value };
+        try { await apiFetch('/api/dp/risk-agents',{method:'POST',body:JSON.stringify(b)}); agents = await apiFetch('/api/dp/risk-agents'); document.getElementById('ppp-modal').style.display='none'; showToast('Salvo!','success'); render(); } catch(e) { showToast('Erro: '+e.message,'error'); }
+      };
+      window._pppAgtDel = async (id, nome) => {
+        if (!confirm(`Excluir "${nome}"?`)) return;
+        await apiFetch(`/api/dp/risk-agents/${id}`,{method:'DELETE'}); agents = agents.filter(a=>a.id!==id); render();
+      };
+
+    } else if (pppTab === 'ltcat') {
+      const concl = {sem_exposicao:'badge-success',com_exposicao:'badge-danger',em_analise:'badge-warning'};
+      body.innerHTML = `
+        <div class="flex justify-between mb-3"><h3 class="font-bold text-slate-800 dark:text-slate-100">Laudos LTCAT</h3>
+          <button onclick="window._ltcatModal()" class="btn btn-primary text-xs">+ Novo LTCAT</button></div>
+        <div class="table-responsive"><table class="table"><thead><tr><th>Ambiente</th><th>Data Emissão</th><th>Vencimento</th><th>Responsável</th><th>Conselho</th><th>Conclusão</th><th>Ações</th></tr></thead>
+        <tbody>${ltcats.length ? ltcats.map(l => {
+          const dv = l.dias_vencimento; const badge = dv==null?'':'badge-'+(dv<0?'danger':dv<30?'warning':'success');
+          return `<tr>
+          <td>${l.ambiente_nome||'—'}</td><td>${l.data_emissao||'—'}</td>
+          <td>${l.data_vencimento ? `<span class="badge ${badge}">${l.data_vencimento} (${dv}d)</span>` : '—'}</td>
+          <td>${l.responsavel_tecnico}</td><td>${l.conselho_profissional||'—'}</td>
+          <td><span class="badge ${concl[l.conclusao]||'badge-secondary'}">${l.conclusao}</span></td>
+          <td>
+            <button onclick="openAuthed('/api/dp/esocial/s2240/${l.work_environment_id||0}','S-2240-${l.id}.xml')" class="btn btn-sm btn-secondary">S-2240</button>
+            <button onclick="window._ltcatDel(${l.id})" class="btn btn-sm btn-danger">Del</button>
+          </td></tr>`;}).join('') : '<tr><td colspan="7" class="text-center text-muted">Nenhum LTCAT cadastrado.</td></tr>'}</tbody></table></div>`;
+
+      window._ltcatModal = () => {
+        document.getElementById('ppp-modal-inner').innerHTML = `
+          <h3>Novo Laudo LTCAT</h3>
+          <div class="form-row"><div class="form-group"><label>Ambiente</label><select id="ltc-env" class="${inputCls}"><option value="">— selecione —</option>${envs.map(e=>`<option value="${e.id}">${e.nome}</option>`).join('')}</select></div>
+          <div class="form-group"><label>Data Emissão *</label><input type="date" id="ltc-emissao" class="${inputCls}"></div></div>
+          <div class="form-row"><div class="form-group"><label>Data Vencimento</label><input type="date" id="ltc-venc" class="${inputCls}"></div>
+          <div class="form-group"><label>Responsável Técnico *</label><input id="ltc-resp" class="${inputCls}"></div></div>
+          <div class="form-row"><div class="form-group"><label>Conselho Profissional</label><input id="ltc-cons" class="${inputCls}" placeholder="Ex: CREA/SP"></div>
+          <div class="form-group"><label>Nº Registro</label><input id="ltc-reg" class="${inputCls}"></div></div>
+          <div class="form-group"><label>Conclusão</label><select id="ltc-concl" class="${inputCls}"><option value="sem_exposicao">Sem Exposição</option><option value="com_exposicao">Com Exposição</option><option value="em_analise">Em Análise</option></select></div>
+          <div class="form-group"><label>Observações</label><textarea id="ltc-obs" class="${inputCls}" rows="2"></textarea></div>
+          <div class="d-flex gap-2 justify-content-end mt-3">
+            <button class="btn btn-secondary" onclick="document.getElementById('ppp-modal').style.display='none'">Cancelar</button>
+            <button class="btn btn-primary" onclick="window._ltcatSave()">Salvar</button></div>`;
+        document.getElementById('ppp-modal').style.display = 'flex';
+      };
+      window._ltcatSave = async () => {
+        const b = { work_environment_id: document.getElementById('ltc-env').value||null, data_emissao: document.getElementById('ltc-emissao').value, data_vencimento: document.getElementById('ltc-venc').value||null, responsavel_tecnico: document.getElementById('ltc-resp').value, conselho_profissional: document.getElementById('ltc-cons').value, registro: document.getElementById('ltc-reg').value, conclusao: document.getElementById('ltc-concl').value, observacoes: document.getElementById('ltc-obs').value };
+        try { await apiFetch('/api/dp/ltcat',{method:'POST',body:JSON.stringify(b)}); ltcats = await apiFetch('/api/dp/ltcat'); document.getElementById('ppp-modal').style.display='none'; showToast('LTCAT salvo!','success'); render(); } catch(e) { showToast('Erro: '+e.message,'error'); }
+      };
+      window._ltcatDel = async (id) => {
+        if (!confirm('Excluir LTCAT?')) return;
+        await apiFetch(`/api/dp/ltcat/${id}`,{method:'DELETE'}); ltcats = ltcats.filter(l=>l.id!==id); render();
+      };
+
+    } else if (pppTab === 'ppps') {
+      const empOpts = dpEmployees.map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
+      body.innerHTML = `
+        <div class="flex justify-between mb-3"><h3 class="font-bold text-slate-800 dark:text-slate-100">PPP dos Funcionários</h3>
+          <button onclick="window._pppRecModal()" class="btn btn-primary text-xs">+ Vincular Ambiente</button></div>
+        <div class="table-responsive"><table class="table"><thead><tr><th>Funcionário</th><th>CPF</th><th>Ambiente</th><th>Início Exp.</th><th>Fim Exp.</th><th>Responsável</th><th>Ações</th></tr></thead>
+        <tbody>${ppps.length ? ppps.map(p=>`<tr>
+          <td>${p.employee_name}</td><td class="font-mono text-xs">${p.cpf||'—'}</td><td>${p.ambiente_nome||'—'}</td>
+          <td>${p.data_inicio_exposicao||'—'}</td><td>${p.data_fim_exposicao||'ativo'}</td><td>${p.responsavel_tecnico||'—'}</td>
+          <td>
+            <button onclick="openAuthed('/api/dp/ppp/${p.id}/documento')" class="btn btn-sm btn-secondary">PPP</button>
+            <button onclick="window._pppRecDel(${p.id})" class="btn btn-sm btn-danger">Del</button>
+          </td></tr>`).join('') : '<tr><td colspan="7" class="text-center text-muted">Nenhum PPP registrado.</td></tr>'}</tbody></table></div>`;
+
+      window._pppRecModal = () => {
+        document.getElementById('ppp-modal-inner').innerHTML = `
+          <h3>Vincular Funcionário a Ambiente</h3>
+          <div class="form-group"><label>Funcionário *</label><select id="prec-emp" class="${inputCls}"><option value="">— selecione —</option>${empOpts}</select></div>
+          <div class="form-group"><label>Ambiente de Trabalho *</label><select id="prec-env" class="${inputCls}"><option value="">— selecione —</option>${envs.map(e=>`<option value="${e.id}">${e.nome}</option>`).join('')}</select></div>
+          <div class="form-row"><div class="form-group"><label>Início Exposição</label><input type="date" id="prec-ini" class="${inputCls}"></div>
+          <div class="form-group"><label>Fim Exposição</label><input type="date" id="prec-fim" class="${inputCls}"></div></div>
+          <div class="form-row"><div class="form-group"><label>Responsável Técnico</label><input id="prec-resp" class="${inputCls}"></div>
+          <div class="form-group"><label>Nº Registro</label><input id="prec-reg" class="${inputCls}"></div></div>
+          <div class="d-flex gap-2 justify-content-end mt-3">
+            <button class="btn btn-secondary" onclick="document.getElementById('ppp-modal').style.display='none'">Cancelar</button>
+            <button class="btn btn-primary" onclick="window._pppRecSave()">Salvar</button></div>`;
+        document.getElementById('ppp-modal').style.display = 'flex';
+      };
+      window._pppRecSave = async () => {
+        const b = { employee_id: +document.getElementById('prec-emp').value, work_environment_id: document.getElementById('prec-env').value||null, data_inicio_exposicao: document.getElementById('prec-ini').value, data_fim_exposicao: document.getElementById('prec-fim').value, responsavel_tecnico: document.getElementById('prec-resp').value, registro_profissional: document.getElementById('prec-reg').value };
+        try { await apiFetch('/api/dp/ppp',{method:'POST',body:JSON.stringify(b)}); ppps = await apiFetch('/api/dp/ppp'); document.getElementById('ppp-modal').style.display='none'; showToast('Salvo!','success'); render(); } catch(e) { showToast('Erro: '+e.message,'error'); }
+      };
+      window._pppRecDel = async (id) => {
+        if (!confirm('Excluir registro PPP?')) return;
+        await apiFetch(`/api/dp/ppp/${id}`,{method:'DELETE'}); ppps = ppps.filter(p=>p.id!==id); render();
+      };
+    }
+    if (window.lucide) lucide.createIcons();
+  };
+  render();
+}
+
+
+// ── INTEGRAÇÃO CONTÁBIL ──────────────────────────────────────────
+async function renderContabilDp(el) {
+  let cfg = {}, entries = [];
+  const mes = new Date().toISOString().slice(0,7);
+  let selComp = mes;
+  try { cfg = await apiFetch('/api/dp/accounting-config'); } catch {}
+
+  let subTab = 'contas';
+  const render = async () => {
+    el.innerHTML = `
+      <div class="flex gap-2 mb-4">
+        <button onclick="window._cdpTab('contas')" class="px-3 py-1.5 rounded-xl text-xs font-semibold ${subTab==='contas'?'bg-violet-600 text-white':'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'}">Plano de Contas</button>
+        <button onclick="window._cdpTab('lancamentos')" class="px-3 py-1.5 rounded-xl text-xs font-semibold ${subTab==='lancamentos'?'bg-violet-600 text-white':'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'}">Lançamentos</button>
+      </div>
+      <div id="cdp-body"></div>`;
+    window._cdpTab = (t) => { subTab = t; render(); };
+    const body = document.getElementById('cdp-body');
+
+    if (subTab === 'contas') {
+      const flds = [
+        ['conta_salarios_bruto','Desp. Salários Brutos (D)'],['conta_salarios_pagar','Salários a Pagar (C)'],
+        ['conta_inss_empregado','INSS Empregado a Recolher (C)'],['conta_inss_patronal','INSS Patronal a Recolher (C)'],
+        ['conta_fgts_provisao','FGTS a Recolher (C)'],['conta_irrf','IRRF a Recolher (C)'],
+        ['conta_ferias_provisao','Provisão Férias (C)'],['conta_decimo_provisao','Provisão 13º Sal (C)'],
+        ['conta_prolabore','Pró-labore (D)'],['conta_banco','Caixa/Banco (C)'],
+      ];
+      body.innerHTML = `
+        <div class="card"><div class="card-body">
+          <h4 class="font-bold mb-4 text-slate-800 dark:text-slate-100">Configuração das Contas Contábeis</h4>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            ${flds.map(([k,lbl]) => `<div class="form-group"><label>${lbl}</label><input id="cfg-${k}" class="${inputCls}" value="${cfg[k]||''}"></div>`).join('')}
+          </div>
+          <div class="d-flex justify-content-end mt-4">
+            <button onclick="window._cdpSaveCfg()" class="btn btn-primary">Salvar Configuração</button>
+          </div>
+        </div></div>`;
+      window._cdpSaveCfg = async () => {
+        const b = {}; flds.forEach(([k]) => { b[k] = document.getElementById('cfg-'+k).value; });
+        try { await apiFetch('/api/dp/accounting-config',{method:'PUT',body:JSON.stringify(b)}); cfg = b; showToast('Configuração salva!','success'); } catch(e) { showToast('Erro: '+e.message,'error'); }
+      };
+
+    } else {
+      entries = await apiFetch(`/api/dp/accounting/entries?competencia=${selComp}`).catch(() => []);
+      const totalD = entries.reduce((s,r) => s + (r.debito_valor||0), 0);
+      const totalC = entries.reduce((s,r) => s + (r.credito_valor||0), 0);
+      body.innerHTML = `
+        <div class="flex gap-3 mb-4 flex-wrap items-end">
+          <div class="form-group mb-0"><label>Competência</label><input type="month" id="cdp-comp" class="${inputCls}" value="${selComp}"></div>
+          <button onclick="window._cdpGerar()" class="btn btn-primary">Gerar Lançamentos</button>
+          <button onclick="window._cdpExportar()" class="btn btn-secondary">Exportar CSV</button>
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+          ${kpiDP('Total Débito', fBRL2(totalD), 'soma lançamentos D', 'arrow-down-left', 'text-rose-500')}
+          ${kpiDP('Total Crédito', fBRL2(totalC), 'soma lançamentos C', 'arrow-up-right', 'text-emerald-500')}
+          ${kpiDP('Nº Partidas', entries.length, 'lançamentos gerados', 'rows-3', 'text-violet-500')}
+          ${kpiDP('Status', entries.filter(e=>e.status==='exportado').length > 0 ? 'Exportado' : entries.length > 0 ? 'Pendente' : '—', '', 'check-circle', 'text-blue-500')}
+        </div>
+        <div class="table-responsive"><table class="table"><thead><tr><th>Data</th><th>Histórico</th><th>Débito</th><th>Valor D</th><th>Crédito</th><th>Valor C</th><th>Status</th></tr></thead>
+        <tbody>${entries.length ? entries.map(e => `<tr>
+          <td class="text-xs">${e.data_lancamento}</td><td class="text-xs">${e.historico}</td>
+          <td class="font-mono text-xs">${e.debito_conta}</td><td class="text-xs text-rose-500">${fBRL2(e.debito_valor)}</td>
+          <td class="font-mono text-xs">${e.credito_conta}</td><td class="text-xs text-emerald-500">${fBRL2(e.credito_valor)}</td>
+          <td><span class="badge ${e.status==='exportado'?'badge-success':'badge-secondary'}">${e.status}</span></td>
+        </tr>`).join('') : '<tr><td colspan="7" class="text-center text-muted">Nenhum lançamento. Clique em "Gerar Lançamentos".</td></tr>'}</tbody></table></div>`;
+
+      window._cdpGerar = async () => {
+        selComp = document.getElementById('cdp-comp').value;
+        try { entries = await apiFetch(`/api/dp/accounting/gerar/${selComp}`,{method:'POST'}); showToast(`${entries.length} lançamentos gerados!`,'success'); render(); } catch(e) { showToast('Erro: '+e.message,'error'); }
+      };
+      window._cdpExportar = async () => {
+        selComp = document.getElementById('cdp-comp').value;
+        openAuthed(`/api/dp/accounting/exportar/${selComp}`, `contabil-${selComp}.csv`);
+      };
+    }
+    if (window.lucide) lucide.createIcons();
+  };
+  await render();
+}
+
+
+// ── ESTAGIÁRIOS & APRENDIZES ─────────────────────────────────────
+async function renderEstagiarios(el) {
+  let interns = [], apprentices = [], cota = {};
+  try {
+    [interns, apprentices, cota] = await Promise.all([
+      apiFetch('/api/dp/interns'),
+      apiFetch('/api/dp/apprentices'),
+      apiFetch('/api/dp/apprentices/cota'),
+    ]);
+  } catch(e) {}
+
+  let subTab = 'estagiarios';
+  const render = () => {
+    const tabs2 = [['estagiarios','Estagiários'],['aprendizes','Aprendizes'],['cota','Controle de Cota']];
+    el.innerHTML = `
+      <div class="flex gap-2 mb-4 flex-wrap">
+        ${tabs2.map(([id,lbl]) => `<button onclick="window._estTab('${id}')" class="px-3 py-1.5 rounded-xl text-xs font-semibold ${subTab===id?'bg-violet-600 text-white':'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'}">${lbl}</button>`).join('')}
+      </div>
+      <div id="est-body"></div>
+      <div id="est-modal" class="modal-overlay" style="display:none"><div class="modal-box" id="est-modal-inner"></div></div>`;
+    window._estTab = (t) => { subTab = t; render(); };
+    const body = document.getElementById('est-body');
+
+    if (subTab === 'estagiarios') {
+      const ativos = interns.filter(i=>i.status==='ativo').length;
+      const enc30 = interns.filter(i=>i.dias_restantes!=null && i.dias_restantes>=0 && i.dias_restantes<=30).length;
+      const sup = interns.filter(i=>i.nivel==='superior').length;
+      const med = interns.filter(i=>i.nivel!=='superior').length;
+      body.innerHTML = `
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+          ${kpiDP('Ativos', ativos, '', 'users', 'text-emerald-500')}
+          ${kpiDP('Encerrando (30d)', enc30, '', 'alert-triangle', 'text-amber-500')}
+          ${kpiDP('Nível Superior', sup, '', 'graduation-cap', 'text-violet-500')}
+          ${kpiDP('Médio / Técnico', med, '', 'book', 'text-blue-500')}
+        </div>
+        <div class="flex justify-between mb-3"><h3 class="font-bold text-slate-800 dark:text-slate-100">Estagiários</h3>
+          <button onclick="window._internModal()" class="btn btn-primary text-xs">+ Novo Estágio</button></div>
+        <div class="table-responsive"><table class="table"><thead><tr><th>Nome</th><th>CPF</th><th>Instituição</th><th>Curso</th><th>Período</th><th>Bolsa</th><th>VT</th><th>Status</th><th>Ações</th></tr></thead>
+        <tbody>${interns.length ? interns.map(i => {
+          const dr = i.dias_restantes; const badge = dr==null?'':dr<0?'badge-secondary':dr<=30?'badge-warning':'badge-success';
+          return `<tr>
+          <td>${i.nome}</td><td class="font-mono text-xs">${i.cpf||'—'}</td><td>${i.instituicao}</td><td>${i.curso||'—'}</td>
+          <td>${i.data_inicio} → ${i.data_fim} ${dr!=null?`<span class="badge ${badge} ml-1">${dr}d</span>`:''}
+          </td><td>${fBRL2(i.bolsa_auxilio)}</td><td>${fBRL2(i.vale_transporte)}</td>
+          <td><span class="badge ${i.status==='ativo'?'badge-success':'badge-secondary'}">${i.status}</span></td>
+          <td>
+            <button onclick="openAuthed('/api/dp/interns/termo/${i.id}')" class="btn btn-sm btn-secondary">TCE</button>
+            <button onclick="window._internDel(${i.id},'${(i.nome||'').replace(/'/g,"\\'")}')"\n              class="btn btn-sm btn-danger">Del</button>
+          </td></tr>`;}).join('') : '<tr><td colspan="9" class="text-center text-muted">Nenhum estagiário.</td></tr>'}</tbody></table></div>`;
+
+      window._internModal = (i={}) => {
+        document.getElementById('est-modal-inner').innerHTML = `
+          <h3>Cadastro de Estagiário</h3>
+          <div class="form-row"><div class="form-group"><label>Nome *</label><input id="int-nome" class="${inputCls}" value="${i.nome||''}"></div>
+          <div class="form-group"><label>CPF</label><input id="int-cpf" class="${inputCls}" value="${i.cpf||''}"></div></div>
+          <div class="form-row"><div class="form-group"><label>Instituição *</label><input id="int-inst" class="${inputCls}" value="${i.instituicao||''}"></div>
+          <div class="form-group"><label>Curso</label><input id="int-curso" class="${inputCls}" value="${i.curso||''}"></div></div>
+          <div class="form-row"><div class="form-group"><label>Nível</label><select id="int-nivel" class="${inputCls}"><option value="superior" ${i.nivel==='superior'?'selected':''}>Superior</option><option value="medio" ${i.nivel==='medio'?'selected':''}>Médio/Técnico</option></select></div>
+          <div class="form-group"><label>Carga Horária Semanal</label><input type="number" id="int-ch" class="${inputCls}" value="${i.carga_horaria_semanal||20}"></div></div>
+          <div class="form-row"><div class="form-group"><label>Início *</label><input type="date" id="int-ini" class="${inputCls}" value="${i.data_inicio||''}"></div>
+          <div class="form-group"><label>Fim *</label><input type="date" id="int-fim" class="${inputCls}" value="${i.data_fim||''}"></div></div>
+          <div class="form-row"><div class="form-group"><label>Bolsa-Auxílio R$</label><input type="number" id="int-bolsa" class="${inputCls}" value="${i.bolsa_auxilio||0}"></div>
+          <div class="form-group"><label>Vale-Transporte R$</label><input type="number" id="int-vt" class="${inputCls}" value="${i.vale_transporte||0}"></div></div>
+          <div class="form-row"><div class="form-group"><label>Supervisor</label><input id="int-sup" class="${inputCls}" value="${i.supervisor_nome||''}"></div>
+          <div class="form-group"><label>Agente de Integração</label><input id="int-ag" class="${inputCls}" value="${i.agente_integracao||''}"></div></div>
+          <div class="d-flex gap-2 justify-content-end mt-3">
+            <button class="btn btn-secondary" onclick="document.getElementById('est-modal').style.display='none'">Cancelar</button>
+            <button class="btn btn-primary" onclick="window._internSave(${i.id||0})">Salvar</button></div>`;
+        document.getElementById('est-modal').style.display = 'flex';
+      };
+      window._internSave = async (id) => {
+        const b = { nome: document.getElementById('int-nome').value, cpf: document.getElementById('int-cpf').value, instituicao: document.getElementById('int-inst').value, curso: document.getElementById('int-curso').value, nivel: document.getElementById('int-nivel').value, carga_horaria_semanal: +document.getElementById('int-ch').value, data_inicio: document.getElementById('int-ini').value, data_fim: document.getElementById('int-fim').value, bolsa_auxilio: +document.getElementById('int-bolsa').value, vale_transporte: +document.getElementById('int-vt').value, supervisor_nome: document.getElementById('int-sup').value, agente_integracao: document.getElementById('int-ag').value };
+        try {
+          if (id) await apiFetch(`/api/dp/interns/${id}`,{method:'PUT',body:JSON.stringify(b)});
+          else await apiFetch('/api/dp/interns',{method:'POST',body:JSON.stringify(b)});
+          interns = await apiFetch('/api/dp/interns'); document.getElementById('est-modal').style.display='none'; showToast('Salvo!','success'); render();
+        } catch(e) { showToast('Erro: '+e.message,'error'); }
+      };
+      window._internDel = async (id, nome) => {
+        if (!confirm(`Excluir "${nome}"?`)) return;
+        await apiFetch(`/api/dp/interns/${id}`,{method:'DELETE'}); interns = interns.filter(i=>i.id!==id); render();
+      };
+
+    } else if (subTab === 'aprendizes') {
+      body.innerHTML = `
+        <div class="flex justify-between mb-3"><h3 class="font-bold text-slate-800 dark:text-slate-100">Aprendizes</h3>
+          <button onclick="window._appModal()" class="btn btn-primary text-xs">+ Novo Aprendiz</button></div>
+        <div class="table-responsive"><table class="table"><thead><tr><th>Funcionário</th><th>CPF</th><th>Entidade Qualificadora</th><th>Programa</th><th>Período</th><th>Ações</th></tr></thead>
+        <tbody>${apprentices.length ? apprentices.map(a=>`<tr>
+          <td>${a.employee_name}</td><td class="font-mono text-xs">${a.cpf||'—'}</td>
+          <td>${a.entidade_qualificadora||'—'}</td><td>${a.programa||'—'}</td>
+          <td>${a.data_inicio} → ${a.data_fim}</td>
+          <td><button onclick="window._appDel(${a.id})" class="btn btn-sm btn-danger">Del</button></td></tr>`).join('') : '<tr><td colspan="6" class="text-center text-muted">Nenhum aprendiz.</td></tr>'}</tbody></table></div>`;
+
+      window._appModal = () => {
+        document.getElementById('est-modal-inner').innerHTML = `
+          <h3>Novo Aprendiz</h3>
+          <div class="form-group"><label>Funcionário *</label><select id="app-emp" class="${inputCls}"><option value="">— selecione —</option>${dpEmployees.map(e=>`<option value="${e.id}">${e.name}</option>`).join('')}</select></div>
+          <div class="form-row"><div class="form-group"><label>Início *</label><input type="date" id="app-ini" class="${inputCls}"></div>
+          <div class="form-group"><label>Fim *</label><input type="date" id="app-fim" class="${inputCls}"></div></div>
+          <div class="form-row"><div class="form-group"><label>Entidade Qualificadora</label><input id="app-ent" class="${inputCls}" placeholder="Ex: SENAI, SENAC"></div>
+          <div class="form-group"><label>Programa</label><input id="app-prog" class="${inputCls}"></div></div>
+          <div class="d-flex gap-2 justify-content-end mt-3">
+            <button class="btn btn-secondary" onclick="document.getElementById('est-modal').style.display='none'">Cancelar</button>
+            <button class="btn btn-primary" onclick="window._appSave()">Salvar</button></div>`;
+        document.getElementById('est-modal').style.display = 'flex';
+      };
+      window._appSave = async () => {
+        const b = { employee_id: +document.getElementById('app-emp').value, data_inicio: document.getElementById('app-ini').value, data_fim: document.getElementById('app-fim').value, entidade_qualificadora: document.getElementById('app-ent').value, programa: document.getElementById('app-prog').value };
+        try { await apiFetch('/api/dp/apprentices',{method:'POST',body:JSON.stringify(b)}); apprentices = await apiFetch('/api/dp/apprentices'); document.getElementById('est-modal').style.display='none'; showToast('Aprendiz cadastrado!','success'); render(); } catch(e) { showToast('Erro: '+e.message,'error'); }
+      };
+      window._appDel = async (id) => {
+        if (!confirm('Excluir aprendiz?')) return;
+        await apiFetch(`/api/dp/apprentices/${id}`,{method:'DELETE'}); apprentices = apprentices.filter(a=>a.id!==id); render();
+      };
+
+    } else {
+      const pct = cota.total_empregados > 0 ? Math.round(cota.aprendizes_ativos / cota.total_empregados * 100) : 0;
+      const minPct = cota.total_empregados > 0 ? Math.round(cota.cota_minima / cota.total_empregados * 100) : 5;
+      const maxPct = cota.total_empregados > 0 ? Math.round(cota.cota_maxima / cota.total_empregados * 100) : 15;
+      const color = cota.situacao === 'dentro' ? 'text-emerald-600' : cota.situacao === 'abaixo' ? 'text-red-500' : 'text-amber-500';
+      body.innerHTML = `
+        <div class="card max-w-lg mx-auto"><div class="card-body">
+          <h3 class="font-bold text-center text-slate-800 dark:text-slate-100 mb-4">Controle de Cota de Aprendizes — Lei 10.097/2000</h3>
+          <div class="grid grid-cols-2 gap-3 mb-4">
+            ${kpiDP('Total Empregados', cota.total_empregados||0, 'com vínculo CLT ativo', 'users', 'text-slate-500')}
+            ${kpiDP('Aprendizes Ativos', cota.aprendizes_ativos||0, 'cadastrados', 'graduation-cap', 'text-violet-500')}
+            ${kpiDP('Cota Mínima (5%)', cota.cota_minima||0, 'mínimo legal', 'arrow-down', 'text-blue-500')}
+            ${kpiDP('Cota Máxima (15%)', cota.cota_maxima||0, 'máximo legal', 'arrow-up', 'text-blue-500')}
+          </div>
+          <div class="text-center mb-4">
+            <span class="text-2xl font-bold ${color}">${cota.situacao === 'dentro' ? '✓ Dentro da cota' : cota.situacao === 'abaixo' ? '⚠ Abaixo da cota mínima' : '⚠ Acima da cota máxima'}</span>
+          </div>
+          <div class="relative h-6 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden mb-2">
+            <div class="h-full bg-violet-500 rounded-full transition-all" style="width:${Math.min(100,pct)}%"></div>
+            <div class="absolute top-0 bottom-0 border-l-2 border-blue-400" style="left:${minPct}%" title="Mínimo ${minPct}%"></div>
+            <div class="absolute top-0 bottom-0 border-l-2 border-red-400" style="left:${maxPct}%" title="Máximo ${maxPct}%"></div>
+          </div>
+          <p class="text-xs text-center text-muted">${pct}% do quadro | Faixa permitida: ${minPct}% — ${maxPct}%</p>
+          ${cota.situacao === 'abaixo' ? `<div class="alert alert-danger mt-3">Empresa abaixo da cota mínima! Deve contratar mais ${(cota.cota_minima||0) - (cota.aprendizes_ativos||0)} aprendiz(es).</div>` : ''}
+        </div></div>`;
+    }
+    if (window.lucide) lucide.createIcons();
+  };
+  render();
+}
+
+
+// ── EXTRATO FGTS ──────────────────────────────────────────────────
+async function renderFgts(el) {
+  let selEmp = dpEmployees[0]?.id || 0;
+  let selAno = new Date().getFullYear();
+  let extrato = { registros: [], saldo_total: 0, employee_name: '' };
+  let resumo = {};
+
+  const load = async () => {
+    if (selEmp) extrato = await apiFetch(`/api/dp/fgts/extrato/${selEmp}?ano=${selAno}`).catch(() => ({ registros: [], saldo_total: 0, employee_name: '' }));
+    resumo = await apiFetch(`/api/dp/fgts/resumo?competencia=${selAno}-${String(new Date().getMonth()+1).padStart(2,'0')}`).catch(() => ({}));
+  };
+
+  await load();
+
+  const render = () => {
+    const pendentes = extrato.registros.filter(r => !r.fgts_depositado || r.fgts_depositado == 0).length;
+    el.innerHTML = `
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+        ${kpiDP('Total Calculado (mês)', fBRL2(resumo.total_calculado||0), 'mês atual', 'calculator', 'text-blue-500')}
+        ${kpiDP('Total Depositado', fBRL2(resumo.total_depositado||0), 'confirmados', 'check-circle', 'text-emerald-500')}
+        ${kpiDP('Pendente', fBRL2(resumo.total_pendente||0), 'sem confirmação', 'clock', 'text-amber-500')}
+        ${kpiDP('Nº Funcionários', resumo.n_funcionarios||0, 'com folha no mês', 'users', 'text-violet-500')}
+      </div>
+      ${pendentes > 0 ? `<div class="alert alert-warning mb-4">⚠ ${pendentes} competência(s) sem depósito confirmado para ${extrato.employee_name||'este funcionário'}.</div>` : ''}
+      <div class="flex gap-3 mb-4 flex-wrap items-end">
+        <div class="form-group mb-0"><label>Funcionário</label>
+          <select id="fgts-emp" class="${inputCls}" onchange="window._fgtsLoad()"><option value="">— selecione —</option>
+            ${dpEmployees.map(e=>`<option value="${e.id}" ${e.id==selEmp?'selected':''}>${e.name}</option>`).join('')}
+          </select></div>
+        <div class="form-group mb-0"><label>Ano</label>
+          <input type="number" id="fgts-ano" class="${inputCls}" value="${selAno}" min="2020" max="2030" onchange="window._fgtsLoad()"></div>
+        <button onclick="window._fgtsDepositar()" class="btn btn-primary">Confirmar Depósito</button>
+      </div>
+      <div class="table-responsive"><table class="table"><thead><tr>
+        <th>Competência</th><th>Salário Base</th><th>FGTS 8%</th><th>Depositado</th><th>Data Depósito</th><th>Guia</th><th>Saldo Acumulado</th><th>Status</th>
+      </tr></thead>
+      <tbody>${extrato.registros.length ? extrato.registros.map(r => `<tr>
+        <td>${r.competencia}</td>
+        <td>${fBRL2(r.salario_base||0)}</td>
+        <td>${fBRL2(r.fgts_calculado||0)}</td>
+        <td>${fBRL2(r.fgts_depositado||0)}</td>
+        <td>${r.data_deposito||'—'}</td>
+        <td class="font-mono text-xs">${r.guia_referencia||'—'}</td>
+        <td class="font-semibold text-emerald-600">${fBRL2(r.saldo_acumulado||0)}</td>
+        <td>${r.fgts_depositado > 0 ? '<span class="badge badge-success">Depositado</span>' : '<span class="badge badge-danger">Pendente</span>'}</td>
+      </tr>`).join('') : '<tr><td colspan="8" class="text-center text-muted">Selecione um funcionário para ver o extrato.</td></tr>'}</tbody></table></div>
+      <div id="fgts-dep-modal" class="modal-overlay" style="display:none">
+        <div class="modal-box"><h3>Confirmar Depósito FGTS</h3>
+          <div class="form-group"><label>Competência</label><input id="fdep-comp" class="${inputCls}" placeholder="YYYY-MM"></div>
+          <div class="form-group"><label>Valor Depositado R$</label><input type="number" step="0.01" id="fdep-val" class="${inputCls}"></div>
+          <div class="form-row"><div class="form-group"><label>Data Depósito</label><input type="date" id="fdep-data" class="${inputCls}"></div>
+          <div class="form-group"><label>Nº Guia</label><input id="fdep-guia" class="${inputCls}"></div></div>
+          <div class="d-flex gap-2 justify-content-end mt-3">
+            <button class="btn btn-secondary" onclick="document.getElementById('fgts-dep-modal').style.display='none'">Cancelar</button>
+            <button class="btn btn-primary" onclick="window._fgtsSaveDeposito()">Confirmar</button></div>
+        </div></div>`;
+
+    window._fgtsLoad = async () => {
+      selEmp = document.getElementById('fgts-emp').value;
+      selAno = document.getElementById('fgts-ano').value;
+      if (selEmp) { extrato = await apiFetch(`/api/dp/fgts/extrato/${selEmp}?ano=${selAno}`).catch(()=>({registros:[],saldo_total:0,employee_name:''})); }
+      render();
+    };
+    window._fgtsDepositar = () => {
+      document.getElementById('fdep-comp').value = `${selAno}-${String(new Date().getMonth()+1).padStart(2,'0')}`;
+      document.getElementById('fdep-data').value = new Date().toISOString().slice(0,10);
+      document.getElementById('fgts-dep-modal').style.display = 'flex';
+    };
+    window._fgtsSaveDeposito = async () => {
+      if (!selEmp) { showToast('Selecione um funcionário','error'); return; }
+      const b = { employee_id: +selEmp, competencia: document.getElementById('fdep-comp').value, fgts_depositado: +document.getElementById('fdep-val').value, data_deposito: document.getElementById('fdep-data').value, guia_referencia: document.getElementById('fdep-guia').value };
+      try { await apiFetch('/api/dp/fgts/confirmar-deposito',{method:'POST',body:JSON.stringify(b)}); document.getElementById('fgts-dep-modal').style.display='none'; extrato = await apiFetch(`/api/dp/fgts/extrato/${selEmp}?ano=${selAno}`); showToast('Depósito confirmado!','success'); render(); } catch(e) { showToast('Erro: '+e.message,'error'); }
+    };
+    if (window.lucide) lucide.createIcons();
+  };
+  render();
+}
+
+
+// ── PORTAL DO FUNCIONÁRIO ─────────────────────────────────────────
+async function renderPortalFuncionario(el) {
+  let selEmp = null;
+  const isAdmin = currentUserRole === 'admin' || currentUserRole === 'dp';
+  const user = (() => { try { return JSON.parse(localStorage.getItem('cortex_user')||'{}'); } catch { return {}; } })();
+
+  if (!isAdmin) {
+    try {
+      selEmp = await apiFetch(`/api/dp/employees/by-email?email=${encodeURIComponent(user.email||'')}`);
+    } catch {}
+  }
+
+  const renderPortal = async (emp) => {
+    if (!emp) {
+      el.innerHTML = `<div class="alert alert-info">Nenhum funcionário vinculado a este usuário. Contate o RH.</div>`; return;
+    }
+    let holerites = [], ferias = {}, afastamentos = [], fgtsData = {}, asos = [], reqFerias = [];
+    try {
+      [holerites, afastamentos, asos, reqFerias] = await Promise.all([
+        apiFetch(`/api/dp/payroll/${emp.id}/history`).catch(() => []),
+        apiFetch(`/api/dp/absences?employee_id=${emp.id}`).catch(() => []),
+        apiFetch(`/api/dp/medical-exams?employee_id=${emp.id}`).catch(() => []),
+        apiFetch(`/api/dp/vacation-requests?employee_id=${emp.id}`).catch(() => []),
+      ]);
+      fgtsData = await apiFetch(`/api/dp/fgts/extrato/${emp.id}`).catch(() => ({}));
+      ferias = await apiFetch(`/api/dp/vacation/balance/${emp.id}`).catch(() => ({}));
+    } catch {}
+
+    const proximo_aso = asos.filter(a=>a.data_vencimento).sort((a,b)=>a.data_vencimento.localeCompare(b.data_vencimento))[0];
+    const anoAtual = new Date().getFullYear();
+
+    el.innerHTML = `
+      ${isAdmin ? `<div class="flex gap-3 mb-4 items-end">
+        <div class="form-group mb-0"><label>Visualizando como:</label>
+          <select id="portal-emp-sel" class="${inputCls}" onchange="window._portalSelEmp(this.value)">
+            ${dpEmployees.map(e=>`<option value="${e.id}" ${e.id==emp.id?'selected':''}>${e.name}</option>`).join('')}
+          </select></div></div>` : ''}
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+
+        <!-- Meus Dados -->
+        <div class="card col-span-1"><div class="card-header"><h4 class="font-bold text-slate-800 dark:text-slate-100">Meus Dados</h4></div><div class="card-body">
+          <dl class="text-sm space-y-2">
+            <div class="flex justify-between"><dt class="text-muted">Nome</dt><dd class="font-semibold">${emp.name}</dd></div>
+            <div class="flex justify-between"><dt class="text-muted">Cargo</dt><dd>${emp.role||'—'}</dd></div>
+            <div class="flex justify-between"><dt class="text-muted">Departamento</dt><dd>${emp.department||'—'}</dd></div>
+            <div class="flex justify-between"><dt class="text-muted">Admissão</dt><dd>${emp.admission_date||'—'}</dd></div>
+            <div class="flex justify-between"><dt class="text-muted">CPF</dt><dd class="font-mono">${(emp.cpf||'').replace(/(\d{3})\d{3}(\d{3})(\d{2})/,'$1.***.***-$3')}</dd></div>
+            ${isAdmin ? `<div class="flex justify-between"><dt class="text-muted">Salário</dt><dd class="font-semibold text-emerald-600">${fBRL2(emp.salary||0)}</dd></div>` : ''}
+          </dl>
+        </div></div>
+
+        <!-- Holerites -->
+        <div class="card"><div class="card-header"><h4 class="font-bold text-slate-800 dark:text-slate-100">Holerites</h4></div><div class="card-body">
+          ${holerites.length ? `<div class="space-y-2 max-h-48 overflow-y-auto">
+            ${holerites.map(h=>`<div class="flex justify-between items-center"><span class="text-sm">${h.competencia}</span>
+              <button onclick="openAuthed('/api/dp/payslip/${emp.id}/${h.competencia}')" class="btn btn-sm btn-secondary">Baixar</button>
+            </div>`).join('')}</div>` : '<p class="text-muted text-sm">Nenhum holerite disponível.</p>'}
+        </div></div>
+
+        <!-- Férias -->
+        <div class="card"><div class="card-header"><h4 class="font-bold text-slate-800 dark:text-slate-100">Férias</h4></div><div class="card-body">
+          <div class="text-center mb-3">
+            <span class="text-3xl font-bold text-violet-600">${ferias.dias_disponiveis||0}</span>
+            <span class="text-sm text-muted"> dias disponíveis</span>
+          </div>
+          <button onclick="window._portalSolFer(${emp.id})" class="btn btn-primary w-full text-xs">Solicitar Férias</button>
+          ${reqFerias.length ? `<div class="mt-3 space-y-1">${reqFerias.slice(0,3).map(r=>`<div class="text-xs flex justify-between"><span>${r.data_inicio_solicitada} → ${r.data_fim_solicitada}</span><span class="badge ${r.status==='aprovado'?'badge-success':r.status==='recusado'?'badge-danger':'badge-warning'}">${r.status}</span></div>`).join('')}</div>` : ''}
+        </div></div>
+
+        <!-- Extrato FGTS -->
+        <div class="card"><div class="card-header"><h4 class="font-bold text-slate-800 dark:text-slate-100">Extrato FGTS</h4></div><div class="card-body">
+          <div class="text-center mb-3">
+            <span class="text-3xl font-bold text-emerald-600">${fBRL2(fgtsData.saldo_total||0)}</span>
+            <span class="text-sm text-muted"> saldo estimado</span>
+          </div>
+          <div class="space-y-1 max-h-32 overflow-y-auto">
+            ${(fgtsData.registros||[]).slice(-6).reverse().map(r=>`<div class="text-xs flex justify-between"><span>${r.competencia}</span><span class="text-emerald-600">${fBRL2(r.fgts_calculado||0)}</span></div>`).join('')}
+          </div>
+        </div></div>
+
+        <!-- Exames ASO -->
+        <div class="card"><div class="card-header"><h4 class="font-bold text-slate-800 dark:text-slate-100">Exames Médicos (ASO)</h4></div><div class="card-body">
+          ${proximo_aso ? `<div class="mb-3 p-3 rounded-lg ${((date.today=>(days=>(days<0?'bg-red-50 dark:bg-red-900/20':days<=30?'bg-amber-50 dark:bg-amber-900/20':'bg-green-50 dark:bg-green-900/20'))((new Date(proximo_aso.data_vencimento)-new Date())/86400000|0))(new Date()))  }">
+            <p class="text-xs font-semibold">Próximo: ${proximo_aso.tipo}</p>
+            <p class="text-xs text-muted">Venc: ${proximo_aso.data_vencimento}</p></div>` : '<p class="text-muted text-sm">Nenhum exame próximo.</p>'}
+          <div class="space-y-1 max-h-32 overflow-y-auto">
+            ${asos.slice(0,5).map(a=>`<div class="text-xs flex justify-between"><span>${a.tipo}</span><span>${a.data_exame}</span><span class="badge ${a.resultado==='apto'?'badge-success':a.resultado==='inapto'?'badge-danger':'badge-warning'}">${a.resultado}</span></div>`).join('')}
+          </div>
+        </div></div>
+
+        <!-- Declarações -->
+        <div class="card"><div class="card-header"><h4 class="font-bold text-slate-800 dark:text-slate-100">Declarações</h4></div><div class="card-body space-y-2">
+          <button onclick="openAuthed('/api/dp/declarations/vinculo/${emp.id}')" class="btn btn-secondary w-full text-xs">Declaração de Vínculo</button>
+          <button onclick="openAuthed('/api/dp/declarations/ir/${emp.id}?ano=${anoAtual-1}')" class="btn btn-secondary w-full text-xs">Informe de Rendimentos ${anoAtual-1}</button>
+          <button onclick="openAuthed('/api/dp/declarations/ir/${emp.id}?ano=${anoAtual}')" class="btn btn-secondary w-full text-xs">Informe de Rendimentos ${anoAtual}</button>
+        </div></div>
+
+      </div>
+      <div id="portal-fer-modal" class="modal-overlay" style="display:none">
+        <div class="modal-box"><h3>Solicitar Férias</h3>
+          <div class="form-row"><div class="form-group"><label>Data Início</label><input type="date" id="pfer-ini" class="${inputCls}"></div>
+          <div class="form-group"><label>Data Fim</label><input type="date" id="pfer-fim" class="${inputCls}"></div></div>
+          <div class="d-flex gap-2 justify-content-end mt-3">
+            <button class="btn btn-secondary" onclick="document.getElementById('portal-fer-modal').style.display='none'">Cancelar</button>
+            <button class="btn btn-primary" onclick="window._portalFerSave(${emp.id})">Enviar Solicitação</button></div>
+        </div></div>`;
+
+    window._portalSolFer = (eid) => { document.getElementById('portal-fer-modal').style.display = 'flex'; };
+    window._portalFerSave = async (eid) => {
+      const b = { employee_id: eid, data_inicio_solicitada: document.getElementById('pfer-ini').value, data_fim_solicitada: document.getElementById('pfer-fim').value };
+      try { await apiFetch('/api/dp/vacation-requests',{method:'POST',body:JSON.stringify(b)}); document.getElementById('portal-fer-modal').style.display='none'; showToast('Solicitação enviada!','success'); } catch(e) { showToast('Erro: '+e.message,'error'); }
+    };
+    window._portalSelEmp = async (eid) => {
+      const emp2 = dpEmployees.find(e=>e.id==eid); if (emp2) { selEmp = emp2; await renderPortal(emp2); }
+    };
+    if (window.lucide) lucide.createIcons();
+  };
+
+  if (isAdmin) {
+    selEmp = dpEmployees[0] || null;
+    el.innerHTML = `<div class="flex gap-3 mb-4 items-end">
+      <div class="form-group mb-0"><label>Visualizando como:</label>
+        <select id="portal-emp-sel" class="${inputCls}" onchange="window._portalSelEmp(this.value)">
+          ${dpEmployees.map(e=>`<option value="${e.id}">${e.name}</option>`).join('')}
+        </select></div></div><div id="portal-inner"></div>`;
+    window._portalSelEmp = async (eid) => {
+      const emp2 = dpEmployees.find(e=>e.id==eid);
+      if (emp2) { const inner = document.getElementById('portal-inner'); if (inner) await renderPortal(emp2); }
+    };
+    if (selEmp) {
+      const inner = document.createElement('div'); inner.id = 'portal-inner'; el.querySelector('#portal-inner') && (el.querySelector('#portal-inner').outerHTML = '');
+      const wrap = el.querySelector('#portal-inner') || el.appendChild(Object.assign(document.createElement('div'),{id:'portal-inner'}));
+      await renderPortal(selEmp);
+    }
+  } else {
+    await renderPortal(selEmp);
+  }
+}
+

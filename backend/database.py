@@ -2013,6 +2013,177 @@ def migrate_db(conn: sqlite3.Connection) -> None:
     )
     """)
 
+    # ── BLOCO PPP & LTCAT ──────────────────────────────────────────
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS work_environments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        nome TEXT NOT NULL,
+        local_trabalho TEXT DEFAULT '',
+        setor TEXT DEFAULT '',
+        atividade_economica TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS risk_agents (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        work_environment_id INTEGER,
+        tipo TEXT DEFAULT 'fisico',
+        nome TEXT NOT NULL,
+        nr15_codigo TEXT DEFAULT '',
+        intensidade TEXT DEFAULT '',
+        limite_tolerancia TEXT DEFAULT '',
+        epc TEXT DEFAULT '',
+        epi TEXT DEFAULT '',
+        esocial_cod_agente TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (work_environment_id) REFERENCES work_environments(id)
+    )""")
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS ltcat_reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        work_environment_id INTEGER,
+        data_emissao TEXT NOT NULL,
+        data_vencimento TEXT DEFAULT NULL,
+        responsavel_tecnico TEXT NOT NULL,
+        conselho_profissional TEXT DEFAULT '',
+        registro TEXT DEFAULT '',
+        conclusao TEXT DEFAULT 'sem_exposicao',
+        observacoes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (work_environment_id) REFERENCES work_environments(id)
+    )""")
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS ppp_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        employee_id INTEGER NOT NULL,
+        work_environment_id INTEGER,
+        data_inicio_exposicao TEXT DEFAULT '',
+        data_fim_exposicao TEXT DEFAULT '',
+        responsavel_tecnico TEXT DEFAULT '',
+        registro_profissional TEXT DEFAULT '',
+        observacoes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (employee_id) REFERENCES employees(id)
+    )""")
+
+    # ── BLOCO INTEGRAÇÃO CONTÁBIL ──────────────────────────────────
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS accounting_config_dp (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        conta_salarios_bruto TEXT DEFAULT '6.1.1.01',
+        conta_inss_empregado TEXT DEFAULT '2.3.1.01',
+        conta_inss_patronal TEXT DEFAULT '2.3.1.02',
+        conta_fgts_provisao TEXT DEFAULT '2.3.1.03',
+        conta_irrf TEXT DEFAULT '2.3.1.04',
+        conta_salarios_pagar TEXT DEFAULT '2.1.1.01',
+        conta_ferias_provisao TEXT DEFAULT '2.1.2.01',
+        conta_decimo_provisao TEXT DEFAULT '2.1.3.01',
+        conta_prolabore TEXT DEFAULT '6.1.2.01',
+        conta_banco TEXT DEFAULT '1.1.1.01',
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS payroll_accounting_entries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        competencia TEXT NOT NULL,
+        tipo TEXT NOT NULL,
+        data_lancamento TEXT NOT NULL,
+        historico TEXT NOT NULL,
+        debito_conta TEXT NOT NULL,
+        debito_valor REAL NOT NULL,
+        credito_conta TEXT NOT NULL,
+        credito_valor REAL NOT NULL,
+        status TEXT DEFAULT 'pendente',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
+
+    # Seed accounting_config_dp default
+    ac_count = cur.execute("SELECT COUNT(*) FROM accounting_config_dp WHERE company_id=1").fetchone()[0]
+    if ac_count == 0:
+        cur.execute("INSERT INTO accounting_config_dp (company_id) VALUES (1)")
+
+    # ── BLOCO ESTAGIÁRIOS & APRENDIZES ─────────────────────────────
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS interns (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        nome TEXT NOT NULL,
+        cpf TEXT NOT NULL,
+        data_nascimento TEXT DEFAULT '',
+        email TEXT DEFAULT '',
+        telefone TEXT DEFAULT '',
+        instituicao TEXT NOT NULL,
+        curso TEXT DEFAULT '',
+        nivel TEXT DEFAULT 'superior',
+        supervisor_nome TEXT DEFAULT '',
+        agente_integracao TEXT DEFAULT '',
+        bolsa_auxilio REAL DEFAULT 0,
+        vale_transporte REAL DEFAULT 0,
+        carga_horaria_semanal INTEGER DEFAULT 20,
+        data_inicio TEXT NOT NULL,
+        data_fim TEXT NOT NULL,
+        status TEXT DEFAULT 'ativo',
+        observacoes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS apprentices (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        employee_id INTEGER NOT NULL,
+        entidade_qualificadora TEXT DEFAULT '',
+        programa TEXT DEFAULT '',
+        data_inicio TEXT NOT NULL,
+        data_fim TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (employee_id) REFERENCES employees(id)
+    )""")
+
+    # ── BLOCO EXTRATO FGTS ─────────────────────────────────────────
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS fgts_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        employee_id INTEGER NOT NULL,
+        competencia TEXT NOT NULL,
+        salario_base REAL DEFAULT 0,
+        fgts_calculado REAL DEFAULT 0,
+        fgts_depositado REAL DEFAULT 0,
+        data_deposito TEXT DEFAULT '',
+        guia_referencia TEXT DEFAULT '',
+        saldo_acumulado REAL DEFAULT 0,
+        observacoes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (employee_id) REFERENCES employees(id)
+    )""")
+
+    # ── BLOCO PORTAL DO FUNCIONÁRIO ────────────────────────────────
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS vacation_requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        employee_id INTEGER NOT NULL,
+        data_inicio_solicitada TEXT NOT NULL,
+        data_fim_solicitada TEXT NOT NULL,
+        dias_solicitados INTEGER NOT NULL,
+        status TEXT DEFAULT 'pendente',
+        motivo_recusa TEXT DEFAULT '',
+        aprovado_por TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (employee_id) REFERENCES employees(id)
+    )""")
+
     conn.commit()
 
 

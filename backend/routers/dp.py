@@ -2738,3 +2738,608 @@ def gerar_s2220(exam_id: int, current_user: Dict[str, Any] = Depends(get_current
 </eSocial>"""
     return Response(content=xml, media_type="application/xml",
                     headers={"Content-Disposition": f'attachment; filename="S-2220-{exam_id}.xml"'})
+
+
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# BLOCO 1 â€” PPP & LTCAT / S-2240
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+
+@router.get("/work-environments")
+def list_work_environments(current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn(); rows = rows_to_dicts(conn.execute("SELECT * FROM work_environments WHERE company_id=? ORDER BY nome", (cid,)).fetchall()); conn.close(); return rows
+
+@router.post("/work-environments")
+def create_work_environment(body: Dict[str,Any]=Body(...), current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    cur = conn.execute("INSERT INTO work_environments (company_id,nome,local_trabalho,setor,atividade_economica) VALUES (?,?,?,?,?)",
+        (cid, body["nome"], body.get("local_trabalho",""), body.get("setor",""), body.get("atividade_economica","")))
+    new_id = cur.lastrowid; conn.commit()
+    row = dict(conn.execute("SELECT * FROM work_environments WHERE id=?", (new_id,)).fetchone()); conn.close(); return row
+
+@router.put("/work-environments/{env_id}")
+def update_work_environment(env_id: int, body: Dict[str,Any]=Body(...), current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    conn.execute("UPDATE work_environments SET nome=?,local_trabalho=?,setor=?,atividade_economica=? WHERE id=? AND company_id=?",
+        (body.get("nome",""), body.get("local_trabalho",""), body.get("setor",""), body.get("atividade_economica",""), env_id, cid))
+    conn.commit(); conn.close(); return {"ok": True}
+
+@router.delete("/work-environments/{env_id}")
+def delete_work_environment(env_id: int, current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn(); conn.execute("DELETE FROM work_environments WHERE id=? AND company_id=?", (env_id, cid)); conn.commit(); conn.close(); return {"ok": True}
+
+@router.get("/work-environments/{env_id}/risk-agents")
+def list_env_risk_agents(env_id: int, current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn(); rows = rows_to_dicts(conn.execute("SELECT * FROM risk_agents WHERE company_id=? AND work_environment_id=?", (cid, env_id)).fetchall()); conn.close(); return rows
+
+@router.get("/risk-agents")
+def list_risk_agents(current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn(); rows = rows_to_dicts(conn.execute("SELECT ra.*, we.nome AS ambiente_nome FROM risk_agents ra LEFT JOIN work_environments we ON we.id=ra.work_environment_id WHERE ra.company_id=? ORDER BY ra.nome", (cid,)).fetchall()); conn.close(); return rows
+
+@router.post("/risk-agents")
+def create_risk_agent(body: Dict[str,Any]=Body(...), current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    cur = conn.execute("INSERT INTO risk_agents (company_id,work_environment_id,tipo,nome,nr15_codigo,intensidade,limite_tolerancia,epc,epi,esocial_cod_agente) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (cid, body.get("work_environment_id"), body.get("tipo","fisico"), body["nome"], body.get("nr15_codigo",""), body.get("intensidade",""), body.get("limite_tolerancia",""), body.get("epc",""), body.get("epi",""), body.get("esocial_cod_agente","")))
+    new_id = cur.lastrowid; conn.commit()
+    row = dict(conn.execute("SELECT * FROM risk_agents WHERE id=?", (new_id,)).fetchone()); conn.close(); return row
+
+@router.put("/risk-agents/{agent_id}")
+def update_risk_agent(agent_id: int, body: Dict[str,Any]=Body(...), current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    conn.execute("UPDATE risk_agents SET work_environment_id=?,tipo=?,nome=?,nr15_codigo=?,intensidade=?,limite_tolerancia=?,epc=?,epi=?,esocial_cod_agente=? WHERE id=? AND company_id=?",
+        (body.get("work_environment_id"), body.get("tipo","fisico"), body.get("nome",""), body.get("nr15_codigo",""), body.get("intensidade",""), body.get("limite_tolerancia",""), body.get("epc",""), body.get("epi",""), body.get("esocial_cod_agente",""), agent_id, cid))
+    conn.commit(); conn.close(); return {"ok": True}
+
+@router.delete("/risk-agents/{agent_id}")
+def delete_risk_agent(agent_id: int, current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn(); conn.execute("DELETE FROM risk_agents WHERE id=? AND company_id=?", (agent_id, cid)); conn.commit(); conn.close(); return {"ok": True}
+
+@router.get("/ltcat")
+def list_ltcat(current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    rows = rows_to_dicts(conn.execute("SELECT lt.*, we.nome AS ambiente_nome FROM ltcat_reports lt LEFT JOIN work_environments we ON we.id=lt.work_environment_id WHERE lt.company_id=? ORDER BY lt.data_emissao DESC", (cid,)).fetchall())
+    conn.close()
+    for r in rows:
+        if r.get("data_vencimento"):
+            r["dias_vencimento"] = (date.fromisoformat(r["data_vencimento"]) - date.today()).days
+        else:
+            r["dias_vencimento"] = None
+    return rows
+
+@router.post("/ltcat")
+def create_ltcat(body: Dict[str,Any]=Body(...), current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    cur = conn.execute("INSERT INTO ltcat_reports (company_id,work_environment_id,data_emissao,data_vencimento,responsavel_tecnico,conselho_profissional,registro,conclusao,observacoes) VALUES (?,?,?,?,?,?,?,?,?)",
+        (cid, body.get("work_environment_id"), body["data_emissao"], body.get("data_vencimento"), body["responsavel_tecnico"], body.get("conselho_profissional",""), body.get("registro",""), body.get("conclusao","sem_exposicao"), body.get("observacoes","")))
+    new_id = cur.lastrowid; conn.commit()
+    row = dict(conn.execute("SELECT * FROM ltcat_reports WHERE id=?", (new_id,)).fetchone()); conn.close(); return row
+
+@router.put("/ltcat/{ltcat_id}")
+def update_ltcat(ltcat_id: int, body: Dict[str,Any]=Body(...), current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    conn.execute("UPDATE ltcat_reports SET work_environment_id=?,data_emissao=?,data_vencimento=?,responsavel_tecnico=?,conselho_profissional=?,registro=?,conclusao=?,observacoes=? WHERE id=? AND company_id=?",
+        (body.get("work_environment_id"), body.get("data_emissao",""), body.get("data_vencimento"), body.get("responsavel_tecnico",""), body.get("conselho_profissional",""), body.get("registro",""), body.get("conclusao","sem_exposicao"), body.get("observacoes",""), ltcat_id, cid))
+    conn.commit(); conn.close(); return {"ok": True}
+
+@router.delete("/ltcat/{ltcat_id}")
+def delete_ltcat(ltcat_id: int, current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn(); conn.execute("DELETE FROM ltcat_reports WHERE id=? AND company_id=?", (ltcat_id, cid)); conn.commit(); conn.close(); return {"ok": True}
+
+@router.get("/ltcat/vencimentos")
+def ltcat_vencimentos(dias: int = 90, current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    limit_date = (date.today() + timedelta(days=dias)).isoformat()
+    rows = rows_to_dicts(conn.execute("SELECT lt.*, we.nome AS ambiente_nome FROM ltcat_reports lt LEFT JOIN work_environments we ON we.id=lt.work_environment_id WHERE lt.company_id=? AND lt.data_vencimento <= ? ORDER BY lt.data_vencimento", (cid, limit_date)).fetchall())
+    conn.close()
+    for r in rows:
+        if r.get("data_vencimento"):
+            r["dias_restantes"] = (date.fromisoformat(r["data_vencimento"]) - date.today()).days
+    return rows
+
+@router.get("/ppp")
+def list_ppp(current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    rows = rows_to_dicts(conn.execute("""SELECT p.*, e.name AS employee_name, e.cpf, e.role AS cargo, e.pis_pasep,
+        e.admission_date, e.dismissal_date, we.nome AS ambiente_nome
+        FROM ppp_records p JOIN employees e ON e.id=p.employee_id
+        LEFT JOIN work_environments we ON we.id=p.work_environment_id
+        WHERE p.company_id=? ORDER BY p.created_at DESC""", (cid,)).fetchall())
+    conn.close(); return rows
+
+@router.post("/ppp")
+def create_ppp(body: Dict[str,Any]=Body(...), current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    cur = conn.execute("INSERT INTO ppp_records (company_id,employee_id,work_environment_id,data_inicio_exposicao,data_fim_exposicao,responsavel_tecnico,registro_profissional,observacoes) VALUES (?,?,?,?,?,?,?,?)",
+        (cid, body["employee_id"], body.get("work_environment_id"), body.get("data_inicio_exposicao",""), body.get("data_fim_exposicao",""), body.get("responsavel_tecnico",""), body.get("registro_profissional",""), body.get("observacoes","")))
+    new_id = cur.lastrowid; conn.commit()
+    row = dict(conn.execute("SELECT * FROM ppp_records WHERE id=?", (new_id,)).fetchone()); conn.close(); return row
+
+@router.delete("/ppp/{ppp_id}")
+def delete_ppp(ppp_id: int, current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn(); conn.execute("DELETE FROM ppp_records WHERE id=? AND company_id=?", (ppp_id, cid)); conn.commit(); conn.close(); return {"ok": True}
+
+@router.get("/ppp/employee/{emp_id}")
+def ppp_by_employee(emp_id: int, current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    rows = rows_to_dicts(conn.execute("SELECT p.*, we.nome AS ambiente_nome FROM ppp_records p LEFT JOIN work_environments we ON we.id=p.work_environment_id WHERE p.company_id=? AND p.employee_id=? ORDER BY p.created_at DESC", (cid, emp_id)).fetchall())
+    conn.close(); return rows
+
+@router.get("/esocial/s2240/{env_id}")
+def esocial_s2240(env_id: int, current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    env = conn.execute("SELECT * FROM work_environments WHERE id=? AND company_id=?", (env_id, cid)).fetchone()
+    if not env:
+        conn.close(); raise HTTPException(404, "Ambiente nÃ£o encontrado")
+    env = dict(env)
+    agents = rows_to_dicts(conn.execute("SELECT * FROM risk_agents WHERE work_environment_id=? AND company_id=?", (env_id, cid)).fetchall())
+    ltcat = conn.execute("SELECT * FROM ltcat_reports WHERE work_environment_id=? AND company_id=? ORDER BY data_emissao DESC LIMIT 1", (env_id, cid)).fetchone()
+    company = dict(conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone() or {})
+    conn.close()
+    cnpj = company.get("cnpj","").replace(".","").replace("/","").replace("-","")
+    period = date.today().strftime("%Y-%m")
+    ltcat_id = ltcat["id"] if ltcat else "0"
+    agents_xml = "\n".join([f"""          <agNoc>
+            <codAgNoc>{a.get('esocial_cod_agente','01')}</codAgNoc>
+            <dscAgNoc>{a.get('nome','')}</dscAgNoc>
+            <tpAval>1</tpAval>
+            <nrLtcat>{ltcat_id}</nrLtcat>
+          </agNoc>""" for a in agents])
+    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<eSocial xmlns="http://www.esocial.gov.br/schema/evt/evtAmbiente/v03_01_00">
+  <evtAmbiente Id="ID1{cnpj}{date.today().strftime('%Y%m%d')}">
+    <ideEvento><indRetif>1</indRetif><nrRec/><tpAmb>1</tpAmb><procEmi>1</procEmi><verProc>1.0</verProc></ideEvento>
+    <ideEmpregador><tpInsc>1</tpInsc><nrInsc>{cnpj}</nrInsc></ideEmpregador>
+    <infoAmbiente>
+      <inclusao>
+        <ideAmbiente><codAmb>{env_id}</codAmb><iniValid>{period}</iniValid></ideAmbiente>
+        <dadosAmbiente>
+          <localAmb>1</localAmb>
+          <dscSetor>{env.get('setor','')}</dscSetor>
+          <tpInsc>1</tpInsc>
+          <nrInsc>{cnpj}</nrInsc>
+{agents_xml}
+        </dadosAmbiente>
+      </inclusao>
+    </infoAmbiente>
+  </evtAmbiente>
+</eSocial>"""
+    return Response(content=xml, media_type="application/xml", headers={"Content-Disposition": f'attachment; filename="S-2240-{env_id}.xml"'})
+
+@router.get("/ppp/{ppp_id}/documento")
+def ppp_documento(ppp_id: int, current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    ppp = conn.execute("""SELECT p.*, e.name, e.cpf, e.pis_pasep, e.role AS cargo,
+        e.admission_date, e.dismissal_date, e.salary, we.nome AS ambiente_nome
+        FROM ppp_records p JOIN employees e ON e.id=p.employee_id
+        LEFT JOIN work_environments we ON we.id=p.work_environment_id
+        WHERE p.id=? AND p.company_id=?""", (ppp_id, cid)).fetchone()
+    if not ppp: conn.close(); raise HTTPException(404)
+    ppp = dict(ppp)
+    agents = rows_to_dicts(conn.execute("SELECT * FROM risk_agents WHERE work_environment_id=? AND company_id=?", (ppp.get("work_environment_id"), cid)).fetchall()) if ppp.get("work_environment_id") else []
+    company = dict(conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone() or {})
+    conn.close()
+    agents_rows = "".join([f"<tr><td>{a.get('nome','')}</td><td>{a.get('tipo','')}</td><td>{a.get('intensidade','')}</td><td>{a.get('epi','')}</td><td>{ppp.get('data_inicio_exposicao','')}</td><td>{ppp.get('data_fim_exposicao','') or 'atual'}</td></tr>" for a in agents])
+    html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><title>PPP</title>
+<style>body{{font-family:serif;max-width:900px;margin:40px auto;padding:20px;color:#000;background:#fff}}
+h1{{text-align:center;font-size:1.3em;text-transform:uppercase;border-bottom:2px solid #000;padding-bottom:8px}}
+table{{width:100%;border-collapse:collapse;margin:12px 0}}th,td{{border:1px solid #333;padding:6px 10px;font-size:.85em}}
+th{{background:#eee;font-weight:bold}}.sig{{margin-top:40px;display:flex;gap:40px}}
+.sig div{{flex:1;text-align:center;border-top:1px solid #000;padding-top:6px}}@media print{{body{{margin:0}}}}
+</style></head><body>
+<h1>Perfil ProfissiogrÃ¡fico PrevidenciÃ¡rio â€” PPP</h1>
+<table><tr><th colspan="2">DADOS DA EMPRESA</th></tr>
+<tr><td><b>RazÃ£o Social:</b> {company.get('razao_social','')}</td><td><b>CNPJ:</b> {company.get('cnpj','')}</td></tr></table>
+<table><tr><th colspan="4">DADOS DO TRABALHADOR</th></tr>
+<tr><td><b>Nome:</b> {ppp.get('name','')}</td><td><b>CPF:</b> {ppp.get('cpf','')}</td><td><b>PIS/PASEP:</b> {ppp.get('pis_pasep','')}</td><td><b>Cargo:</b> {ppp.get('cargo','')}</td></tr>
+<tr><td><b>AdmissÃ£o:</b> {ppp.get('admission_date','')}</td><td><b>DemissÃ£o:</b> {ppp.get('dismissal_date','') or 'Ativo'}</td><td colspan="2"><b>Ambiente:</b> {ppp.get('ambiente_nome','')}</td></tr></table>
+<table><tr><th>Agente Nocivo</th><th>Tipo</th><th>Intensidade</th><th>EPI</th><th>InÃ­cio Exp.</th><th>Fim Exp.</th></tr>
+{agents_rows if agents_rows else '<tr><td colspan="6" style="text-align:center">Sem agentes nocivos</td></tr>'}
+</table>
+<p><b>ObservaÃ§Ãµes:</b> {ppp.get('observacoes','')}</p>
+<div class="sig">
+<div>{ppp.get('responsavel_tecnico','')}<br><small>ResponsÃ¡vel TÃ©cnico â€” {ppp.get('registro_profissional','')}</small></div>
+<div>_________________________<br><small>Trabalhador â€” {ppp.get('name','')}</small></div>
+</div>
+<p style="text-align:right;font-size:.75em;margin-top:20px">Emitido em {date.today().strftime('%d/%m/%Y')}</p>
+</body></html>"""
+    return Response(content=html, media_type="text/html")
+
+
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# BLOCO 2 â€” INTEGRAÃ‡ÃƒO CONTÃBIL
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+
+@router.get("/accounting-config")
+def get_accounting_config(current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    row = conn.execute("SELECT * FROM accounting_config_dp WHERE company_id=?", (cid,)).fetchone()
+    conn.close()
+    return dict(row) if row else {}
+
+@router.put("/accounting-config")
+def update_accounting_config(body: Dict[str,Any]=Body(...), current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    exists = conn.execute("SELECT id FROM accounting_config_dp WHERE company_id=?", (cid,)).fetchone()
+    fields = ["conta_salarios_bruto","conta_inss_empregado","conta_inss_patronal","conta_fgts_provisao",
+              "conta_irrf","conta_salarios_pagar","conta_ferias_provisao","conta_decimo_provisao","conta_prolabore","conta_banco"]
+    if exists:
+        sets = ", ".join([f"{f}=?" for f in fields] + ["updated_at=CURRENT_TIMESTAMP"])
+        vals = [body.get(f,"") for f in fields] + [cid]
+        conn.execute(f"UPDATE accounting_config_dp SET {sets} WHERE company_id=?", vals)
+    else:
+        cols = ",".join(["company_id"] + fields)
+        phs = ",".join(["?"] * (1 + len(fields)))
+        vals = [cid] + [body.get(f,"") for f in fields]
+        conn.execute(f"INSERT INTO accounting_config_dp ({cols}) VALUES ({phs})", vals)
+    conn.commit(); conn.close(); return {"ok": True}
+
+@router.get("/accounting/entries")
+def get_accounting_entries(competencia: str = "", current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    if competencia:
+        rows = rows_to_dicts(conn.execute("SELECT * FROM payroll_accounting_entries WHERE company_id=? AND competencia=? ORDER BY id", (cid, competencia)).fetchall())
+    else:
+        rows = rows_to_dicts(conn.execute("SELECT * FROM payroll_accounting_entries WHERE company_id=? ORDER BY competencia DESC, id LIMIT 200", (cid,)).fetchall())
+    conn.close(); return rows
+
+@router.post("/accounting/gerar/{competencia}")
+def gerar_contabilidade(competencia: str, current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    cfg_row = conn.execute("SELECT * FROM accounting_config_dp WHERE company_id=?", (cid,)).fetchone()
+    cfg = dict(cfg_row) if cfg_row else {}
+    runs = rows_to_dicts(conn.execute("SELECT * FROM payroll_runs WHERE company_id=? AND competencia=?", (cid, competencia)).fetchall())
+    total_bruto = sum(r.get("gross_salary", 0) for r in runs)
+    total_liquido = sum(r.get("net_salary", 0) for r in runs)
+    total_inss = sum(r.get("inss", 0) for r in runs)
+    total_irrf = sum(r.get("irrf", 0) for r in runs)
+    if total_bruto == 0:
+        conn.close(); raise HTTPException(400, "Nenhuma folha calculada para esta competÃªncia")
+    conn.execute("DELETE FROM payroll_accounting_entries WHERE company_id=? AND competencia=?", (cid, competencia))
+    today = date.today().isoformat()
+    entries = [
+        ("folha_bruta", f"Folha {competencia} â€” SalÃ¡rios Brutos",
+         cfg.get("conta_salarios_bruto","6.1.1.01"), total_bruto, cfg.get("conta_salarios_pagar","2.1.1.01"), total_liquido),
+        ("inss_empregado", f"Folha {competencia} â€” INSS Empregados",
+         cfg.get("conta_salarios_bruto","6.1.1.01"), 0.01, cfg.get("conta_inss_empregado","2.3.1.01"), total_inss),
+        ("irrf", f"Folha {competencia} â€” IRRF Retido",
+         cfg.get("conta_salarios_bruto","6.1.1.01"), 0.01, cfg.get("conta_irrf","2.3.1.04"), total_irrf),
+        ("inss_patronal", f"Folha {competencia} â€” INSS Patronal 20%",
+         "6.1.1.10", round(total_bruto * 0.20, 2), cfg.get("conta_inss_patronal","2.3.1.02"), round(total_bruto * 0.20, 2)),
+        ("fgts", f"Folha {competencia} â€” FGTS 8%",
+         "6.1.1.11", round(total_bruto * 0.08, 2), cfg.get("conta_fgts_provisao","2.3.1.03"), round(total_bruto * 0.08, 2)),
+        ("provisao_ferias", f"Folha {competencia} â€” ProvisÃ£o FÃ©rias 1/12",
+         "6.1.1.12", round(total_bruto * 0.0833, 2), cfg.get("conta_ferias_provisao","2.1.2.01"), round(total_bruto * 0.0833, 2)),
+        ("provisao_decimo", f"Folha {competencia} â€” ProvisÃ£o 13Âº Sal 1/12",
+         "6.1.1.13", round(total_bruto * 0.0833, 2), cfg.get("conta_decimo_provisao","2.1.3.01"), round(total_bruto * 0.0833, 2)),
+    ]
+    for e in entries:
+        conn.execute("INSERT INTO payroll_accounting_entries (company_id,competencia,tipo,data_lancamento,historico,debito_conta,debito_valor,credito_conta,credito_valor) VALUES (?,?,?,?,?,?,?,?,?)",
+            (cid, competencia, e[0], today, e[1], e[2], e[3], e[4], e[5]))
+    conn.commit()
+    rows = rows_to_dicts(conn.execute("SELECT * FROM payroll_accounting_entries WHERE company_id=? AND competencia=? ORDER BY id", (cid, competencia)).fetchall())
+    conn.close(); return rows
+
+@router.post("/accounting/exportar/{competencia}")
+def exportar_contabilidade(competencia: str, current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    rows = rows_to_dicts(conn.execute("SELECT * FROM payroll_accounting_entries WHERE company_id=? AND competencia=? ORDER BY id", (cid, competencia)).fetchall())
+    conn.execute("UPDATE payroll_accounting_entries SET status='exportado' WHERE company_id=? AND competencia=?", (cid, competencia))
+    conn.commit(); conn.close()
+    lines = ["data;historico;debito_conta;debito_valor;credito_conta;credito_valor"]
+    for r in rows:
+        lines.append(f"{r['data_lancamento']};{r['historico']};{r['debito_conta']};{r['debito_valor']:.2f};{r['credito_conta']};{r['credito_valor']:.2f}")
+    return Response(content="\n".join(lines), media_type="text/csv", headers={"Content-Disposition": f'attachment; filename="contabil-{competencia}.csv"'})
+
+@router.delete("/accounting/entries/{entry_id}")
+def delete_accounting_entry(entry_id: int, current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn(); conn.execute("DELETE FROM payroll_accounting_entries WHERE id=? AND company_id=?", (entry_id, cid)); conn.commit(); conn.close(); return {"ok": True}
+
+
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# BLOCO 3 â€” ESTAGIÃRIOS & APRENDIZES
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+
+@router.get("/interns")
+def list_interns(current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn(); rows = rows_to_dicts(conn.execute("SELECT * FROM interns WHERE company_id=? ORDER BY nome", (cid,)).fetchall()); conn.close()
+    for r in rows:
+        if r.get("data_fim"):
+            r["dias_restantes"] = (date.fromisoformat(r["data_fim"]) - date.today()).days
+    return rows
+
+@router.post("/interns")
+def create_intern(body: Dict[str,Any]=Body(...), current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    cur = conn.execute("INSERT INTO interns (company_id,nome,cpf,data_nascimento,email,telefone,instituicao,curso,nivel,supervisor_nome,agente_integracao,bolsa_auxilio,vale_transporte,carga_horaria_semanal,data_inicio,data_fim,status,observacoes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (cid, body["nome"], body.get("cpf",""), body.get("data_nascimento",""), body.get("email",""), body.get("telefone",""), body["instituicao"], body.get("curso",""), body.get("nivel","superior"), body.get("supervisor_nome",""), body.get("agente_integracao",""), body.get("bolsa_auxilio",0), body.get("vale_transporte",0), body.get("carga_horaria_semanal",20), body["data_inicio"], body["data_fim"], "ativo", body.get("observacoes","")))
+    new_id = cur.lastrowid; conn.commit()
+    row = dict(conn.execute("SELECT * FROM interns WHERE id=?", (new_id,)).fetchone()); conn.close(); return row
+
+@router.put("/interns/{intern_id}")
+def update_intern(intern_id: int, body: Dict[str,Any]=Body(...), current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    conn.execute("UPDATE interns SET nome=?,cpf=?,data_nascimento=?,email=?,telefone=?,instituicao=?,curso=?,nivel=?,supervisor_nome=?,agente_integracao=?,bolsa_auxilio=?,vale_transporte=?,carga_horaria_semanal=?,data_inicio=?,data_fim=?,status=?,observacoes=? WHERE id=? AND company_id=?",
+        (body.get("nome",""), body.get("cpf",""), body.get("data_nascimento",""), body.get("email",""), body.get("telefone",""), body.get("instituicao",""), body.get("curso",""), body.get("nivel","superior"), body.get("supervisor_nome",""), body.get("agente_integracao",""), body.get("bolsa_auxilio",0), body.get("vale_transporte",0), body.get("carga_horaria_semanal",20), body.get("data_inicio",""), body.get("data_fim",""), body.get("status","ativo"), body.get("observacoes",""), intern_id, cid))
+    conn.commit(); conn.close(); return {"ok": True}
+
+@router.delete("/interns/{intern_id}")
+def delete_intern(intern_id: int, current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn(); conn.execute("DELETE FROM interns WHERE id=? AND company_id=?", (intern_id, cid)); conn.commit(); conn.close(); return {"ok": True}
+
+@router.get("/interns/termo/{intern_id}")
+def intern_tce(intern_id: int, current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    intern = conn.execute("SELECT * FROM interns WHERE id=? AND company_id=?", (intern_id, cid)).fetchone()
+    if not intern: conn.close(); raise HTTPException(404)
+    intern = dict(intern)
+    company = dict(conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone() or {})
+    conn.close()
+    html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><title>TCE</title>
+<style>body{{font-family:serif;max-width:900px;margin:40px auto;padding:20px;color:#000;background:#fff}}
+h1{{text-align:center;font-size:1.2em;text-transform:uppercase;border-bottom:2px solid #000;padding-bottom:8px}}
+p{{line-height:1.7;text-align:justify}}table{{width:100%;border-collapse:collapse;margin:12px 0}}
+th,td{{border:1px solid #333;padding:6px 10px;font-size:.85em}}.sig{{margin-top:50px;display:flex;gap:30px;flex-wrap:wrap}}
+.sig div{{flex:1;min-width:200px;text-align:center;border-top:1px solid #000;padding-top:6px;font-size:.85em}}
+@media print{{body{{margin:0}}}}</style></head><body>
+<h1>Termo de Compromisso de EstÃ¡gio â€” TCE</h1>
+<p>Pelo presente instrumento, de um lado <b>{company.get('razao_social','')}</b>, CNPJ nÂº {company.get('cnpj','')}, com sede em {company.get('logradouro','')}, nÂº {company.get('numero','')}, {company.get('cidade','')}/{company.get('uf','')}, doravante denominada <b>CONCEDENTE</b>; de outro lado a InstituiÃ§Ã£o de Ensino <b>{intern.get('instituicao','')}</b>, doravante denominada <b>INSTITUIÃ‡ÃƒO DE ENSINO</b>; e ainda o(a) estudante <b>{intern.get('nome','')}</b>, CPF nÂº {intern.get('cpf','')}, doravante denominado(a) <b>ESTAGIÃRIO(A)</b>, celebram o presente Termo nos termos da Lei nÂº 11.788/2008.</p>
+<table>
+<tr><th>Dados do EstagiÃ¡rio</th><th></th></tr>
+<tr><td>Nome</td><td>{intern.get('nome','')}</td></tr>
+<tr><td>CPF</td><td>{intern.get('cpf','')}</td></tr>
+<tr><td>Curso / NÃ­vel</td><td>{intern.get('curso','')} â€” {intern.get('nivel','')}</td></tr>
+<tr><td>InstituiÃ§Ã£o</td><td>{intern.get('instituicao','')}</td></tr>
+<tr><th colspan="2">CondiÃ§Ãµes do EstÃ¡gio</th></tr>
+<tr><td>PerÃ­odo</td><td>{intern.get('data_inicio','')} a {intern.get('data_fim','')}</td></tr>
+<tr><td>Carga HorÃ¡ria Semanal</td><td>{intern.get('carga_horaria_semanal',20)} horas</td></tr>
+<tr><td>Bolsa-AuxÃ­lio Mensal</td><td>R$ {float(intern.get('bolsa_auxilio',0)):.2f}</td></tr>
+<tr><td>Vale-Transporte Mensal</td><td>R$ {float(intern.get('vale_transporte',0)):.2f}</td></tr>
+<tr><td>Supervisor</td><td>{intern.get('supervisor_nome','')}</td></tr>
+</table>
+<p>O estÃ¡gio nÃ£o cria vÃ­nculo empregatÃ­cio de qualquer natureza, nos termos do art. 3Âº da Lei nÂº 11.788/2008.</p>
+<div class="sig">
+<div>{company.get('razao_social','')}<br><small>CONCEDENTE</small></div>
+<div>{intern.get('nome','')}<br><small>ESTAGIÃRIO(A)</small></div>
+<div>{intern.get('instituicao','')}<br><small>INSTITUIÃ‡ÃƒO DE ENSINO</small></div>
+</div>
+<p style="text-align:right;font-size:.75em;margin-top:20px">{company.get('cidade','')}, {date.today().strftime('%d de %B de %Y')}</p>
+</body></html>"""
+    return Response(content=html, media_type="text/html")
+
+@router.get("/apprentices")
+def list_apprentices(current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    rows = rows_to_dicts(conn.execute("SELECT a.*, e.name AS employee_name, e.cpf FROM apprentices a JOIN employees e ON e.id=a.employee_id WHERE a.company_id=? ORDER BY a.data_inicio DESC", (cid,)).fetchall())
+    conn.close(); return rows
+
+@router.post("/apprentices")
+def create_apprentice(body: Dict[str,Any]=Body(...), current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    cur = conn.execute("INSERT INTO apprentices (company_id,employee_id,entidade_qualificadora,programa,data_inicio,data_fim) VALUES (?,?,?,?,?,?)",
+        (cid, body["employee_id"], body.get("entidade_qualificadora",""), body.get("programa",""), body["data_inicio"], body["data_fim"]))
+    new_id = cur.lastrowid; conn.commit()
+    row = dict(conn.execute("SELECT * FROM apprentices WHERE id=?", (new_id,)).fetchone()); conn.close(); return row
+
+@router.delete("/apprentices/{app_id}")
+def delete_apprentice(app_id: int, current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn(); conn.execute("DELETE FROM apprentices WHERE id=? AND company_id=?", (app_id, cid)); conn.commit(); conn.close(); return {"ok": True}
+
+@router.get("/apprentices/cota")
+def apprentices_cota(current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    total_emp = conn.execute("SELECT COUNT(*) FROM employees WHERE company_id=? AND active=1", (cid,)).fetchone()[0]
+    today = date.today().isoformat()
+    ativos = conn.execute("SELECT COUNT(*) FROM apprentices WHERE company_id=? AND data_fim >= ?", (cid, today)).fetchone()[0]
+    conn.close()
+    cota_min = max(1, round(total_emp * 0.05))
+    cota_max = max(1, round(total_emp * 0.15))
+    if ativos < cota_min: situacao = "abaixo"
+    elif ativos > cota_max: situacao = "acima"
+    else: situacao = "dentro"
+    return {"total_empregados": total_emp, "cota_minima": cota_min, "cota_maxima": cota_max, "aprendizes_ativos": ativos, "situacao": situacao}
+
+
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# BLOCO 4 â€” EXTRATO FGTS
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+
+@router.get("/fgts/extrato/{employee_id}")
+def fgts_extrato(employee_id: int, ano: int = 0, current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    if not ano: ano = date.today().year
+    conn = get_conn()
+    manual = rows_to_dicts(conn.execute("SELECT * FROM fgts_history WHERE company_id=? AND employee_id=? AND competencia LIKE ? ORDER BY competencia", (cid, employee_id, f"{ano}-%")).fetchall())
+    if not manual:
+        runs = rows_to_dicts(conn.execute("SELECT competencia, gross_salary FROM payroll_runs WHERE company_id=? AND employee_id=? AND competencia LIKE ? ORDER BY competencia", (cid, employee_id, f"{ano}-%")).fetchall())
+        manual = [{"id": None, "competencia": r["competencia"], "salario_base": r["gross_salary"], "fgts_calculado": round(r["gross_salary"]*0.08,2), "fgts_depositado": 0, "data_deposito": "", "guia_referencia": "", "saldo_acumulado": 0} for r in runs]
+    saldo = 0.0
+    for r in manual:
+        dep = float(r.get("fgts_depositado") or 0)
+        calc = float(r.get("fgts_calculado") or 0)
+        saldo += dep if dep > 0 else calc
+        r["saldo_acumulado"] = round(saldo, 2)
+    emp = conn.execute("SELECT name FROM employees WHERE id=? AND company_id=?", (employee_id, cid)).fetchone()
+    conn.close()
+    return {"ano": ano, "employee_name": emp["name"] if emp else "", "registros": manual, "saldo_total": round(saldo, 2)}
+
+@router.post("/fgts/confirmar-deposito")
+def fgts_confirmar(body: Dict[str,Any]=Body(...), current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    emp_id = body["employee_id"]; comp = body["competencia"]
+    run = conn.execute("SELECT gross_salary FROM payroll_runs WHERE company_id=? AND employee_id=? AND competencia=?", (cid, emp_id, comp)).fetchone()
+    salario = run["gross_salary"] if run else 0
+    fgts_calc = round(salario * 0.08, 2)
+    existing = conn.execute("SELECT id FROM fgts_history WHERE company_id=? AND employee_id=? AND competencia=?", (cid, emp_id, comp)).fetchone()
+    if existing:
+        conn.execute("UPDATE fgts_history SET fgts_depositado=?,data_deposito=?,guia_referencia=? WHERE id=?",
+            (body.get("fgts_depositado",0), body.get("data_deposito",""), body.get("guia_referencia",""), existing["id"]))
+    else:
+        conn.execute("INSERT INTO fgts_history (company_id,employee_id,competencia,salario_base,fgts_calculado,fgts_depositado,data_deposito,guia_referencia) VALUES (?,?,?,?,?,?,?,?)",
+            (cid, emp_id, comp, salario, fgts_calc, body.get("fgts_depositado",0), body.get("data_deposito",""), body.get("guia_referencia","")))
+    conn.commit(); conn.close(); return {"ok": True}
+
+@router.get("/fgts/pendentes")
+def fgts_pendentes(competencia: str = "", current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    if not competencia: competencia = date.today().strftime("%Y-%m")
+    conn = get_conn()
+    runs = rows_to_dicts(conn.execute("SELECT pr.employee_id, pr.competencia, pr.gross_salary, e.name FROM payroll_runs pr JOIN employees e ON e.id=pr.employee_id WHERE pr.company_id=? AND pr.competencia=?", (cid, competencia)).fetchall())
+    confirmed = set(r["employee_id"] for r in rows_to_dicts(conn.execute("SELECT employee_id FROM fgts_history WHERE company_id=? AND competencia=? AND fgts_depositado > 0", (cid, competencia)).fetchall()))
+    conn.close()
+    return [dict(r, fgts=round(r["gross_salary"]*0.08,2)) for r in runs if r["employee_id"] not in confirmed]
+
+@router.get("/fgts/resumo")
+def fgts_resumo(competencia: str = "", current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    if not competencia: competencia = date.today().strftime("%Y-%m")
+    conn = get_conn()
+    runs = rows_to_dicts(conn.execute("SELECT employee_id, gross_salary FROM payroll_runs WHERE company_id=? AND competencia=?", (cid, competencia)).fetchall())
+    total_calc = round(sum(r["gross_salary"]*0.08 for r in runs), 2)
+    total_dep = conn.execute("SELECT COALESCE(SUM(fgts_depositado),0) FROM fgts_history WHERE company_id=? AND competencia=?", (cid, competencia)).fetchone()[0] or 0
+    conn.close()
+    return {"competencia": competencia, "total_calculado": total_calc, "total_depositado": round(float(total_dep),2), "total_pendente": round(total_calc - float(total_dep), 2), "n_funcionarios": len(runs)}
+
+
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+# BLOCO 5 â€” PORTAL DO FUNCIONÃRIO
+# â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+
+@router.get("/employees/by-email")
+def employee_by_email(email: str = Query(...), current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    row = conn.execute("""
+        SELECT e.* FROM employees e
+        JOIN users u ON u.company_id = e.company_id
+        WHERE u.email = ? AND u.company_id = ? LIMIT 1
+    """, (email, cid)).fetchone()
+    conn.close()
+    if not row: raise HTTPException(404, "FuncionÃ¡rio nÃ£o encontrado para este usuÃ¡rio")
+    return dict(row)
+
+@router.get("/vacation-requests")
+def list_vacation_requests(employee_id: int = 0, current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    if employee_id:
+        rows = rows_to_dicts(conn.execute("SELECT vr.*, e.name AS employee_name FROM vacation_requests vr JOIN employees e ON e.id=vr.employee_id WHERE vr.company_id=? AND vr.employee_id=? ORDER BY vr.created_at DESC", (cid, employee_id)).fetchall())
+    else:
+        rows = rows_to_dicts(conn.execute("SELECT vr.*, e.name AS employee_name FROM vacation_requests vr JOIN employees e ON e.id=vr.employee_id WHERE vr.company_id=? ORDER BY vr.created_at DESC", (cid,)).fetchall())
+    conn.close(); return rows
+
+@router.post("/vacation-requests")
+def create_vacation_request(body: Dict[str,Any]=Body(...), current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    d1 = date.fromisoformat(body["data_inicio_solicitada"]); d2 = date.fromisoformat(body["data_fim_solicitada"])
+    dias = (d2 - d1).days + 1
+    cur = conn.execute("INSERT INTO vacation_requests (company_id,employee_id,data_inicio_solicitada,data_fim_solicitada,dias_solicitados) VALUES (?,?,?,?,?)",
+        (cid, body["employee_id"], body["data_inicio_solicitada"], body["data_fim_solicitada"], dias))
+    new_id = cur.lastrowid; conn.commit()
+    row = dict(conn.execute("SELECT * FROM vacation_requests WHERE id=?", (new_id,)).fetchone()); conn.close(); return row
+
+@router.put("/vacation-requests/{req_id}")
+def update_vacation_request(req_id: int, body: Dict[str,Any]=Body(...), current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    conn.execute("UPDATE vacation_requests SET status=?,motivo_recusa=?,aprovado_por=? WHERE id=? AND company_id=?",
+        (body.get("status","pendente"), body.get("motivo_recusa",""), body.get("aprovado_por",""), req_id, cid))
+    conn.commit(); conn.close(); return {"ok": True}
+
+@router.get("/declarations/vinculo/{emp_id}")
+def declaracao_vinculo(emp_id: int, current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    emp = conn.execute("SELECT * FROM employees WHERE id=? AND company_id=?", (emp_id, cid)).fetchone()
+    if not emp: conn.close(); raise HTTPException(404)
+    emp = dict(emp)
+    company = dict(conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone() or {})
+    conn.close()
+    html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><title>DeclaraÃ§Ã£o de VÃ­nculo</title>
+<style>body{{font-family:serif;max-width:800px;margin:60px auto;padding:30px;color:#000;background:#fff;line-height:1.8}}
+h1{{text-align:center;font-size:1.1em;text-transform:uppercase;margin-bottom:30px}}
+p{{text-align:justify;margin:15px 0}}.sig{{margin-top:60px;text-align:center}}
+.sig div{{border-top:1px solid #000;width:300px;margin:0 auto;padding-top:8px}}
+@media print{{body{{margin:0}}}}</style></head><body>
+<h1>DeclaraÃ§Ã£o de VÃ­nculo EmpregatÃ­cio</h1>
+<p>{company.get('cidade','')}, {date.today().strftime('%d de %B de %Y')}.</p>
+<p><b>{company.get('razao_social','')}</b>, pessoa jurÃ­dica de direito privado, inscrita no CNPJ sob o nÂº <b>{company.get('cnpj','')}</b>, com sede na {company.get('logradouro','')}, nÂº {company.get('numero','')}, {company.get('bairro','')}, {company.get('cidade','')}/{company.get('uf','')}, <b>DECLARA</b>, para os devidos fins de direito, que <b>{emp.get('name','')}</b>, portador(a) do CPF nÂº <b>{emp.get('cpf','')}</b>, Ã© funcionÃ¡rio(a) desta empresa desde <b>{emp.get('admission_date','')}</b>, exercendo o cargo de <b>{emp.get('role','')}</b>, com salÃ¡rio base de <b>R$ {float(emp.get('salary',0)):.2f}</b>, em regime CLT.</p>
+<p>Esta declaraÃ§Ã£o Ã© emitida a pedido do(a) interessado(a), para os fins que se fizerem necessÃ¡rios.</p>
+<div class="sig"><div>{company.get('razao_social','')}<br><small>ResponsÃ¡vel Legal / RH</small></div></div>
+</body></html>"""
+    return Response(content=html, media_type="text/html")
+
+@router.get("/declarations/ir/{emp_id}")
+def declaracao_ir(emp_id: int, ano: int = 0, current_user=Depends(get_current_user)):
+    cid = current_user.get("company_id", 1)
+    if not ano: ano = date.today().year - 1
+    conn = get_conn()
+    emp = conn.execute("SELECT * FROM employees WHERE id=? AND company_id=?", (emp_id, cid)).fetchone()
+    if not emp: conn.close(); raise HTTPException(404)
+    emp = dict(emp)
+    company = dict(conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone() or {})
+    runs = rows_to_dicts(conn.execute("SELECT * FROM payroll_runs WHERE company_id=? AND employee_id=? AND competencia LIKE ?", (cid, emp_id, f"{ano}-%")).fetchall())
+    conn.close()
+    total_bruto = sum(r.get("gross_salary",0) for r in runs)
+    total_inss = sum(r.get("inss",0) for r in runs)
+    total_irrf = sum(r.get("irrf",0) for r in runs)
+    html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Informe de Rendimentos</title>
+<style>body{{font-family:serif;max-width:800px;margin:40px auto;padding:20px;color:#000;background:#fff}}
+h1{{text-align:center;font-size:1.1em;text-transform:uppercase;border-bottom:2px solid #000;padding-bottom:8px}}
+table{{width:100%;border-collapse:collapse;margin:12px 0}}th,td{{border:1px solid #333;padding:7px 10px;font-size:.88em}}
+th{{background:#eee;font-weight:bold}}.total{{font-weight:bold;background:#f5f5f5}}
+@media print{{body{{margin:0}}}}</style></head><body>
+<h1>Informe de Rendimentos â€” Ano-CalendÃ¡rio {ano}</h1>
+<table><tr><th colspan="2">FONTE PAGADORA</th></tr>
+<tr><td>RazÃ£o Social</td><td>{company.get('razao_social','')}</td></tr>
+<tr><td>CNPJ</td><td>{company.get('cnpj','')}</td></tr>
+<tr><th colspan="2">BENEFICIÃRIO</th></tr>
+<tr><td>Nome</td><td>{emp.get('name','')}</td></tr>
+<tr><td>CPF</td><td>{emp.get('cpf','')}</td></tr>
+<tr><td>PIS/PASEP</td><td>{emp.get('pis_pasep','')}</td></tr>
+<tr><th colspan="2">RENDIMENTOS E DEDUÃ‡Ã•ES</th></tr>
+<tr><td>Rendimentos TributÃ¡veis (SalÃ¡rios, FÃ©rias, 13Âº)</td><td style="text-align:right">R$ {total_bruto:,.2f}</td></tr>
+<tr><td>(-) DeduÃ§Ãµes INSS</td><td style="text-align:right">R$ {total_inss:,.2f}</td></tr>
+<tr><td>(-) IRRF Retido na Fonte</td><td style="text-align:right">R$ {total_irrf:,.2f}</td></tr>
+<tr class="total"><td>Base de CÃ¡lculo LÃ­quida</td><td style="text-align:right">R$ {total_bruto-total_inss:,.2f}</td></tr>
+</table>
+<p style="font-size:.8em">Declaramos que as informaÃ§Ãµes acima sÃ£o fiÃ©is aos registros contÃ¡beis desta empresa.</p>
+<p style="text-align:right;font-size:.75em">Emitido em {date.today().strftime('%d/%m/%Y')}</p>
+</body></html>"""
+    return Response(content=html, media_type="text/html")
