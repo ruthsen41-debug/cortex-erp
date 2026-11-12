@@ -2354,7 +2354,7 @@ async function renderTabelasFiscais(el) {
   window.tfImportDefault = async () => {
     const a = document.getElementById('tfAno').value || ano;
     try {
-      await apiFetch(`/api/dp/tax-tables`, { method:'POST', body: JSON.stringify({ ano: parseInt(a), tipo: 'IMPORT_DEFAULT', brackets: [] }) });
+      await apiFetch(`/api/dp/tax-tables/seed-default?ano=${parseInt(a)}`, { method:'POST' });
       showToast(`Tabelas ${a} importadas.`, 'success');
       window.tfLoadTables();
     } catch(e) { showToast('Erro: ' + e.message, 'error'); }

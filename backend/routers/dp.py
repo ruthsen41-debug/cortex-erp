@@ -1298,6 +1298,32 @@ def tax_tables_vigente(ano: int, current_user: Dict[str, Any] = Depends(get_curr
     return result
 
 
+@router.post("/tax-tables/seed-default", status_code=201)
+def seed_default_tax_tables(ano: int = 2025, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    cur = conn.cursor()
+    existing = cur.execute("SELECT COUNT(*) FROM tax_tables WHERE company_id=? AND ano=?", (company_id, ano)).fetchone()[0]
+    if existing > 0:
+        conn.close()
+        return {"ok": True, "msg": f"Tabelas {ano} já existem para esta empresa."}
+    defaults = {
+        "inss": [(0, 1518.00, 7.5, 0), (1518.01, 2793.88, 9.0, 22.77), (2793.89, 4190.83, 12.0, 106.60), (4190.84, 8157.41, 14.0, 190.42)],
+        "irrf": [(0, 2824.00, 0.0, 0), (2824.01, 3751.05, 7.5, 211.80), (3751.06, 4664.68, 15.0, 492.78), (4664.69, 5871.22, 22.5, 843.34), (5871.23, None, 27.5, 1137.74)],
+        "fgts": [(0, None, 8.0, 0)],
+        "salario_minimo": [(0, None, 1518.00, 0)],
+    }
+    for tipo, brackets in defaults.items():
+        cur.execute("INSERT INTO tax_tables (company_id, ano, tipo) VALUES (?,?,?)", (company_id, ano, tipo))
+        table_id = cur.lastrowid
+        for b in brackets:
+            cur.execute("INSERT INTO tax_brackets (tax_table_id, faixa_de, faixa_ate, aliquota, deducao) VALUES (?,?,?,?,?)",
+                        (table_id, b[0], b[1], b[2], b[3]))
+    conn.commit()
+    conn.close()
+    return {"ok": True, "msg": f"Tabelas {ano} criadas com sucesso."}
+
+
 @router.post("/tax-tables", status_code=201)
 def create_tax_table(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
     conn = get_conn()
