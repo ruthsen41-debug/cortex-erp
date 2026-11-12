@@ -880,6 +880,66 @@ def init_db() -> None:
     );
     """)
 
+    # 38b. Afastamentos / Atestados / CAT
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS employee_absences (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL DEFAULT 1,
+        employee_id INTEGER NOT NULL,
+        tipo TEXT NOT NULL,
+        cid TEXT DEFAULT '',
+        data_inicio TEXT NOT NULL,
+        data_fim TEXT DEFAULT '',
+        dias_empresa INTEGER DEFAULT 0,
+        dias_inss INTEGER DEFAULT 0,
+        retorno_efetivo TEXT DEFAULT '',
+        observacoes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (employee_id) REFERENCES employees(id)
+    );
+    """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS medical_certificates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL DEFAULT 1,
+        employee_id INTEGER NOT NULL,
+        data_emissao TEXT NOT NULL,
+        data_apresentacao TEXT DEFAULT '',
+        dias_afastamento INTEGER DEFAULT 0,
+        horas_afastamento REAL DEFAULT 0,
+        cid TEXT DEFAULT '',
+        crm_medico TEXT DEFAULT '',
+        nome_medico TEXT DEFAULT '',
+        hipotese_diagnostica TEXT DEFAULT '',
+        justifica_falta INTEGER DEFAULT 1,
+        afastamento_id INTEGER DEFAULT NULL,
+        observacoes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (employee_id) REFERENCES employees(id)
+    );
+    """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS work_accidents (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL DEFAULT 1,
+        employee_id INTEGER NOT NULL,
+        data_acidente TEXT NOT NULL,
+        hora_acidente TEXT DEFAULT '',
+        local_acidente TEXT DEFAULT '',
+        tipo_acidente TEXT DEFAULT 'tipico',
+        parte_corpo TEXT DEFAULT '',
+        agente_causador TEXT DEFAULT '',
+        descricao TEXT DEFAULT '',
+        houve_afastamento INTEGER DEFAULT 0,
+        dias_afastamento INTEGER DEFAULT 0,
+        houve_obito INTEGER DEFAULT 0,
+        cat_numero TEXT DEFAULT '',
+        observacoes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (employee_id) REFERENCES employees(id)
+    );
+    """)
+
     # 39. Módulo Contábil — Plano de Contas
     cur.execute("""
     CREATE TABLE IF NOT EXISTS accounting_accounts (

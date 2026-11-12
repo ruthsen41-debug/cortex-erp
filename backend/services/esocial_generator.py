@@ -212,6 +212,96 @@ def gerar_s1200(empresa: Dict, funcionario: Dict,
     return xml
 
 
+# ─── S-2230 — Afastamento Temporário ────────────────────────────────────────
+
+_COD_MOTIVO_AFASTAMENTO = {
+    "auxilio_doenca_b31": "01",
+    "auxilio_doenca_b91": "03",
+    "acidente_trabalho":  "03",
+    "maternidade":        "11",
+    "maternidade_180":    "11",
+    "paternidade":        "18",
+    "paternidade_20":     "18",
+    "luto":               "17",
+    "casamento":          "15",
+    "doacao_sangue":      "20",
+    "militar":            "08",
+    "suspensao":          "26",
+    "outros":             "99",
+}
+
+
+def gerar_s2230(empresa: Dict, funcionario: Dict, afastamento: Dict) -> str:
+    """Gera o XML do evento S-2230 (Afastamento Temporário do Trabalhador)."""
+    ev_id = f"ID1{re.sub(r'\\D', '', _c(empresa.get('cnpj', '')))}{_date.today().strftime('%Y%m%d%H%M%S')}{'00004'}"
+    cpf = re.sub(r"\D", "", _c(funcionario.get("cpf", "")))
+    tipo = afastamento.get("tipo", "outros")
+    cod_mot = _COD_MOTIVO_AFASTAMENTO.get(tipo, "99")
+
+    xml = _header(empresa, empresa.get("cnpj", ""), empresa.get("cnpj", ""), ev_id)
+    xml += f"""
+        <evtAfastTemp Id="{ev_id}">
+          {_ide_evento()[9:]}
+          {_ide_empregador(empresa.get("cnpj", ""))[9:]}
+          <ideVinculo>
+            <cpfTrab>{cpf}</cpfTrab>
+            <matriCad>{_c(funcionario.get("matricula", "001"))}</matriCad>
+          </ideVinculo>
+          <infoAfastamento>
+            <iniAfastamento>
+              <dtIniAfast>{_d(afastamento.get("data_inicio", ""))}</dtIniAfast>
+              <codMotAfast>{cod_mot}</codMotAfast>
+              {f'<cid>{_c(afastamento.get("cid", ""))}</cid>' if afastamento.get("cid") else ''}
+            </iniAfastamento>
+            {f'''<fimAfastamento>
+              <dtTermAfast>{_d(afastamento.get("data_fim", ""))}</dtTermAfast>
+            </fimAfastamento>''' if afastamento.get("data_fim") else ''}
+          </infoAfastamento>
+        </evtAfastTemp>"""
+    xml += _footer()
+    return xml
+
+
+# ─── S-2210 — Comunicação de Acidente de Trabalho (CAT) ─────────────────────
+
+def gerar_s2210(empresa: Dict, funcionario: Dict, acidente: Dict) -> str:
+    """Gera o XML do evento S-2210 (Comunicação de Acidente de Trabalho)."""
+    ev_id = f"ID1{re.sub(r'\\D', '', _c(empresa.get('cnpj', '')))}{_date.today().strftime('%Y%m%d%H%M%S')}{'00005'}"
+    cpf = re.sub(r"\D", "", _c(funcionario.get("cpf", "")))
+
+    xml = _header(empresa, empresa.get("cnpj", ""), empresa.get("cnpj", ""), ev_id)
+    xml += f"""
+        <evtCAT Id="{ev_id}">
+          {_ide_evento()[9:]}
+          {_ide_empregador(empresa.get("cnpj", ""))[9:]}
+          <ideVinculo>
+            <cpfTrab>{cpf}</cpfTrab>
+            <matriCad>{_c(funcionario.get("matricula", "001"))}</matriCad>
+          </ideVinculo>
+          <cat>
+            <dtAcid>{_d(acidente.get("data_acidente", ""))}</dtAcid>
+            <tpAcid>{_c(acidente.get("tipo_acidente", "tipico"))}</tpAcid>
+            <hrAcid>{_c(acidente.get("hora_acidente", "00:00"))}</hrAcid>
+            <tpCat>1</tpCat>
+            <descAcid>{_c(acidente.get("descricao", ""))}</descAcid>
+            <houveAfast>{1 if acidente.get("houve_afastamento") else 0}</houveAfast>
+            <localAcidente>
+              <tpLocal>1</tpLocal>
+              <dsLocal>{_c(acidente.get("local_acidente", ""))}</dsLocal>
+            </localAcidente>
+            <parteAtingida>
+              <codParteAting>99999</codParteAting>
+              <lateralidade>9</lateralidade>
+            </parteAtingida>
+            <agenteCausador>
+              <codAgntCausador>99999</codAgntCausador>
+            </agenteCausador>
+          </cat>
+        </evtCAT>"""
+    xml += _footer()
+    return xml
+
+
 # ─── S-2299 — Desligamento ───────────────────────────────────────────────────
 
 def gerar_s2299(empresa: Dict, funcionario: Dict,
