@@ -4,7 +4,8 @@ Módulo Departamento Pessoal — Folha de Pagamento, eSocial, Rescisão.
 import uuid
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+import calendar as _calendar
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
 
 try:
     from ..database import get_conn
@@ -1258,3 +1259,697 @@ def calcular_darf(competencia: str, current_user: Dict[str, Any] = Depends(get_c
         "periodo_apuracao": competencia,
         "vencimento": _next_business_day_last(next_y, next_m),
     }
+
+
+# ─── TABELAS FISCAIS ──────────────────────────────────────────────────────────
+
+@router.get("/tax-tables")
+def list_tax_tables(ano: Optional[int] = None, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    where = "company_id = ?"
+    params: List[Any] = [company_id]
+    if ano:
+        where += " AND ano = ?"
+        params.append(ano)
+    tables = rows_to_dicts(conn.execute(f"SELECT * FROM tax_tables WHERE {where} ORDER BY ano DESC, tipo", params).fetchall())
+    for t in tables:
+        t["brackets"] = rows_to_dicts(conn.execute("SELECT * FROM tax_brackets WHERE tax_table_id = ? ORDER BY faixa_de", (t["id"],)).fetchall())
+    conn.close()
+    return tables
+
+
+@router.get("/tax-tables/vigente/{ano}")
+def tax_tables_vigente(ano: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    rows = rows_to_dicts(conn.execute(
+        "SELECT * FROM tax_tables WHERE company_id=? AND ano<=? ORDER BY ano DESC",
+        (company_id, ano)
+    ).fetchall())
+    seen: Dict[str, bool] = {}
+    result = []
+    for t in rows:
+        if t["tipo"] not in seen:
+            seen[t["tipo"]] = True
+            t["brackets"] = rows_to_dicts(conn.execute("SELECT * FROM tax_brackets WHERE tax_table_id=? ORDER BY faixa_de", (t["id"],)).fetchall())
+            result.append(t)
+    conn.close()
+    return result
+
+
+@router.post("/tax-tables", status_code=201)
+def create_tax_table(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    cur = conn.cursor()
+    cur.execute("INSERT INTO tax_tables (company_id, ano, tipo) VALUES (?,?,?)",
+                (company_id, data["ano"], data["tipo"]))
+    table_id = cur.lastrowid
+    for b in data.get("brackets", []):
+        cur.execute("INSERT INTO tax_brackets (tax_table_id, faixa_de, faixa_ate, aliquota, deducao) VALUES (?,?,?,?,?)",
+                    (table_id, b["faixa_de"], b.get("faixa_ate"), b["aliquota"], b.get("deducao", 0)))
+    conn.commit()
+    conn.close()
+    return {"id": table_id, "ok": True}
+
+
+@router.put("/tax-tables/{table_id}")
+def update_tax_table(table_id: int, data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    if not conn.execute("SELECT 1 FROM tax_tables WHERE id=? AND company_id=?", (table_id, company_id)).fetchone():
+        conn.close()
+        raise HTTPException(404, "Tabela não encontrada.")
+    conn.execute("DELETE FROM tax_brackets WHERE tax_table_id=?", (table_id,))
+    for b in data.get("brackets", []):
+        conn.execute("INSERT INTO tax_brackets (tax_table_id, faixa_de, faixa_ate, aliquota, deducao) VALUES (?,?,?,?,?)",
+                     (table_id, b["faixa_de"], b.get("faixa_ate"), b["aliquota"], b.get("deducao", 0)))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@router.delete("/tax-tables/{table_id}")
+def delete_tax_table(table_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    conn.execute("DELETE FROM tax_tables WHERE id=? AND company_id=?", (table_id, company_id))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+# ─── RUBRICAS ─────────────────────────────────────────────────────────────────
+
+def _insert_default_rubrics_dp(conn, company_id: int):
+    rubrics = [
+        ("0001","Salário Base","provento",1,1,1,1,1,"1000"),
+        ("0002","Hora Extra 50%","provento",1,1,1,1,1,"1010"),
+        ("0003","Hora Extra 100%","provento",1,1,1,1,1,"1010"),
+        ("0004","Adicional Noturno","provento",1,1,1,1,1,"1020"),
+        ("0005","Adicional de Insalubridade","provento",1,1,1,1,1,"1070"),
+        ("0006","Adicional de Periculosidade","provento",1,1,1,1,1,"1080"),
+        ("0007","Comissão","provento",1,1,1,1,1,"1030"),
+        ("0008","Férias Gozadas","provento",0,1,0,0,0,"2000"),
+        ("0009","1/3 Constitucional Férias","provento",0,1,0,0,0,"2010"),
+        ("0010","13º Salário","provento",1,1,1,0,0,"3000"),
+        ("0100","INSS Empregado","desconto",0,0,0,0,0,"9220"),
+        ("0101","IRRF","desconto",0,0,0,0,0,"9230"),
+        ("0102","Vale Transporte","desconto",0,0,0,0,0,"9999"),
+        ("0103","Vale Alimentação","desconto",0,0,0,0,0,"9999"),
+        ("0104","Pensão Alimentícia","desconto",0,0,0,0,0,"9999"),
+        ("0105","Adiantamento de Salário","desconto",0,0,0,0,0,"9999"),
+        ("0200","FGTS (informativo)","informativo",0,0,0,0,0,"9000"),
+        ("0201","Base de Cálculo INSS","informativo",0,0,0,0,0,"9100"),
+        ("0202","Base de Cálculo IRRF","informativo",0,0,0,0,0,"9110"),
+        ("0203","Base de Cálculo FGTS","informativo",0,0,0,0,0,"9120"),
+    ]
+    for r in rubrics:
+        conn.execute("""INSERT INTO payroll_rubrics (company_id,codigo,nome,tipo,incide_inss,incide_irrf,incide_fgts,incide_13,incide_ferias,esocial_nat_rubrica,ativo)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,1)""",
+                     (company_id, r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8]))
+
+
+@router.get("/rubrics")
+def list_rubrics(current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    rows = rows_to_dicts(conn.execute("SELECT * FROM payroll_rubrics WHERE company_id=? ORDER BY codigo", (company_id,)).fetchall())
+    conn.close()
+    return rows
+
+
+@router.post("/rubrics/seed-default", status_code=201)
+def seed_default_rubrics(current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    count = conn.execute("SELECT COUNT(*) FROM payroll_rubrics WHERE company_id=?", (company_id,)).fetchone()[0]
+    if count > 0:
+        conn.close()
+        return {"ok": True, "message": "Rubricas já cadastradas."}
+    _insert_default_rubrics_dp(conn, company_id)
+    conn.commit()
+    conn.close()
+    return {"ok": True, "created": True}
+
+
+@router.post("/rubrics", status_code=201)
+def create_rubric(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    cur = conn.cursor()
+    cur.execute("""INSERT INTO payroll_rubrics (company_id,codigo,nome,tipo,natureza,incide_inss,incide_irrf,incide_fgts,incide_13,incide_ferias,esocial_cod_rubrica,esocial_nat_rubrica,ativo)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1)""",
+                (company_id, data["codigo"], data["nome"], data.get("tipo","provento"), data.get("natureza","normal"),
+                 int(data.get("incide_inss",1)), int(data.get("incide_irrf",1)), int(data.get("incide_fgts",1)),
+                 int(data.get("incide_13",1)), int(data.get("incide_ferias",1)),
+                 data.get("esocial_cod_rubrica",""), data.get("esocial_nat_rubrica","1000")))
+    conn.commit()
+    new_id = cur.lastrowid
+    conn.close()
+    return {"id": new_id, "ok": True}
+
+
+@router.put("/rubrics/{rubric_id}")
+def update_rubric(rubric_id: int, data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    fields = []
+    vals: List[Any] = []
+    for f in ["codigo","nome","tipo","natureza","incide_inss","incide_irrf","incide_fgts","incide_13","incide_ferias","esocial_cod_rubrica","esocial_nat_rubrica","ativo"]:
+        if f in data:
+            fields.append(f"{f}=?")
+            vals.append(int(data[f]) if f.startswith("incide") or f=="ativo" else data[f])
+    if fields:
+        vals += [rubric_id, company_id]
+        conn.execute(f"UPDATE payroll_rubrics SET {','.join(fields)} WHERE id=? AND company_id=?", vals)
+        conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@router.delete("/rubrics/{rubric_id}")
+def delete_rubric(rubric_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    conn.execute("DELETE FROM payroll_rubrics WHERE id=? AND company_id=?", (rubric_id, company_id))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@router.get("/esocial/s1010")
+def gerar_s1010_rubrics(ano: int = 2025, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    rubrics = rows_to_dicts(conn.execute("SELECT * FROM payroll_rubrics WHERE company_id=? AND ativo=1 ORDER BY codigo", (company_id,)).fetchall())
+    company = conn.execute("SELECT * FROM companies WHERE id=?", (company_id,)).fetchone()
+    conn.close()
+    if not company:
+        raise HTTPException(404, "Empresa não encontrada.")
+    company = dict(company)
+    cnpj = (company.get("cnpj") or "").replace(".", "").replace("/", "").replace("-", "")
+    cnpj8 = cnpj[:8]
+    per_apur = f"{ano}-01"
+    tipo_map = {"provento": "1", "desconto": "3", "informativo": "4", "reserva": "5"}
+    linhas = []
+    for r in rubrics:
+        linhas.append(f"""    <infoRubrica>
+      <inclusao>
+        <ideRubrica><codRubr>{r['codigo']}</codRubr><ideTabRubr>{company_id}</ideTabRubr><iniValid>{per_apur}</iniValid></ideRubrica>
+        <dadosRubrica>
+          <dscRubr>{r['nome']}</dscRubr>
+          <natRubr>{r['esocial_nat_rubrica']}</natRubr>
+          <tpRubr>{tipo_map.get(r['tipo'],'1')}</tpRubr>
+          <codIncCP>{'1' if r['incide_inss'] else '0'}</codIncCP>
+          <codIncIRRF>{'1' if r['incide_irrf'] else '0'}</codIncIRRF>
+          <codIncFGTS>{'1' if r['incide_fgts'] else '0'}</codIncFGTS>
+        </dadosRubrica>
+      </inclusao>
+    </infoRubrica>""")
+    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<eSocial xmlns="http://www.esocial.gov.br/schema/evt/evtTabRubrica/v02_05_00">
+  <evtTabRubrica Id="ID1{cnpj8}{per_apur.replace('-','')}">
+    <ideEvento>
+      <nrRec/><indRetif>1</indRetif><perApur>{per_apur}</perApur>
+      <tpAmb>1</tpAmb><procEmi>1</procEmi><verProc>1.0</verProc>
+    </ideEvento>
+    <ideEmpregador><tpInsc>1</tpInsc><nrInsc>{cnpj8}</nrInsc></ideEmpregador>
+{chr(10).join(linhas)}
+  </evtTabRubrica>
+</eSocial>"""
+    return Response(content=xml, media_type="application/xml",
+                    headers={"Content-Disposition": f'attachment; filename="S-1010-{ano}.xml"'})
+
+
+# ─── ESOCIAL PERIÓDICO ────────────────────────────────────────────────────────
+
+@router.get("/payroll/items")
+def list_payroll_items_by_comp(competencia: str = Query(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    items = rows_to_dicts(conn.execute("""
+        SELECT pi.*, e.name as employee_name, e.cpf, e.pis_pasep, e.cbo
+        FROM payroll_items pi
+        JOIN payroll_runs pr ON pr.id=pi.run_id
+        JOIN employees e ON e.id=pi.employee_id
+        WHERE pr.company_id=? AND pr.competence=?
+        ORDER BY e.name
+    """, (company_id, competencia)).fetchall())
+    conn.close()
+    return items
+
+
+@router.get("/esocial/s1200/{competencia}/todos")
+def gerar_s1200_todos(competencia: str, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    company = dict(conn.execute("SELECT * FROM companies WHERE id=?", (company_id,)).fetchone() or {})
+    cnpj = (company.get("cnpj") or "").replace(".","").replace("/","").replace("-","")
+    items = rows_to_dicts(conn.execute("""
+        SELECT pi.*, e.name, e.cpf, e.pis_pasep, e.cbo
+        FROM payroll_items pi
+        JOIN payroll_runs pr ON pr.id=pi.run_id
+        JOIN employees e ON e.id=pi.employee_id
+        WHERE pr.company_id=? AND pr.competence=?
+    """, (company_id, competencia)).fetchall())
+    conn.close()
+    if not items:
+        raise HTTPException(404, "Nenhum item de folha encontrado para esta competência.")
+    xmls = []
+    for it in items:
+        verbas = f"""          <detVerbas><codRubr>0001</codRubr><ideTabRubr>{company_id}</ideTabRubr><qtdRubr>1</qtdRubr><vrRubr>{float(it.get('gross_salary',0)):.2f}</vrRubr></detVerbas>
+          <detVerbas><codRubr>0100</codRubr><ideTabRubr>{company_id}</ideTabRubr><qtdRubr>1</qtdRubr><vrRubr>{float(it.get('inss',0)):.2f}</vrRubr></detVerbas>
+          <detVerbas><codRubr>0101</codRubr><ideTabRubr>{company_id}</ideTabRubr><qtdRubr>1</qtdRubr><vrRubr>{float(it.get('irrf',0)):.2f}</vrRubr></detVerbas>"""
+        xmls.append(f"""<?xml version="1.0" encoding="UTF-8"?>
+<eSocial xmlns="http://www.esocial.gov.br/schema/evt/evtRemun/v02_01_00">
+  <evtRemun Id="ID1{cnpj[:8]}{competencia.replace('-','')}E{it.get('employee_id',0)}">
+    <ideEvento><indRetif>1</indRetif><nrRec/><perApur>{competencia}</perApur><indGuia>1</indGuia><tpAmb>1</tpAmb><procEmi>1</procEmi><verProc>1.0</verProc></ideEvento>
+    <ideEmpregador><tpInsc>1</tpInsc><nrInsc>{cnpj}</nrInsc></ideEmpregador>
+    <ideTrab><cpfTrab>{it.get('cpf','')}</cpfTrab><nisTrab>{it.get('pis_pasep','')}</nisTrab><codCateg>101</codCateg></ideTrab>
+    <dmDev><codDmDev>1</codDmDev><indRRA>N</indRRA>
+      <infoPerApur><ideEstabLot><tpInsc>1</tpInsc><nrInsc>{cnpj}</nrInsc><codLotacao>1</codLotacao>
+{verbas}
+      </ideEstabLot></infoPerApur>
+      <infoComplCont><codCBO>{it.get('cbo','111105')}</codCBO><natAtividade>1</natAtividade><qtdDiasAv>30</qtdDiasAv></infoComplCont>
+    </dmDev>
+  </evtRemun>
+</eSocial>""")
+    combined = "\n<!-- === PRÓXIMO EVENTO === -->\n".join(xmls)
+    return Response(content=combined, media_type="application/xml",
+                    headers={"Content-Disposition": f'attachment; filename="S-1200-{competencia}-todos.xml"'})
+
+
+@router.get("/esocial/s1200/{competencia}/{emp_id}")
+def gerar_s1200_emp(competencia: str, emp_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    company = dict(conn.execute("SELECT * FROM companies WHERE id=?", (company_id,)).fetchone() or {})
+    cnpj = (company.get("cnpj") or "").replace(".","").replace("/","").replace("-","")
+    it = conn.execute("""
+        SELECT pi.*, e.name, e.cpf, e.pis_pasep, e.cbo
+        FROM payroll_items pi
+        JOIN payroll_runs pr ON pr.id=pi.run_id
+        JOIN employees e ON e.id=pi.employee_id
+        WHERE pr.company_id=? AND pr.competence=? AND pi.employee_id=?
+    """, (company_id, competencia, emp_id)).fetchone()
+    conn.close()
+    if not it:
+        raise HTTPException(404, "Item não encontrado.")
+    it = dict(it)
+    verbas = f"""          <detVerbas><codRubr>0001</codRubr><ideTabRubr>{company_id}</ideTabRubr><qtdRubr>1</qtdRubr><vrRubr>{float(it.get('gross_salary',0)):.2f}</vrRubr></detVerbas>
+          <detVerbas><codRubr>0100</codRubr><ideTabRubr>{company_id}</ideTabRubr><qtdRubr>1</qtdRubr><vrRubr>{float(it.get('inss',0)):.2f}</vrRubr></detVerbas>
+          <detVerbas><codRubr>0101</codRubr><ideTabRubr>{company_id}</ideTabRubr><qtdRubr>1</qtdRubr><vrRubr>{float(it.get('irrf',0)):.2f}</vrRubr></detVerbas>"""
+    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<eSocial xmlns="http://www.esocial.gov.br/schema/evt/evtRemun/v02_01_00">
+  <evtRemun Id="ID1{cnpj[:8]}{competencia.replace('-','')}E{emp_id}">
+    <ideEvento><indRetif>1</indRetif><nrRec/><perApur>{competencia}</perApur><indGuia>1</indGuia><tpAmb>1</tpAmb><procEmi>1</procEmi><verProc>1.0</verProc></ideEvento>
+    <ideEmpregador><tpInsc>1</tpInsc><nrInsc>{cnpj}</nrInsc></ideEmpregador>
+    <ideTrab><cpfTrab>{it.get('cpf','')}</cpfTrab><nisTrab>{it.get('pis_pasep','')}</nisTrab><codCateg>101</codCateg></ideTrab>
+    <dmDev><codDmDev>1</codDmDev><indRRA>N</indRRA>
+      <infoPerApur><ideEstabLot><tpInsc>1</tpInsc><nrInsc>{cnpj}</nrInsc><codLotacao>1</codLotacao>
+{verbas}
+      </ideEstabLot></infoPerApur>
+      <infoComplCont><codCBO>{it.get('cbo','111105')}</codCBO><natAtividade>1</natAtividade><qtdDiasAv>30</qtdDiasAv></infoComplCont>
+    </dmDev>
+  </evtRemun>
+</eSocial>"""
+    return Response(content=xml, media_type="application/xml",
+                    headers={"Content-Disposition": f'attachment; filename="S-1200-{competencia}-E{emp_id}.xml"'})
+
+
+@router.get("/esocial/s1299/{competencia}")
+def gerar_s1299(competencia: str, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    company = dict(conn.execute("SELECT * FROM companies WHERE id=?", (company_id,)).fetchone() or {})
+    conn.close()
+    cnpj = (company.get("cnpj") or "").replace(".","").replace("/","").replace("-","")
+    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<eSocial xmlns="http://www.esocial.gov.br/schema/evt/evtFechamento/v01_01_00">
+  <evtFechamento Id="ID1{cnpj[:8]}{competencia.replace('-','')}FEC">
+    <ideEvento><indRetif>1</indRetif><nrRec/><perApur>{competencia}</perApur><tpAmb>1</tpAmb><procEmi>1</procEmi><verProc>1.0</verProc></ideEvento>
+    <ideEmpregador><tpInsc>1</tpInsc><nrInsc>{cnpj}</nrInsc></ideEmpregador>
+    <infoFechamento><situFolha>1</situFolha><compSemMovto>N</compSemMovto></infoFechamento>
+  </evtFechamento>
+</eSocial>"""
+    return Response(content=xml, media_type="application/xml",
+                    headers={"Content-Disposition": f'attachment; filename="S-1299-{competencia}.xml"'})
+
+
+@router.post("/esocial/periodic/mark-sent")
+def mark_esocial_sent(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    competencia = data["competencia"]
+    evento = data["evento"]
+    nr_rec = data.get("nr_rec", "")
+    existing = conn.execute(
+        "SELECT id FROM esocial_periodic_events WHERE company_id=? AND competencia=? AND evento=? AND employee_id IS NULL",
+        (company_id, competencia, evento)
+    ).fetchone()
+    if existing:
+        conn.execute("UPDATE esocial_periodic_events SET status='transmitido', nr_rec=? WHERE id=?", (nr_rec, existing["id"]))
+    else:
+        conn.execute("""INSERT INTO esocial_periodic_events (company_id,competencia,evento,status,nr_rec)
+                        VALUES (?,?,?,'transmitido',?)""", (company_id, competencia, evento, nr_rec))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@router.get("/esocial/periodic/status")
+def esocial_periodic_status(competencia: str = Query(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    rows = rows_to_dicts(conn.execute(
+        "SELECT * FROM esocial_periodic_events WHERE company_id=? AND competencia=?",
+        (company_id, competencia)
+    ).fetchall())
+    conn.close()
+    return rows
+
+
+# ─── SEFIP/GFIP ──────────────────────────────────────────────────────────────
+
+@router.get("/sefip/{competencia}")
+def calcular_sefip(competencia: str, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    items = rows_to_dicts(conn.execute("""
+        SELECT pi.*, e.name, e.cpf, e.pis_pasep, e.admission_date, e.birth_date
+        FROM payroll_items pi
+        JOIN payroll_runs pr ON pr.id=pi.run_id
+        JOIN employees e ON e.id=pi.employee_id
+        WHERE pr.company_id=? AND pr.competence=?
+    """, (company_id, competencia)).fetchall())
+    conn.close()
+    total_trab = len(items)
+    total_rem = sum(float(i.get("gross_salary") or 0) for i in items)
+    total_fgts = sum(float(i.get("fgts") or 0) for i in items) or round(total_rem * 0.08, 2)
+    total_inss_emp = sum(float(i.get("inss") or 0) for i in items)
+    patronal = round(total_rem * 0.20, 2)
+    rat = round(total_rem * 0.03, 2)
+    terceiros = round(total_rem * 0.058, 2)
+    total_gps = round(total_inss_emp + patronal + rat + terceiros, 2)
+    return {
+        "competencia": competencia,
+        "total_trabalhadores": total_trab,
+        "total_remuneracao": round(total_rem, 2),
+        "total_fgts": total_fgts,
+        "total_inss_emp": total_inss_emp,
+        "total_inss_patronal": patronal,
+        "total_rat": rat,
+        "total_terceiros": terceiros,
+        "total_gps": total_gps,
+        "fpas": "515",
+        "cod_terceiros": "0001",
+        "funcionarios": items,
+    }
+
+
+@router.get("/sefip/{competencia}/arquivo")
+def sefip_arquivo(competencia: str, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    company = dict(conn.execute("SELECT * FROM companies WHERE id=?", (company_id,)).fetchone() or {})
+    items = rows_to_dicts(conn.execute("""
+        SELECT pi.*, e.name, e.cpf, e.pis_pasep, e.admission_date, e.birth_date
+        FROM payroll_items pi
+        JOIN payroll_runs pr ON pr.id=pi.run_id
+        JOIN employees e ON e.id=pi.employee_id
+        WHERE pr.company_id=? AND pr.competence=?
+    """, (company_id, competencia)).fetchall())
+    conn.close()
+    cnpj = (company.get("cnpj") or "").replace(".","").replace("/","").replace("-","")
+    comp_fmt = competencia[5:7] + competencia[:4]
+    lines = []
+    total_rem = 0.0
+    total_fgts_sum = 0.0
+    total_inss_emp = 0.0
+    lines.append(f"00{cnpj:<14}0{comp_fmt}515000115")
+    for it in items:
+        cpf = (it.get("cpf") or "").replace(".","").replace("-","")
+        pis = (it.get("pis_pasep") or "").replace(".","").replace("-","")
+        nome = (it.get("name") or "")[:40].ljust(40)
+        adm = (it.get("admission_date") or "").replace("-","")
+        nasc = (it.get("birth_date") or "").replace("-","")
+        rem = float(it.get("gross_salary") or 0)
+        fgts = float(it.get("fgts") or 0) or round(rem * 0.08, 2)
+        inss = float(it.get("inss") or 0)
+        total_rem += rem
+        total_fgts_sum += fgts
+        total_inss_emp += inss
+        lines.append(f"10{cpf:<11}{pis:<11}{nome}01{adm:<8}{nasc:<8}{rem:013.2f}{fgts:013.2f}")
+    patronal = round(total_rem * 0.20, 2)
+    rat = round(total_rem * 0.03, 2)
+    terceiros = round(total_rem * 0.058, 2)
+    lines.append(f"90{len(items):05d}{total_rem:015.2f}{total_fgts_sum:015.2f}{total_inss_emp:015.2f}{patronal:015.2f}{rat:015.2f}{terceiros:015.2f}")
+    content = "\r\n".join(lines) + "\r\n"
+    return Response(content=content, media_type="text/plain",
+                    headers={"Content-Disposition": f'attachment; filename="SEFIP-{competencia}.txt"'})
+
+
+# ─── EFD-REINF ───────────────────────────────────────────────────────────────
+
+@router.get("/reinf/tomadores")
+def list_reinf_tomadores(competencia: Optional[str] = None, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    where = "company_id=?"
+    params: List[Any] = [company_id]
+    if competencia:
+        where += " AND competencia=?"
+        params.append(competencia)
+    rows = rows_to_dicts(conn.execute(f"SELECT * FROM reinf_service_takers WHERE {where} ORDER BY razao_social", params).fetchall())
+    conn.close()
+    return rows
+
+
+@router.post("/reinf/tomadores", status_code=201)
+def create_reinf_tomador(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    cur = conn.cursor()
+    cur.execute("""INSERT INTO reinf_service_takers (company_id,tipo_insc,nr_insc,razao_social,tipo_servico,valor_bruto,valor_bc_ret,valor_irrf,valor_csll,valor_pis,valor_cofins,competencia)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (company_id, data.get("tipo_insc","cnpj"), data["nr_insc"], data["razao_social"],
+                 data.get("tipo_servico","0001"), float(data.get("valor_bruto",0)), float(data.get("valor_bc_ret",0)),
+                 float(data.get("valor_irrf",0)), float(data.get("valor_csll",0)),
+                 float(data.get("valor_pis",0)), float(data.get("valor_cofins",0)), data["competencia"]))
+    conn.commit()
+    new_id = cur.lastrowid
+    conn.close()
+    return {"id": new_id, "ok": True}
+
+
+@router.put("/reinf/tomadores/{tom_id}")
+def update_reinf_tomador(tom_id: int, data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    fields = []
+    vals: List[Any] = []
+    for f in ["tipo_insc","nr_insc","razao_social","tipo_servico","valor_bruto","valor_bc_ret","valor_irrf","valor_csll","valor_pis","valor_cofins","competencia"]:
+        if f in data:
+            fields.append(f"{f}=?")
+            vals.append(data[f])
+    if fields:
+        vals += [tom_id, company_id]
+        conn.execute(f"UPDATE reinf_service_takers SET {','.join(fields)} WHERE id=? AND company_id=?", vals)
+        conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@router.delete("/reinf/tomadores/{tom_id}")
+def delete_reinf_tomador(tom_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    conn.execute("DELETE FROM reinf_service_takers WHERE id=? AND company_id=?", (tom_id, company_id))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@router.get("/reinf/r1000")
+def gerar_r1000(current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    company = dict(conn.execute("SELECT * FROM companies WHERE id=?", (company_id,)).fetchone() or {})
+    conn.close()
+    cnpj = (company.get("cnpj") or "").replace(".","").replace("/","").replace("-","")
+    per = date.today().strftime("%Y-%m")
+    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Reinf xmlns="http://www.reinf.esocial.gov.br/schemas/evtInfoContribuinte/v2_01_01">
+  <evtInfoContri Id="R{cnpj}{per.replace('-','')}">
+    <ideEvento><indRetif>1</indRetif><perApur>{per}</perApur><tpAmb>1</tpAmb><procEmi>1</procEmi><verProc>1.0</verProc></ideEvento>
+    <ideContri><tpInsc>1</tpInsc><nrInsc>{cnpj}</nrInsc></ideContri>
+    <infoContri>
+      <inclusao>
+        <idePeriodo><iniValid>{per}</iniValid></idePeriodo>
+        <infoCadastro>
+          <classTrib>01</classTrib><indEscrituracao>1</indEscrituracao>
+          <indDesoneracao>N</indDesoneracao><indAcordoIsenIsento>N</indAcordoIsenIsento>
+          <contato>
+            <nmCtt>{company.get('razao_social','Empresa')}</nmCtt>
+            <cpfCtt>00000000000</cpfCtt>
+            <fone>{company.get('telefone','')}</fone>
+            <email>{company.get('email','')}</email>
+          </contato>
+        </infoCadastro>
+      </inclusao>
+    </infoContri>
+  </evtInfoContri>
+</Reinf>"""
+    return Response(content=xml, media_type="application/xml",
+                    headers={"Content-Disposition": 'attachment; filename="R-1000.xml"'})
+
+
+@router.get("/reinf/r2010/{competencia}")
+def gerar_r2010(competencia: str, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    company = dict(conn.execute("SELECT * FROM companies WHERE id=?", (company_id,)).fetchone() or {})
+    takers = rows_to_dicts(conn.execute(
+        "SELECT * FROM reinf_service_takers WHERE company_id=? AND competencia=? ORDER BY razao_social",
+        (company_id, competencia)
+    ).fetchall())
+    conn.close()
+    cnpj = (company.get("cnpj") or "").replace(".","").replace("/","").replace("-","")
+    estabs = []
+    for t in takers:
+        nr = t["nr_insc"].replace(".","").replace("/","").replace("-","")
+        estabs.append(f"""    <ideEstabObra>
+      <tpInscEstab>1</tpInscEstab><nrInscEstab>{nr}</nrInscEstab>
+      <infoServ><tpSrv>{t['tipo_servico']}</tpSrv>
+        <vlrServContratado>{float(t.get('valor_bruto',0)):.2f}</vlrServContratado>
+        <vlrServPrestado>{float(t.get('valor_bruto',0)):.2f}</vlrServPrestado>
+        <vlrBC>{float(t.get('valor_bc_ret',0)):.2f}</vlrBC>
+        <vlrRetencao>{float(t.get('valor_irrf',0)):.2f}</vlrRetencao>
+      </infoServ>
+    </ideEstabObra>""")
+    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Reinf xmlns="http://www.reinf.esocial.gov.br/schemas/evtServTom/v2_01_01">
+  <evtServTom Id="R{cnpj}{competencia.replace('-','')}2010">
+    <ideEvento><indRetif>1</indRetif><perApur>{competencia}</perApur><tpAmb>1</tpAmb><procEmi>1</procEmi><verProc>1.0</verProc></ideEvento>
+    <ideContri><tpInsc>1</tpInsc><nrInsc>{cnpj}</nrInsc></ideContri>
+    <infoServ><evtServTomado>
+{chr(10).join(estabs) if estabs else '      <!-- Sem tomadores neste período -->'}
+    </evtServTomado></infoServ>
+  </evtServTom>
+</Reinf>"""
+    return Response(content=xml, media_type="application/xml",
+                    headers={"Content-Disposition": f'attachment; filename="R-2010-{competencia}.xml"'})
+
+
+@router.get("/reinf/r4010/{competencia}")
+def gerar_r4010(competencia: str, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    company = dict(conn.execute("SELECT * FROM companies WHERE id=?", (company_id,)).fetchone() or {})
+    items = rows_to_dicts(conn.execute("""
+        SELECT pi.*, e.name, e.cpf
+        FROM payroll_items pi
+        JOIN payroll_runs pr ON pr.id=pi.run_id
+        JOIN employees e ON e.id=pi.employee_id
+        WHERE pr.company_id=? AND pr.competence=? AND pi.irrf > 0
+    """, (company_id, competencia)).fetchall())
+    conn.close()
+    cnpj = (company.get("cnpj") or "").replace(".","").replace("/","").replace("-","")
+    ano, mes = int(competencia[:4]), int(competencia[5:7])
+    last_day = _calendar.monthrange(ano, mes)[1]
+    dt_fg = f"{ano}-{mes:02d}-{last_day:02d}"
+    benefs = []
+    for it in items:
+        cpf = (it.get("cpf") or "").replace(".","").replace("-","")
+        benefs.append(f"""      <ideEstab><tpInscEstab>1</tpInscEstab><nrInscEstab>{cnpj}</nrInscEstab>
+        <ideBenef>
+          <cpfBenef>{cpf}</cpfBenef><nmBenef>{it.get('name','')}</nmBenef>
+          <infoPgto>
+            <dtFG>{dt_fg}</dtFG><tpPgto>11</tpPgto>
+            <vlrRendBruto>{float(it.get('gross_salary',0)):.2f}</vlrRendBruto>
+            <vlrRendTrib>{float(it.get('gross_salary',0)):.2f}</vlrRendTrib>
+            <vlrIR>{float(it.get('irrf',0)):.2f}</vlrIR><indRRA>N</indRRA>
+          </infoPgto>
+        </ideBenef>
+      </ideEstab>""")
+    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Reinf xmlns="http://www.reinf.esocial.gov.br/schemas/evtRetPF/v2_01_01">
+  <evtRetPF Id="R{cnpj}{competencia.replace('-','')}4010">
+    <ideEvento><indRetif>1</indRetif><perApur>{competencia}</perApur><tpAmb>1</tpAmb><procEmi>1</procEmi><verProc>1.0</verProc></ideEvento>
+    <ideContri><tpInsc>1</tpInsc><nrInsc>{cnpj}</nrInsc></ideContri>
+    <evtPgto>
+{chr(10).join(benefs) if benefs else '      <!-- Sem pagamentos com retenção neste período -->'}
+    </evtPgto>
+  </evtRetPF>
+</Reinf>"""
+    return Response(content=xml, media_type="application/xml",
+                    headers={"Content-Disposition": f'attachment; filename="R-4010-{competencia}.xml"'})
+
+
+@router.get("/reinf/r4020/{competencia}")
+def gerar_r4020(competencia: str, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    company = dict(conn.execute("SELECT * FROM companies WHERE id=?", (company_id,)).fetchone() or {})
+    takers = rows_to_dicts(conn.execute(
+        "SELECT * FROM reinf_service_takers WHERE company_id=? AND competencia=? AND tipo_insc='cnpj'",
+        (company_id, competencia)
+    ).fetchall())
+    conn.close()
+    cnpj = (company.get("cnpj") or "").replace(".","").replace("/","").replace("-","")
+    ano, mes = int(competencia[:4]), int(competencia[5:7])
+    last_day = _calendar.monthrange(ano, mes)[1]
+    dt_fg = f"{ano}-{mes:02d}-{last_day:02d}"
+    pgtos = []
+    for t in takers:
+        nr = t["nr_insc"].replace(".","").replace("/","").replace("-","")
+        pgtos.append(f"""      <ideEstab><tpInscEstab>1</tpInscEstab><nrInscEstab>{cnpj}</nrInscEstab>
+        <ideBenef>
+          <cnpjBenef>{nr}</cnpjBenef><nmBenef>{t['razao_social']}</nmBenef>
+          <infoPgto>
+            <dtFG>{dt_fg}</dtFG><tpPgto>12</tpPgto>
+            <vlrRendBruto>{float(t.get('valor_bruto',0)):.2f}</vlrRendBruto>
+            <vlrRendTrib>{float(t.get('valor_bc_ret',0)):.2f}</vlrRendTrib>
+            <vlrIR>{float(t.get('valor_irrf',0)):.2f}</vlrIR>
+            <vlrCSLL>{float(t.get('valor_csll',0)):.2f}</vlrCSLL>
+            <vlrPIS>{float(t.get('valor_pis',0)):.2f}</vlrPIS>
+            <vlrCOFINS>{float(t.get('valor_cofins',0)):.2f}</vlrCOFINS>
+          </infoPgto>
+        </ideBenef>
+      </ideEstab>""")
+    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Reinf xmlns="http://www.reinf.esocial.gov.br/schemas/evtRetPJ/v2_01_01">
+  <evtRetPJ Id="R{cnpj}{competencia.replace('-','')}4020">
+    <ideEvento><indRetif>1</indRetif><perApur>{competencia}</perApur><tpAmb>1</tpAmb><procEmi>1</procEmi><verProc>1.0</verProc></ideEvento>
+    <ideContri><tpInsc>1</tpInsc><nrInsc>{cnpj}</nrInsc></ideContri>
+    <evtPgto>
+{chr(10).join(pgtos) if pgtos else '      <!-- Sem pagamentos a PJ neste período -->'}
+    </evtPgto>
+  </evtRetPJ>
+</Reinf>"""
+    return Response(content=xml, media_type="application/xml",
+                    headers={"Content-Disposition": f'attachment; filename="R-4020-{competencia}.xml"'})
+
+
+@router.get("/reinf/r4099/{competencia}")
+def gerar_r4099(competencia: str, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    company = dict(conn.execute("SELECT * FROM companies WHERE id=?", (company_id,)).fetchone() or {})
+    conn.close()
+    cnpj = (company.get("cnpj") or "").replace(".","").replace("/","").replace("-","")
+    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Reinf xmlns="http://www.reinf.esocial.gov.br/schemas/evtFechamento/v2_01_01">
+  <evtFech Id="R{cnpj}{competencia.replace('-','')}4099">
+    <ideEvento><indRetif>1</indRetif><perApur>{competencia}</perApur><tpAmb>1</tpAmb><procEmi>1</procEmi><verProc>1.0</verProc></ideEvento>
+    <ideContri><tpInsc>1</tpInsc><nrInsc>{cnpj}</nrInsc></ideContri>
+    <infoFech>
+      <evtR2010>S</evtR2010><evtR4010>S</evtR4010><evtR4020>S</evtR4020>
+      <indApuracao>1</indApuracao>
+    </infoFech>
+  </evtFech>
+</Reinf>"""
+    return Response(content=xml, media_type="application/xml",
+                    headers={"Content-Disposition": f'attachment; filename="R-4099-{competencia}.xml"'})

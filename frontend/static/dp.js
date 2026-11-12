@@ -49,6 +49,11 @@ function dpTabs() {
     { id: 'cargos',       icon: 'briefcase',       label: 'Cargos & Depts' },
     { id: 'historico',    icon: 'trending-up',     label: 'Histórico Salarial' },
     { id: 'obrigacoes',   icon: 'file-check',      label: 'Obrigações' },
+    { id: 'tabelas_fiscais',   icon: 'percent',      label: 'Tabelas Fiscais' },
+    { id: 'rubricas',          icon: 'list-checks',  label: 'Rubricas' },
+    { id: 'esocial_periodico', icon: 'send',         label: 'eSocial Periódico' },
+    { id: 'sefip',             icon: 'building-2',   label: 'SEFIP/GFIP' },
+    { id: 'efd_reinf',         icon: 'file-code-2',  label: 'EFD-Reinf' },
   ];
   return `<div class="flex gap-1 overflow-x-auto pb-1 flex-wrap">
     ${tabs.map(t => `
@@ -104,6 +109,11 @@ async function switchDpTab(tab, noRebuildTabs = false) {
     case 'cargos':       await renderCargos(body); break;
     case 'historico':    await renderHistoricoSalarial(body); break;
     case 'obrigacoes':   renderObrigacoes(body); break;
+    case 'tabelas_fiscais':    await renderTabelasFiscais(body); break;
+    case 'rubricas':           await renderRubricas(body); break;
+    case 'esocial_periodico':  await renderEsocialPeriodico(body); break;
+    case 'sefip':              await renderSefip(body); break;
+    case 'efd_reinf':          await renderEfdReinf(body); break;
   }
   if (window.lucide) lucide.createIcons();
 }
@@ -2270,4 +2280,516 @@ function obrigExportJSON() {
   a.download = 'cortex_obrigacao.json';
   a.click();
   URL.revokeObjectURL(url);
+}
+
+// ── TABELAS FISCAIS ──────────────────────────────────────────────────────────
+async function renderTabelasFiscais(el) {
+  const today = new Date();
+  const ano = today.getFullYear();
+  el.innerHTML = `
+    <div class="page-header">
+      <div>
+        <h2 style="font-family:var(--font-display);font-size:1.4rem;font-weight:700;color:var(--text);margin:0">Tabelas Fiscais</h2>
+        <p style="font-size:.8rem;color:var(--muted);margin:.25rem 0 0">INSS, IRRF, FGTS e Salário Mínimo vigentes</p>
+      </div>
+      <div class="d-flex gap-2">
+        <input type="number" id="tfAno" class="form-control" style="width:100px" value="${ano}">
+        <button class="btn btn-secondary" onclick="window.tfLoadTables()">Buscar</button>
+        <button class="btn btn-primary" onclick="window.tfImportDefault()">Importar ${ano}</button>
+      </div>
+    </div>
+    <div id="tfResult"></div>`;
+
+  window.tfLoadTables = async () => {
+    const a = document.getElementById('tfAno').value || ano;
+    const res = document.getElementById('tfResult');
+    try {
+      const rows = await apiFetch(`/api/dp/tax-tables?ano=${a}`);
+      if (!rows.length) { res.innerHTML = '<p class="text-muted text-center py-6">Nenhuma tabela encontrada. Clique em "Importar" para carregar as tabelas padrão.</p>'; return; }
+      const tipoLabel = { INSS:'INSS 2025', IRRF:'IRRF 2025', FGTS:'FGTS', SALARIO_MINIMO:'Salário Mínimo' };
+      res.innerHTML = rows.map(t => `
+        <div class="card mb-4">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <strong>${tipoLabel[t.tipo] || t.tipo} — ${t.ano}</strong>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-sm mb-0">
+              <thead><tr>
+                ${t.tipo === 'SALARIO_MINIMO' ? '<th>Valor</th>' : '<th>Faixa De</th><th>Faixa Até</th><th>Alíquota (%)</th><th>Dedução (R$)</th>'}
+              </tr></thead>
+              <tbody>
+                ${(t.brackets||[]).map(b => t.tipo === 'SALARIO_MINIMO'
+                  ? `<tr><td>R$ ${Number(b.aliquota).toFixed(2)}</td></tr>`
+                  : `<tr><td>R$ ${Number(b.faixa_de).toFixed(2)}</td><td>${b.faixa_ate ? 'R$ '+Number(b.faixa_ate).toFixed(2) : 'Acima'}</td><td>${Number(b.aliquota).toFixed(2)}%</td><td>R$ ${Number(b.deducao||0).toFixed(2)}</td></tr>`
+                ).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>`).join('');
+    } catch(e) { res.innerHTML = `<div class="alert alert-danger">Erro: ${e.message}</div>`; }
+  };
+
+  window.tfImportDefault = async () => {
+    const a = document.getElementById('tfAno').value || ano;
+    try {
+      await apiFetch(`/api/dp/tax-tables`, { method:'POST', body: JSON.stringify({ ano: parseInt(a), tipo: 'IMPORT_DEFAULT', brackets: [] }) });
+      showToast(`Tabelas ${a} importadas.`, 'success');
+      window.tfLoadTables();
+    } catch(e) { showToast('Erro: ' + e.message, 'error'); }
+  };
+
+  await window.tfLoadTables();
+}
+
+// ── RUBRICAS ─────────────────────────────────────────────────────────────────
+async function renderRubricas(el) {
+  el.innerHTML = `
+    <div class="page-header">
+      <div>
+        <h2 style="font-family:var(--font-display);font-size:1.4rem;font-weight:700;color:var(--text);margin:0">Rubricas de Folha</h2>
+        <p style="font-size:.8rem;color:var(--muted);margin:.25rem 0 0">Tabela de rubricas S-1010 do eSocial</p>
+      </div>
+      <div class="d-flex gap-2">
+        <button class="btn btn-secondary" onclick="rubricSeedDefault()">Carregar Padrão</button>
+        <button class="btn btn-secondary" onclick="rubricDownloadS1010()">Gerar S-1010 XML</button>
+        <button class="btn btn-primary" onclick="rubricOpenModal()">+ Nova Rubrica</button>
+      </div>
+    </div>
+    <div id="rubricKpis" class="row g-3 mb-4"></div>
+    <div class="table-responsive">
+      <table class="table">
+        <thead><tr><th>Código</th><th>Nome</th><th>Tipo</th><th>INSS</th><th>IRRF</th><th>FGTS</th><th>Nat.eSocial</th><th>Ativo</th><th>Ações</th></tr></thead>
+        <tbody id="rubricTableBody"><tr><td colspan="9" class="text-center text-muted">Carregando...</td></tr></tbody>
+      </table>
+    </div>
+    <div id="rubricModal" class="modal-overlay" style="display:none">
+      <div class="modal-box">
+        <h3 id="rubricModalTitle">Nova Rubrica</h3>
+        <input type="hidden" id="rubricEditId">
+        <div class="form-row">
+          <div class="form-group"><label>Código</label><input type="text" id="rubricCodigo" class="form-control" placeholder="0001"></div>
+          <div class="form-group"><label>Nome</label><input type="text" id="rubricNome" class="form-control" placeholder="Salário Base"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Tipo</label>
+            <select id="rubricTipo" class="form-control">
+              <option value="provento">Provento</option><option value="desconto">Desconto</option><option value="informativo">Informativo</option>
+            </select></div>
+          <div class="form-group"><label>Nat. eSocial</label><input type="text" id="rubricNat" class="form-control" placeholder="1000"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label><input type="checkbox" id="rubricINSS"> Incide INSS</label></div>
+          <div class="form-group"><label><input type="checkbox" id="rubricIRRF"> Incide IRRF</label></div>
+          <div class="form-group"><label><input type="checkbox" id="rubricFGTS"> Incide FGTS</label></div>
+        </div>
+        <div id="rubricModalError" class="alert alert-danger" style="display:none"></div>
+        <div class="d-flex gap-2 justify-content-end mt-3">
+          <button class="btn btn-secondary" onclick="document.getElementById('rubricModal').style.display='none'">Cancelar</button>
+          <button class="btn btn-primary" onclick="rubricSave()">Salvar</button>
+        </div>
+      </div>
+    </div>`;
+
+  await rubricLoadTable();
+}
+
+async function rubricLoadTable() {
+  const tbody = document.getElementById('rubricTableBody');
+  if (!tbody) return;
+  try {
+    const rows = await apiFetch('/api/dp/rubrics');
+    const kpis = document.getElementById('rubricKpis');
+    if (kpis) {
+      const prov = rows.filter(r=>r.tipo==='provento').length;
+      const desc = rows.filter(r=>r.tipo==='desconto').length;
+      const info = rows.filter(r=>r.tipo==='informativo').length;
+      kpis.innerHTML = [
+        ['Proventos', prov, 'text-success'],['Descontos', desc, 'text-danger'],
+        ['Informativos', info, 'text-info'],['Total', rows.length, 'text-primary']
+      ].map(([l,v,c])=>`<div class="col-md-3"><div class="card text-center p-3"><div class="fs-4 fw-bold ${c}">${v}</div><div class="text-muted small">${l}</div></div></div>`).join('');
+    }
+    const badge = {provento:'badge-success', desconto:'badge-danger', informativo:'badge-info'};
+    tbody.innerHTML = rows.length ? rows.map(r=>`<tr>
+      <td><code>${r.codigo}</code></td><td>${r.nome}</td>
+      <td><span class="badge ${badge[r.tipo]||'badge-secondary'}">${r.tipo}</span></td>
+      <td>${r.incide_inss?'✓':'—'}</td><td>${r.incide_irrf?'✓':'—'}</td><td>${r.incide_fgts?'✓':'—'}</td>
+      <td><code>${r.esocial_nat_rubrica||''}</code></td>
+      <td>${r.ativo?'<span class="badge badge-success">Sim</span>':'<span class="badge badge-secondary">Não</span>'}</td>
+      <td>
+        <button class="btn btn-sm btn-secondary" onclick="rubricEdit(${JSON.stringify(r).replace(/"/g,'&quot;')})">Editar</button>
+        <button class="btn btn-sm btn-danger" onclick="rubricDelete(${r.id},'${r.nome.replace(/'/g,"\\'")}')">Excluir</button>
+      </td></tr>`).join('')
+      : '<tr><td colspan="9" class="text-center text-muted">Nenhuma rubrica. Clique em "Carregar Padrão".</td></tr>';
+  } catch(e) { if (tbody) tbody.innerHTML = `<tr><td colspan="9" class="text-danger">${e.message}</td></tr>`; }
+}
+
+function rubricOpenModal() {
+  document.getElementById('rubricModalTitle').textContent = 'Nova Rubrica';
+  document.getElementById('rubricEditId').value = '';
+  ['rubricCodigo','rubricNome','rubricNat'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('rubricTipo').value = 'provento';
+  ['rubricINSS','rubricIRRF','rubricFGTS'].forEach(id => document.getElementById(id).checked = true);
+  document.getElementById('rubricModalError').style.display = 'none';
+  document.getElementById('rubricModal').style.display = 'flex';
+}
+
+function rubricEdit(r) {
+  document.getElementById('rubricModalTitle').textContent = 'Editar Rubrica';
+  document.getElementById('rubricEditId').value = r.id;
+  document.getElementById('rubricCodigo').value = r.codigo || '';
+  document.getElementById('rubricNome').value = r.nome || '';
+  document.getElementById('rubricTipo').value = r.tipo || 'provento';
+  document.getElementById('rubricNat').value = r.esocial_nat_rubrica || '';
+  document.getElementById('rubricINSS').checked = !!r.incide_inss;
+  document.getElementById('rubricIRRF').checked = !!r.incide_irrf;
+  document.getElementById('rubricFGTS').checked = !!r.incide_fgts;
+  document.getElementById('rubricModalError').style.display = 'none';
+  document.getElementById('rubricModal').style.display = 'flex';
+}
+
+async function rubricSave() {
+  const id = document.getElementById('rubricEditId').value;
+  const body = {
+    codigo: document.getElementById('rubricCodigo').value.trim(),
+    nome: document.getElementById('rubricNome').value.trim(),
+    tipo: document.getElementById('rubricTipo').value,
+    esocial_nat_rubrica: document.getElementById('rubricNat').value.trim(),
+    incide_inss: document.getElementById('rubricINSS').checked ? 1 : 0,
+    incide_irrf: document.getElementById('rubricIRRF').checked ? 1 : 0,
+    incide_fgts: document.getElementById('rubricFGTS').checked ? 1 : 0,
+  };
+  const errBox = document.getElementById('rubricModalError');
+  if (!body.codigo || !body.nome) { errBox.textContent = 'Código e nome são obrigatórios.'; errBox.style.display = ''; return; }
+  try {
+    if (id) await apiFetch(`/api/dp/rubrics/${id}`, { method:'PUT', body: JSON.stringify(body) });
+    else await apiFetch('/api/dp/rubrics', { method:'POST', body: JSON.stringify(body) });
+    document.getElementById('rubricModal').style.display = 'none';
+    showToast(id ? 'Rubrica atualizada.' : 'Rubrica criada.', 'success');
+    await rubricLoadTable();
+  } catch(e) { errBox.textContent = 'Erro: ' + e.message; errBox.style.display = ''; }
+}
+
+async function rubricDelete(id, nome) {
+  if (!confirm(`Excluir rubrica "${nome}"?`)) return;
+  try {
+    await apiFetch(`/api/dp/rubrics/${id}`, { method:'DELETE' });
+    showToast('Rubrica excluída.', 'success');
+    await rubricLoadTable();
+  } catch(e) { showToast('Erro: ' + e.message, 'error'); }
+}
+
+async function rubricSeedDefault() {
+  try {
+    const r = await apiFetch('/api/dp/rubrics/seed-default', { method:'POST' });
+    showToast(r.created ? '20 rubricas padrão carregadas.' : r.message, 'success');
+    await rubricLoadTable();
+  } catch(e) { showToast('Erro: ' + e.message, 'error'); }
+}
+
+function rubricDownloadS1010() {
+  const ano = new Date().getFullYear();
+  window.open(`/api/dp/esocial/s1010?ano=${ano}`, '_blank');
+}
+
+// ── ESOCIAL PERIÓDICO ─────────────────────────────────────────────────────────
+async function renderEsocialPeriodico(el) {
+  const today = new Date();
+  const comp = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`;
+  el.innerHTML = `
+    <div class="page-header">
+      <div>
+        <h2 style="font-family:var(--font-display);font-size:1.4rem;font-weight:700;color:var(--text);margin:0">eSocial Periódico</h2>
+        <p style="font-size:.8rem;color:var(--muted);margin:.25rem 0 0">S-1200 (Remunerações) e S-1299 (Fechamento)</p>
+      </div>
+      <div class="d-flex gap-2 align-items-center">
+        <input type="month" id="espComp" class="form-control" style="width:150px" value="${comp}">
+        <button class="btn btn-secondary" onclick="window.espLoad()">Buscar</button>
+      </div>
+    </div>
+    <div id="espKpis" class="row g-3 mb-4"></div>
+    <div class="table-responsive mb-4">
+      <table class="table">
+        <thead><tr><th>Funcionário</th><th>CPF</th><th>Bruto</th><th>INSS</th><th>IRRF</th><th>Líquido</th><th>S-1200</th></tr></thead>
+        <tbody id="espTableBody"><tr><td colspan="7" class="text-center text-muted">Selecione uma competência.</td></tr></tbody>
+      </table>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+      <button class="btn btn-primary" onclick="window.espDownloadAll()">Baixar S-1200 Todos (XML)</button>
+      <button class="btn btn-secondary" onclick="window.espDownloadS1299()">Baixar S-1299 Fechamento (XML)</button>
+      <button class="btn btn-secondary" onclick="window.espMarkSent()">Marcar como Transmitida</button>
+    </div>`;
+
+  window.espLoad = async () => {
+    const c = document.getElementById('espComp').value;
+    const tbody = document.getElementById('espTableBody');
+    const kpis = document.getElementById('espKpis');
+    try {
+      const items = await apiFetch(`/api/dp/payroll/items?competencia=${c}`);
+      const status = await apiFetch(`/api/dp/esocial/periodic/status?competencia=${c}`);
+      const sentEvts = new Set(status.map(s=>s.evento));
+      if (kpis) {
+        const totBruto = items.reduce((s,i)=>s+Number(i.gross_salary||0),0);
+        const totLiq = items.reduce((s,i)=>s+Number(i.net_salary||0),0);
+        kpis.innerHTML = [
+          ['Funcionários', items.length, 'text-primary'],
+          ['Total Bruto', 'R$ '+totBruto.toFixed(2), 'text-success'],
+          ['Total Líquido', 'R$ '+totLiq.toFixed(2), 'text-info'],
+          ['Status S-1200', sentEvts.has('S-1200')?'Transmitido':'Pendente', sentEvts.has('S-1200')?'text-success':'text-warning'],
+        ].map(([l,v,c])=>`<div class="col-md-3"><div class="card text-center p-3"><div class="fs-5 fw-bold ${c}">${v}</div><div class="text-muted small">${l}</div></div></div>`).join('');
+      }
+      tbody.innerHTML = items.length ? items.map(it=>`<tr>
+        <td>${it.employee_name||it.name||'—'}</td>
+        <td style="font-family:var(--font-mono);font-size:.8rem">${it.cpf||'—'}</td>
+        <td>R$ ${Number(it.gross_salary||0).toFixed(2)}</td>
+        <td>R$ ${Number(it.inss||0).toFixed(2)}</td>
+        <td>R$ ${Number(it.irrf||0).toFixed(2)}</td>
+        <td>R$ ${Number(it.net_salary||0).toFixed(2)}</td>
+        <td><a href="/api/dp/esocial/s1200/${c}/${it.employee_id}" target="_blank" class="btn btn-sm btn-secondary">XML</a></td>
+      </tr>`).join('')
+        : '<tr><td colspan="7" class="text-center text-muted">Nenhum item de folha nesta competência.</td></tr>';
+    } catch(e) { tbody.innerHTML = `<tr><td colspan="7" class="text-danger">${e.message}</td></tr>`; }
+  };
+
+  window.espDownloadAll = () => {
+    const c = document.getElementById('espComp').value;
+    window.open(`/api/dp/esocial/s1200/${c}/todos`, '_blank');
+  };
+
+  window.espDownloadS1299 = () => {
+    const c = document.getElementById('espComp').value;
+    window.open(`/api/dp/esocial/s1299/${c}`, '_blank');
+  };
+
+  window.espMarkSent = async () => {
+    const c = document.getElementById('espComp').value;
+    try {
+      await apiFetch('/api/dp/esocial/periodic/mark-sent', { method:'POST', body: JSON.stringify({ competencia: c, evento:'S-1200' }) });
+      showToast('Competência marcada como transmitida.', 'success');
+      window.espLoad();
+    } catch(e) { showToast('Erro: ' + e.message, 'error'); }
+  };
+}
+
+// ── SEFIP/GFIP ───────────────────────────────────────────────────────────────
+async function renderSefip(el) {
+  const today = new Date();
+  const comp = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`;
+  el.innerHTML = `
+    <div class="page-header">
+      <div>
+        <h2 style="font-family:var(--font-display);font-size:1.4rem;font-weight:700;color:var(--text);margin:0">SEFIP / GFIP</h2>
+        <p style="font-size:.8rem;color:var(--muted);margin:.25rem 0 0">Geração do arquivo GRF e resumo da GPS</p>
+      </div>
+      <div class="d-flex gap-2 align-items-center">
+        <input type="month" id="sefipComp" class="form-control" style="width:150px" value="${comp}">
+        <button class="btn btn-primary" onclick="window.sefipCalc()">Calcular SEFIP</button>
+      </div>
+    </div>
+    <div id="sefipResult"></div>`;
+
+  window.sefipCalc = async () => {
+    const c = document.getElementById('sefipComp').value;
+    const res = document.getElementById('sefipResult');
+    res.innerHTML = '<p class="text-muted text-center py-4">Calculando...</p>';
+    try {
+      const d = await apiFetch(`/api/dp/sefip/${c}`);
+      const rows = [
+        ['Total Trabalhadores', d.total_trabalhadores],
+        ['Total Remuneração', 'R$ '+Number(d.total_remuneracao).toFixed(2)],
+        ['FGTS a Recolher', 'R$ '+Number(d.total_fgts).toFixed(2)],
+        ['INSS Empregado', 'R$ '+Number(d.total_inss_emp).toFixed(2)],
+        ['INSS Patronal (20%)', 'R$ '+Number(d.total_inss_patronal).toFixed(2)],
+        ['RAT (3%)', 'R$ '+Number(d.total_rat).toFixed(2)],
+        ['Terceiros (5,8%)', 'R$ '+Number(d.total_terceiros).toFixed(2)],
+      ];
+      res.innerHTML = `
+        <div class="row g-3 mb-4">
+          <div class="col-md-5">
+            <div class="card p-3">
+              <h5 class="mb-3">GPS — Guia da Previdência Social</h5>
+              ${rows.map(([l,v])=>`<div class="d-flex justify-content-between border-bottom py-1"><span class="text-muted">${l}</span><strong>${v}</strong></div>`).join('')}
+              <div class="d-flex justify-content-between pt-2 mt-1"><strong>Total GPS</strong><strong class="text-primary fs-5">R$ ${Number(d.total_gps).toFixed(2)}</strong></div>
+              <div class="text-muted small mt-2">FPAS: ${d.fpas} | Cód. Terceiros: ${d.cod_terceiros}</div>
+            </div>
+          </div>
+          <div class="col-md-7">
+            <div class="table-responsive">
+              <table class="table table-sm">
+                <thead><tr><th>Funcionário</th><th>CPF</th><th>Remuneração</th><th>FGTS</th></tr></thead>
+                <tbody>${(d.funcionarios||[]).map(f=>`<tr>
+                  <td>${f.name||f.employee_name||'—'}</td>
+                  <td style="font-size:.8rem">${f.cpf||'—'}</td>
+                  <td>R$ ${Number(f.gross_salary||0).toFixed(2)}</td>
+                  <td>R$ ${Number(f.fgts||0).toFixed(2)}</td>
+                </tr>`).join('')||'<tr><td colspan="4" class="text-muted text-center">Sem folha nesta competência.</td></tr>'}</tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="window.open('/api/dp/sefip/${c}/arquivo','_blank')">Baixar Arquivo SEFIP (GRF)</button>`;
+    } catch(e) { res.innerHTML = `<div class="alert alert-danger">Erro: ${e.message}</div>`; }
+  };
+}
+
+// ── EFD-REINF ─────────────────────────────────────────────────────────────────
+async function renderEfdReinf(el) {
+  const today = new Date();
+  const comp = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`;
+  el.innerHTML = `
+    <div class="page-header">
+      <div>
+        <h2 style="font-family:var(--font-display);font-size:1.4rem;font-weight:700;color:var(--text);margin:0">EFD-Reinf</h2>
+        <p style="font-size:.8rem;color:var(--muted);margin:.25rem 0 0">Eventos de retenção: R-1000, R-2010, R-4010, R-4020, R-4099</p>
+      </div>
+      <button class="btn btn-primary" onclick="reinfOpenModal()">+ Tomador</button>
+    </div>
+
+    <h5 class="mb-3">Tomadores de Serviço</h5>
+    <div class="d-flex gap-2 align-items-center mb-3">
+      <input type="month" id="reinfComp" class="form-control" style="width:150px" value="${comp}">
+      <button class="btn btn-secondary" onclick="window.reinfLoadTomadores()">Filtrar</button>
+    </div>
+    <div class="table-responsive mb-4">
+      <table class="table">
+        <thead><tr><th>Razão Social</th><th>CNPJ/CPF</th><th>Tipo Serviço</th><th>Valor Bruto</th><th>IRRF</th><th>Competência</th><th>Ações</th></tr></thead>
+        <tbody id="reinfTableBody"><tr><td colspan="7" class="text-center text-muted">Carregando...</td></tr></tbody>
+      </table>
+    </div>
+
+    <h5 class="mb-3">Eventos EFD-Reinf</h5>
+    <div class="row g-3" id="reinfEventos"></div>
+
+    <div id="reinfModal" class="modal-overlay" style="display:none">
+      <div class="modal-box">
+        <h3 id="reinfModalTitle">Novo Tomador</h3>
+        <input type="hidden" id="reinfEditId">
+        <div class="form-row">
+          <div class="form-group"><label>Razão Social</label><input type="text" id="reinfRazao" class="form-control"></div>
+          <div class="form-group"><label>CNPJ/CPF</label><input type="text" id="reinfNrInsc" class="form-control" placeholder="00.000.000/0000-00"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Tipo Inscrição</label>
+            <select id="reinfTipoInsc" class="form-control"><option value="cnpj">CNPJ</option><option value="cpf">CPF</option></select></div>
+          <div class="form-group"><label>Tipo Serviço</label><input type="text" id="reinfTipoServ" class="form-control" placeholder="0001" value="0001"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Competência</label><input type="month" id="reinfCompModal" class="form-control" value="${comp}"></div>
+          <div class="form-group"><label>Valor Bruto</label><input type="number" id="reinfVlrBruto" class="form-control" step="0.01" placeholder="0.00"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Base Cálculo Ret.</label><input type="number" id="reinfVlrBc" class="form-control" step="0.01" placeholder="0.00"></div>
+          <div class="form-group"><label>IRRF</label><input type="number" id="reinfVlrIrrf" class="form-control" step="0.01" placeholder="0.00"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>CSLL</label><input type="number" id="reinfVlrCsll" class="form-control" step="0.01" placeholder="0.00"></div>
+          <div class="form-group"><label>PIS</label><input type="number" id="reinfVlrPis" class="form-control" step="0.01" placeholder="0.00"></div>
+          <div class="form-group"><label>COFINS</label><input type="number" id="reinfVlrCofins" class="form-control" step="0.01" placeholder="0.00"></div>
+        </div>
+        <div id="reinfModalError" class="alert alert-danger" style="display:none"></div>
+        <div class="d-flex gap-2 justify-content-end mt-3">
+          <button class="btn btn-secondary" onclick="document.getElementById('reinfModal').style.display='none'">Cancelar</button>
+          <button class="btn btn-primary" onclick="window.reinfSaveTomador()">Salvar</button>
+        </div>
+      </div>
+    </div>`;
+
+  window.reinfLoadTomadores = async () => {
+    const c = document.getElementById('reinfComp').value;
+    const tbody = document.getElementById('reinfTableBody');
+    const eventosEl = document.getElementById('reinfEventos');
+    try {
+      const rows = await apiFetch(`/api/dp/reinf/tomadores?competencia=${c}`);
+      tbody.innerHTML = rows.length ? rows.map(t=>`<tr>
+        <td>${t.razao_social}</td>
+        <td style="font-family:var(--font-mono);font-size:.8rem">${t.nr_insc}</td>
+        <td>${t.tipo_servico}</td>
+        <td>R$ ${Number(t.valor_bruto||0).toFixed(2)}</td>
+        <td>R$ ${Number(t.valor_irrf||0).toFixed(2)}</td>
+        <td>${t.competencia}</td>
+        <td>
+          <button class="btn btn-sm btn-secondary" onclick="reinfEditTomador(${JSON.stringify(t).replace(/"/g,'&quot;')})">Editar</button>
+          <button class="btn btn-sm btn-danger" onclick="window.reinfDeleteTomador(${t.id},'${t.razao_social.replace(/'/g,"\\'")}')">Excluir</button>
+        </td></tr>`).join('')
+        : '<tr><td colspan="7" class="text-center text-muted">Sem tomadores nesta competência.</td></tr>';
+      if (eventosEl) {
+        const eventos = [
+          { code:'R-1000', label:'Informações do Contribuinte', url:`/api/dp/reinf/r1000`, icon:'building' },
+          { code:'R-2010', label:'Serviços Tomados', url:`/api/dp/reinf/r2010/${c}`, icon:'file-input' },
+          { code:'R-4010', label:'Pagamentos a PF', url:`/api/dp/reinf/r4010/${c}`, icon:'user' },
+          { code:'R-4020', label:'Pagamentos a PJ', url:`/api/dp/reinf/r4020/${c}`, icon:'building-2' },
+          { code:'R-4099', label:'Fechamento', url:`/api/dp/reinf/r4099/${c}`, icon:'check-circle' },
+        ];
+        eventosEl.innerHTML = eventos.map(ev=>`
+          <div class="col-md-4">
+            <div class="card p-3 d-flex flex-column gap-2">
+              <div class="d-flex align-items-center gap-2">
+                <i data-lucide="${ev.icon}" class="w-5 h-5 text-violet-400"></i>
+                <div>
+                  <div class="fw-bold">${ev.code}</div>
+                  <div class="text-muted small">${ev.label}</div>
+                </div>
+              </div>
+              <a href="${ev.url}" target="_blank" class="btn btn-sm btn-primary w-100">Baixar XML</a>
+            </div>
+          </div>`).join('');
+        if (window.lucide) lucide.createIcons();
+      }
+    } catch(e) { tbody.innerHTML = `<tr><td colspan="7" class="text-danger">${e.message}</td></tr>`; }
+  };
+
+  function reinfOpenModal(t) {
+    document.getElementById('reinfModalTitle').textContent = t ? 'Editar Tomador' : 'Novo Tomador';
+    document.getElementById('reinfEditId').value = t ? t.id : '';
+    document.getElementById('reinfRazao').value = t ? t.razao_social : '';
+    document.getElementById('reinfNrInsc').value = t ? t.nr_insc : '';
+    document.getElementById('reinfTipoInsc').value = t ? (t.tipo_insc||'cnpj') : 'cnpj';
+    document.getElementById('reinfTipoServ').value = t ? (t.tipo_servico||'0001') : '0001';
+    document.getElementById('reinfCompModal').value = t ? t.competencia : document.getElementById('reinfComp').value;
+    ['Bruto','Bc','Irrf','Csll','Pis','Cofins'].forEach(f => {
+      const el = document.getElementById('reinfVlr'+f);
+      if (el) el.value = t ? (Number(t['valor_'+f.toLowerCase()]||0).toFixed(2)) : '';
+    });
+    document.getElementById('reinfModalError').style.display = 'none';
+    document.getElementById('reinfModal').style.display = 'flex';
+  }
+  window.reinfOpenModal = reinfOpenModal;
+
+  function reinfEditTomador(t) { reinfOpenModal(t); }
+
+  window.reinfSaveTomador = async () => {
+    const id = document.getElementById('reinfEditId').value;
+    const body = {
+      razao_social: document.getElementById('reinfRazao').value.trim(),
+      nr_insc: document.getElementById('reinfNrInsc').value.trim(),
+      tipo_insc: document.getElementById('reinfTipoInsc').value,
+      tipo_servico: document.getElementById('reinfTipoServ').value.trim(),
+      competencia: document.getElementById('reinfCompModal').value,
+      valor_bruto: parseFloat(document.getElementById('reinfVlrBruto').value||0),
+      valor_bc_ret: parseFloat(document.getElementById('reinfVlrBc').value||0),
+      valor_irrf: parseFloat(document.getElementById('reinfVlrIrrf').value||0),
+      valor_csll: parseFloat(document.getElementById('reinfVlrCsll').value||0),
+      valor_pis: parseFloat(document.getElementById('reinfVlrPis').value||0),
+      valor_cofins: parseFloat(document.getElementById('reinfVlrCofins').value||0),
+    };
+    const errBox = document.getElementById('reinfModalError');
+    if (!body.razao_social || !body.nr_insc) { errBox.textContent = 'Razão Social e CNPJ/CPF são obrigatórios.'; errBox.style.display = ''; return; }
+    try {
+      if (id) await apiFetch(`/api/dp/reinf/tomadores/${id}`, { method:'PUT', body: JSON.stringify(body) });
+      else await apiFetch('/api/dp/reinf/tomadores', { method:'POST', body: JSON.stringify(body) });
+      document.getElementById('reinfModal').style.display = 'none';
+      showToast(id ? 'Tomador atualizado.' : 'Tomador criado.', 'success');
+      window.reinfLoadTomadores();
+    } catch(e) { errBox.textContent = 'Erro: ' + e.message; errBox.style.display = ''; }
+  };
+
+  window.reinfDeleteTomador = async (id, nome) => {
+    if (!confirm(`Excluir tomador "${nome}"?`)) return;
+    try {
+      await apiFetch(`/api/dp/reinf/tomadores/${id}`, { method:'DELETE' });
+      showToast('Tomador excluído.', 'success');
+      window.reinfLoadTomadores();
+    } catch(e) { showToast('Erro: ' + e.message, 'error'); }
+  };
+
+  await window.reinfLoadTomadores();
 }

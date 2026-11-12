@@ -1125,6 +1125,118 @@ def init_db() -> None:
     );
     """)
 
+    # 46. DP — Tabelas Fiscais (INSS, IRRF, FGTS, Salário Mínimo)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS tax_tables (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        ano INTEGER NOT NULL,
+        tipo TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS tax_brackets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tax_table_id INTEGER NOT NULL,
+        faixa_de REAL NOT NULL,
+        faixa_ate REAL,
+        aliquota REAL NOT NULL,
+        deducao REAL DEFAULT 0,
+        FOREIGN KEY (tax_table_id) REFERENCES tax_tables(id) ON DELETE CASCADE
+    );
+    """)
+
+    # 47. DP — Rubricas (eSocial S-1010)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS payroll_rubrics (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        codigo TEXT NOT NULL,
+        nome TEXT NOT NULL,
+        tipo TEXT DEFAULT 'provento',
+        natureza TEXT DEFAULT 'normal',
+        incide_inss INTEGER DEFAULT 1,
+        incide_irrf INTEGER DEFAULT 1,
+        incide_fgts INTEGER DEFAULT 1,
+        incide_13 INTEGER DEFAULT 1,
+        incide_ferias INTEGER DEFAULT 1,
+        esocial_cod_rubrica TEXT DEFAULT '',
+        esocial_nat_rubrica TEXT DEFAULT '1000',
+        ativo INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    # 48. DP — eSocial Eventos Periódicos
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS esocial_periodic_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        competencia TEXT NOT NULL,
+        evento TEXT NOT NULL,
+        employee_id INTEGER,
+        status TEXT DEFAULT 'pendente',
+        xml_content TEXT DEFAULT '',
+        nr_rec TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    # 49. DP — SEFIP/GFIP
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS sefip_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        competencia TEXT NOT NULL,
+        total_trabalhadores INTEGER DEFAULT 0,
+        total_remuneracao REAL DEFAULT 0,
+        total_fgts REAL DEFAULT 0,
+        total_inss_emp REAL DEFAULT 0,
+        total_inss_patronal REAL DEFAULT 0,
+        total_rat REAL DEFAULT 0,
+        total_terceiros REAL DEFAULT 0,
+        total_gps REAL DEFAULT 0,
+        fpas TEXT DEFAULT '515',
+        cod_terceiros TEXT DEFAULT '0001',
+        gerado_em TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    # 50. DP — EFD-Reinf Tomadores de Serviço
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS reinf_service_takers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        tipo_insc TEXT DEFAULT 'cnpj',
+        nr_insc TEXT NOT NULL,
+        razao_social TEXT NOT NULL,
+        tipo_servico TEXT DEFAULT '0001',
+        valor_bruto REAL DEFAULT 0,
+        valor_bc_ret REAL DEFAULT 0,
+        valor_irrf REAL DEFAULT 0,
+        valor_csll REAL DEFAULT 0,
+        valor_pis REAL DEFAULT 0,
+        valor_cofins REAL DEFAULT 0,
+        competencia TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    # 51. DP — EFD-Reinf Log de Eventos
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS reinf_events_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        competencia TEXT NOT NULL,
+        evento TEXT NOT NULL,
+        status TEXT DEFAULT 'gerado',
+        xml_hash TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
     conn.commit()
     migrate_db(conn)
 
@@ -1174,6 +1286,18 @@ def init_db() -> None:
 
     # Empresa padrão e dados de demonstração primeiro: users/api_keys referenciam companies(id).
     seed_initial_data(conn)
+
+    # Seed Tabelas Fiscais 2025
+    tax_count = cur.execute("SELECT COUNT(*) FROM tax_tables WHERE ano=2025").fetchone()[0]
+    if tax_count == 0:
+        _seed_tax_tables_2025(cur)
+        conn.commit()
+
+    # Seed Rubricas Padrão
+    rubric_count = cur.execute("SELECT COUNT(*) FROM payroll_rubrics WHERE company_id=1").fetchone()[0]
+    if rubric_count == 0:
+        _seed_default_rubrics(cur, 1)
+        conn.commit()
 
     # Token do portal do contador (a empresa padrão só existe após o seed acima em banco novo).
     row = cur.execute("SELECT accountant_token FROM companies WHERE id = 1").fetchone()
@@ -1712,6 +1836,50 @@ def migrate_db(conn: sqlite3.Connection) -> None:
     """)
 
     conn.commit()
+
+
+def _seed_tax_tables_2025(cur) -> None:
+    tables = [
+        ("inss", [(0, 1518.00, 7.5, 0), (1518.01, 2793.88, 9.0, 22.77), (2793.89, 4190.83, 12.0, 106.60), (4190.84, 8157.41, 14.0, 190.42)]),
+        ("irrf", [(0, 2824.00, 0.0, 0), (2824.01, 3751.05, 7.5, 211.80), (3751.06, 4664.68, 15.0, 492.78), (4664.69, 5871.22, 22.5, 843.34), (5871.23, None, 27.5, 1137.74)]),
+        ("fgts", [(0, None, 8.0, 0)]),
+        ("salario_minimo", [(0, None, 1518.00, 0)]),
+    ]
+    for tipo, brackets in tables:
+        cur.execute("INSERT INTO tax_tables (company_id, ano, tipo) VALUES (1, 2025, ?)", (tipo,))
+        table_id = cur.lastrowid
+        for b in brackets:
+            cur.execute("INSERT INTO tax_brackets (tax_table_id, faixa_de, faixa_ate, aliquota, deducao) VALUES (?,?,?,?,?)",
+                        (table_id, b[0], b[1], b[2], b[3]))
+
+
+def _seed_default_rubrics(cur, company_id: int) -> None:
+    rubrics = [
+        ("0001","Salário Base","provento",1,1,1,1,1,"1000"),
+        ("0002","Hora Extra 50%","provento",1,1,1,1,1,"1010"),
+        ("0003","Hora Extra 100%","provento",1,1,1,1,1,"1010"),
+        ("0004","Adicional Noturno","provento",1,1,1,1,1,"1020"),
+        ("0005","Adicional de Insalubridade","provento",1,1,1,1,1,"1070"),
+        ("0006","Adicional de Periculosidade","provento",1,1,1,1,1,"1080"),
+        ("0007","Comissão","provento",1,1,1,1,1,"1030"),
+        ("0008","Férias Gozadas","provento",0,1,0,0,0,"2000"),
+        ("0009","1/3 Constitucional Férias","provento",0,1,0,0,0,"2010"),
+        ("0010","13º Salário","provento",1,1,1,0,0,"3000"),
+        ("0100","INSS Empregado","desconto",0,0,0,0,0,"9220"),
+        ("0101","IRRF","desconto",0,0,0,0,0,"9230"),
+        ("0102","Vale Transporte","desconto",0,0,0,0,0,"9999"),
+        ("0103","Vale Alimentação","desconto",0,0,0,0,0,"9999"),
+        ("0104","Pensão Alimentícia","desconto",0,0,0,0,0,"9999"),
+        ("0105","Adiantamento de Salário","desconto",0,0,0,0,0,"9999"),
+        ("0200","FGTS (informativo)","informativo",0,0,0,0,0,"9000"),
+        ("0201","Base de Cálculo INSS","informativo",0,0,0,0,0,"9100"),
+        ("0202","Base de Cálculo IRRF","informativo",0,0,0,0,0,"9110"),
+        ("0203","Base de Cálculo FGTS","informativo",0,0,0,0,0,"9120"),
+    ]
+    for r in rubrics:
+        cur.execute("""INSERT INTO payroll_rubrics (company_id,codigo,nome,tipo,incide_inss,incide_irrf,incide_fgts,incide_13,incide_ferias,esocial_nat_rubrica,ativo)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,1)""",
+                    (company_id, r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8]))
 
 
 def recalculate_bank_balances(conn: sqlite3.Connection) -> None:
