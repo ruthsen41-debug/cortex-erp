@@ -1,6 +1,6 @@
 // DIRBI — Declaração de Incentivos, Renúncias, Benefícios e Imunidades
-async function renderDirbi() {
-  const app = document.getElementById('app');
+async function renderDirbi(container) {
+  const app = container;
   const comp = new Date().toISOString().slice(0,7);
   app.innerHTML = `
     <div class="page-header">

@@ -1,6 +1,6 @@
 // LALUR — Livro de Apuração do Lucro Real
-async function renderLalur() {
-  const app = document.getElementById('app');
+async function renderLalur(container) {
+  const app = container;
   const yr = new Date().getFullYear();
   app.innerHTML = `
     <div class="page-header">

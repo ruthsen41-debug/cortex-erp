@@ -1,6 +1,6 @@
 // Certificados Digitais
-async function renderCertificates() {
-  const app = document.getElementById('app');
+async function renderCertificates(container) {
+  const app = container;
   app.innerHTML = `
     <div class="page-header">
       <h2>Certificados Digitais</h2>

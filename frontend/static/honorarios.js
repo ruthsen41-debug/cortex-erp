@@ -1,6 +1,6 @@
 // Honorários — Gestão de contratos de honorários contábeis
-async function renderHonorarios() {
-  const app = document.getElementById('app');
+async function renderHonorarios(container) {
+  const app = container;
   app.innerHTML = `
     <div class="page-header">
       <h2>Honorários</h2>

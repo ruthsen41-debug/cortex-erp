@@ -1,6 +1,6 @@
 // Convenções Coletivas de Trabalho (CCT)
-async function renderConventions() {
-  const app = document.getElementById('app');
+async function renderConventions(container) {
+  const app = container;
   app.innerHTML = `
     <div class="page-header">
       <h2>Convenções Coletivas (CCT)</h2>

@@ -1,6 +1,6 @@
 // Manifesto do Destinatário — NF-e recebidas
-async function renderNfeManifest() {
-  const app = document.getElementById('app');
+async function renderNfeManifest(container) {
+  const app = container;
   app.innerHTML = `
     <div class="page-header">
       <h2>Manifesto do Destinatário</h2>
