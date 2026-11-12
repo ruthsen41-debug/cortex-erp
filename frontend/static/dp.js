@@ -4341,7 +4341,7 @@ async function renderPortalFuncionario(el) {
 
         <!-- Exames ASO -->
         <div class="card"><div class="card-header"><h4 class="font-bold text-slate-800 dark:text-slate-100">Exames Médicos (ASO)</h4></div><div class="card-body">
-          ${proximo_aso ? `<div class="mb-3 p-3 rounded-lg ${((date.today=>(days=>(days<0?'bg-red-50 dark:bg-red-900/20':days<=30?'bg-amber-50 dark:bg-amber-900/20':'bg-green-50 dark:bg-green-900/20'))((new Date(proximo_aso.data_vencimento)-new Date())/86400000|0))(new Date()))  }">
+          ${proximo_aso ? `<div class="mb-3 p-3 rounded-lg ${(()=>{const d=Math.floor((new Date(proximo_aso.data_vencimento)-new Date())/86400000);return d<0?'bg-red-50 dark:bg-red-900/20':d<=30?'bg-amber-50 dark:bg-amber-900/20':'bg-green-50 dark:bg-green-900/20';})()}">
             <p class="text-xs font-semibold">Próximo: ${proximo_aso.tipo}</p>
             <p class="text-xs text-muted">Venc: ${proximo_aso.data_vencimento}</p></div>` : '<p class="text-muted text-sm">Nenhum exame próximo.</p>'}
           <div class="space-y-1 max-h-32 overflow-y-auto">

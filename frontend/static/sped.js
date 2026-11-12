@@ -7,8 +7,8 @@ let spedSubTab = 'efd';
 let spedPreview = null;
 
 // ── helpers ──────────────────────────────────────────────────
-const fBRL5  = v => parseFloat(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-const fDate5 = s => s ? s.slice(0, 10).split('-').reverse().join('/') : '-';
+const fBRL_sp  = v => parseFloat(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const fDate_sp = s => s ? s.slice(0, 10).split('-').reverse().join('/') : '-';
 
 function kpiSped(label, value, sub, icon, color) {
   return `<div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs">
@@ -148,11 +148,11 @@ async function loadSpedPreview() {
     const p = spedPreview;
     kpiEl.innerHTML = [
       kpiSped('Notas Fiscais (NF-e)', p.count_nfe, `${p.start_date} → ${p.end_date}`, 'receipt', 'text-amber-500'),
-      kpiSped('Faturamento Bruto', fBRL5(p.total_faturamento), p.company?.razao_social || '', 'trending-up', 'text-emerald-500'),
-      kpiSped('ICMS Apurado', fBRL5(p.total_icms), 'Operações próprias', 'landmark', 'text-blue-500'),
-      kpiSped('PIS Apurado', fBRL5(p.total_pis), 'Conf. regime tributário', 'percent', 'text-indigo-500'),
-      kpiSped('COFINS Apurado', fBRL5(p.total_cofins), 'Conf. regime tributário', 'percent', 'text-purple-500'),
-      kpiSped('Total de Impostos', fBRL5(p.total_impostos), 'ICMS + PIS + COFINS', 'calculator', 'text-rose-500'),
+      kpiSped('Faturamento Bruto', fBRL_sp(p.total_faturamento), p.company?.razao_social || '', 'trending-up', 'text-emerald-500'),
+      kpiSped('ICMS Apurado', fBRL_sp(p.total_icms), 'Operações próprias', 'landmark', 'text-blue-500'),
+      kpiSped('PIS Apurado', fBRL_sp(p.total_pis), 'Conf. regime tributário', 'percent', 'text-indigo-500'),
+      kpiSped('COFINS Apurado', fBRL_sp(p.total_cofins), 'Conf. regime tributário', 'percent', 'text-purple-500'),
+      kpiSped('Total de Impostos', fBRL_sp(p.total_impostos), 'ICMS + PIS + COFINS', 'calculator', 'text-rose-500'),
     ].join('');
     pvEl.classList.remove('hidden');
     if (window.lucide) lucide.createIcons();
@@ -285,7 +285,7 @@ async function loadPortalLink() {
         </div>
         <div class="grid grid-cols-2 gap-4">
           ${kpiSped('NF-e no Mês', pData.invoices_count, pData.period, 'receipt', 'text-amber-500')}
-          ${kpiSped('Faturado no Mês', fBRL5(pData.total_billed), pData.company?.razao_social || '', 'trending-up', 'text-emerald-500')}
+          ${kpiSped('Faturado no Mês', fBRL_sp(pData.total_billed), pData.company?.razao_social || '', 'trending-up', 'text-emerald-500')}
         </div>
       </div>`;
     pEl.classList.remove('hidden');
@@ -357,14 +357,14 @@ async function spedContribPreview() {
   el.innerHTML = `<div class="space-y-3">
     <div class="font-semibold text-sm text-slate-700 dark:text-slate-200">EFD Contribuições — Período ${s} a ${e}</div>
     ${[
-      ['Receita Bruta', fBRL5(data.total_receita), 'text-blue-400'],
-      ['PIS Saída', fBRL5(data.pis_saida), 'text-rose-400'],
-      ['COFINS Saída', fBRL5(data.cofins_saida), 'text-rose-400'],
-      ['Total Compras', fBRL5(data.total_compras), 'text-slate-400'],
-      ['PIS Crédito Est.', fBRL5(data.pis_credito_estimado), 'text-emerald-400'],
-      ['COFINS Crédito Est.', fBRL5(data.cofins_credito_estimado), 'text-emerald-400'],
-      ['PIS a Recolher', fBRL5(data.pis_a_recolher), 'text-amber-400'],
-      ['COFINS a Recolher', fBRL5(data.cofins_a_recolher), 'text-amber-400'],
+      ['Receita Bruta', fBRL_sp(data.total_receita), 'text-blue-400'],
+      ['PIS Saída', fBRL_sp(data.pis_saida), 'text-rose-400'],
+      ['COFINS Saída', fBRL_sp(data.cofins_saida), 'text-rose-400'],
+      ['Total Compras', fBRL_sp(data.total_compras), 'text-slate-400'],
+      ['PIS Crédito Est.', fBRL_sp(data.pis_credito_estimado), 'text-emerald-400'],
+      ['COFINS Crédito Est.', fBRL_sp(data.cofins_credito_estimado), 'text-emerald-400'],
+      ['PIS a Recolher', fBRL_sp(data.pis_a_recolher), 'text-amber-400'],
+      ['COFINS a Recolher', fBRL_sp(data.cofins_a_recolher), 'text-amber-400'],
     ].map(([l,v,c])=>`<div class="flex justify-between border-b border-slate-100 dark:border-slate-800 py-1.5 last:border-0"><span class="text-xs text-slate-400">${l}</span><span class="font-mono font-semibold text-xs ${c}">${v}</span></div>`).join('')}
     <div class="text-[10px] text-slate-400 pt-1">Apuração: <strong>${data.tipo_apuracao}</strong> · ${data.count_nfe} NF-e</div>
   </div>`;
@@ -434,7 +434,7 @@ async function reinfPreview() {
       </div>
     </div>`).join('')}
     <div class="bg-indigo-500/10 border border-indigo-500/20 rounded-xl p-3 text-xs text-indigo-400">
-      Total retenções estimadas: <strong>${fBRL5(data.total_retencoes_estimadas)}</strong> · Vence: ${data.vencimento?.split('-').reverse().join('/')||'-'}
+      Total retenções estimadas: <strong>${fBRL_sp(data.total_retencoes_estimadas)}</strong> · Vence: ${data.vencimento?.split('-').reverse().join('/')||'-'}
     </div>
   </div>`;
 }
@@ -471,13 +471,13 @@ async function dctfPreview() {
     <div class="font-semibold text-xs text-slate-500 mt-3 mb-1">Débitos</div>
     ${debitos.map(([k,v])=>`<div class="flex justify-between border-b border-slate-100 dark:border-slate-800 py-1.5 last:border-0">
       <span class="text-xs text-slate-400">${k.replace(/_/g,' ')}</span>
-      <span class="font-mono text-xs font-bold text-rose-400">${fBRL5(v)}</span>
+      <span class="font-mono text-xs font-bold text-rose-400">${fBRL_sp(v)}</span>
     </div>`).join('')}
     <div class="flex justify-between py-2 border-t border-slate-200 dark:border-slate-700">
       <span class="text-sm font-bold text-slate-600 dark:text-slate-200">Total Débitos</span>
-      <span class="font-mono font-bold text-rose-400">${fBRL5(data.total_debitos)}</span>
+      <span class="font-mono font-bold text-rose-400">${fBRL_sp(data.total_debitos)}</span>
     </div>
-    <div class="flex justify-between py-1"><span class="text-xs text-slate-400">FGTS (separado)</span><span class="font-mono text-xs">${fBRL5(data.total_fgts)}</span></div>
+    <div class="flex justify-between py-1"><span class="text-xs text-slate-400">FGTS (separado)</span><span class="font-mono text-xs">${fBRL_sp(data.total_fgts)}</span></div>
     <div class="bg-blue-500/10 border border-blue-500/20 rounded-xl p-3 text-xs space-y-1 mt-2">
       <div class="text-blue-400">Venc. DARF: <strong>${data.vencimento_darf?.split('-').reverse().join('/')||'-'}</strong></div>
       <div class="text-slate-400">Venc. FGTS: ${data.vencimento_fgts?.split('-').reverse().join('/')||'-'}</div>
@@ -529,19 +529,19 @@ async function ecfPreview() {
     <div class="text-xs text-slate-400">${data.razao_social} · ${data.cnpj}</div>
     <div class="text-xs font-semibold text-fuchsia-400">Regime: ${data.regime}</div>
     ${[
-      ['Receita Bruta', fBRL5(data.receita_bruta_total), 'text-blue-400'],
-      ['Despesas Totais', fBRL5(data.total_despesas), 'text-rose-400'],
-      ['Lucro Bruto Contábil', fBRL5(data.lucro_bruto_contabil), 'text-emerald-400'],
-      ['Base IRPJ', fBRL5(data.base_calculo_irpj), 'text-slate-400'],
-      ['IRPJ 15%', fBRL5(data.irpj_normal_15pct), 'text-fuchsia-400'],
-      ['IRPJ Adicional 10%', fBRL5(data.irpj_adicional_10pct), 'text-fuchsia-400'],
-      ['CSLL 9%', fBRL5(data.csll_total), 'text-fuchsia-400'],
+      ['Receita Bruta', fBRL_sp(data.receita_bruta_total), 'text-blue-400'],
+      ['Despesas Totais', fBRL_sp(data.total_despesas), 'text-rose-400'],
+      ['Lucro Bruto Contábil', fBRL_sp(data.lucro_bruto_contabil), 'text-emerald-400'],
+      ['Base IRPJ', fBRL_sp(data.base_calculo_irpj), 'text-slate-400'],
+      ['IRPJ 15%', fBRL_sp(data.irpj_normal_15pct), 'text-fuchsia-400'],
+      ['IRPJ Adicional 10%', fBRL_sp(data.irpj_adicional_10pct), 'text-fuchsia-400'],
+      ['CSLL 9%', fBRL_sp(data.csll_total), 'text-fuchsia-400'],
     ].map(([l,v,c])=>`<div class="flex justify-between border-b border-slate-100 dark:border-slate-800 py-1.5 last:border-0">
       <span class="text-xs text-slate-400">${l}</span><span class="font-mono text-xs font-bold ${c}">${v}</span>
     </div>`).join('')}
     <div class="flex justify-between py-2 border-t border-slate-200 dark:border-slate-700">
       <span class="text-sm font-bold text-slate-600 dark:text-slate-200">Total IRPJ + CSLL</span>
-      <span class="font-mono font-bold text-fuchsia-400">${fBRL5(data.total_impostos_federais)}</span>
+      <span class="font-mono font-bold text-fuchsia-400">${fBRL_sp(data.total_impostos_federais)}</span>
     </div>
     <div class="bg-fuchsia-500/10 border border-fuchsia-500/20 rounded-xl p-3 text-xs text-fuchsia-400">
       Prazo entrega: <strong>${data.prazo_entrega?.split('-').reverse().join('/')||'-'}</strong>
