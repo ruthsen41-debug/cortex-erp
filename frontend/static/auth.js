@@ -56,6 +56,7 @@
 
   window.cortexLogout = function () {
     clearToken();
+    try { localStorage.removeItem('cortex_user'); } catch (e) {}
     window.location.reload();
   };
 
@@ -174,6 +175,7 @@
         const data = await res.json().catch(() => ({}));
         if (!res.ok) { errBox.textContent = data.detail || 'Falha no login.'; return; }
         setToken(data.access_token);
+        try { localStorage.setItem('cortex_user', JSON.stringify(data.user)); } catch (e) {}
         // Remove reset_token da URL antes de recarregar
         const url = new URL(window.location.href);
         url.searchParams.delete('reset_token');
@@ -216,6 +218,7 @@
           return;
         }
         setToken(data.access_token);
+        try { localStorage.setItem('cortex_user', JSON.stringify(data.user)); } catch (e) {}
         window.location.reload();
       } catch (e) {
         errBox.textContent = 'Erro de conexão com o servidor.';

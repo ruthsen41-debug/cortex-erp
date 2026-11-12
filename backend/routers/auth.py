@@ -7,7 +7,7 @@ from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from fastapi import APIRouter, HTTPException, Depends, Request, status
+from fastapi import APIRouter, HTTPException, Depends, Request, Body, status
 from typing import Dict, Any
 
 _log = logging.getLogger(__name__)
@@ -279,6 +279,82 @@ def register_company(req: CompanyRegisterRequest):
         raise
     finally:
         conn.close()
+
+
+@router.get("/users-list", response_model=list)
+def list_users(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Lista todos os usuários da empresa (apenas admin)."""
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Apenas administradores podem listar usuários.")
+    conn = get_conn()
+    cur = conn.cursor()
+    rows = cur.execute(
+        "SELECT id, company_id, name, email, role, active, created_at FROM users WHERE company_id = ? ORDER BY name",
+        (current_user.get("company_id", 1),),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@router.put("/users/{user_id}")
+def update_user(user_id: int, req: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Atualiza nome, perfil, senha e status ativo de um usuário (apenas admin)."""
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Apenas administradores podem editar usuários.")
+    conn = get_conn()
+    cur = conn.cursor()
+    user = cur.execute(
+        "SELECT id FROM users WHERE id = ? AND company_id = ?",
+        (user_id, current_user.get("company_id", 1)),
+    ).fetchone()
+    if not user:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+
+    fields, values = [], []
+    if "name" in req:
+        fields.append("name = ?"); values.append(req["name"])
+    if "role" in req:
+        fields.append("role = ?"); values.append(req["role"])
+    if "active" in req:
+        fields.append("active = ?"); values.append(int(req["active"]))
+    if "password" in req and req["password"]:
+        fields.append("password_hash = ?"); values.append(hash_password(req["password"]))
+
+    if fields:
+        values.append(user_id)
+        cur.execute(f"UPDATE users SET {', '.join(fields)} WHERE id = ?", values)
+        conn.commit()
+
+    log_audit(conn, action="update", entity="users", entity_id=user_id, user_id=current_user["id"])
+    updated = cur.execute(
+        "SELECT id, company_id, name, email, role, active, created_at FROM users WHERE id = ?", (user_id,)
+    ).fetchone()
+    conn.close()
+    return dict(updated)
+
+
+@router.delete("/users/{user_id}")
+def delete_user(user_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Remove um usuário da empresa (apenas admin; não pode excluir a si mesmo)."""
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Apenas administradores podem excluir usuários.")
+    if current_user["id"] == user_id:
+        raise HTTPException(status_code=400, detail="Você não pode excluir sua própria conta.")
+    conn = get_conn()
+    cur = conn.cursor()
+    user = cur.execute(
+        "SELECT id FROM users WHERE id = ? AND company_id = ?",
+        (user_id, current_user.get("company_id", 1)),
+    ).fetchone()
+    if not user:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+    cur.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    conn.commit()
+    log_audit(conn, action="delete", entity="users", entity_id=user_id, user_id=current_user["id"])
+    conn.close()
+    return {"message": "Usuário excluído com sucesso."}
 
 
 @router.post("/forgot-password")

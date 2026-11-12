@@ -5,6 +5,71 @@ let currentProducts = [];
 let currentBankAccounts = [];
 let currentCategories = [];
 let currentContacts = [];
+let currentUserRole = 'admin';
+
+// Perfis de acesso — null = todos os módulos
+const ROLE_MODULES = {
+  admin:      null,
+  dp:         ['dp', 'conventions', 'employee_portal', 'settings'],
+  fiscal:     ['invoices', 'sped', 'nfe_manifest', 'dirbi', 'certificates', 'settings'],
+  contabil:   ['accounting', 'lalur', 'honorarios', 'audit', 'patrimony', 'simples', 'obligations', 'certificates', 'reports', 'settings'],
+  comercial:  ['crm', 'sales', 'pdv', 'os', 'inventory', 'purchases', 'contracts', 'returns', 'quotes', 'settings'],
+  financeiro: ['receivables', 'payables', 'ofx', 'reports', 'settings'],
+};
+const ROLE_FIRST_TAB = {
+  admin: 'dashboard', dp: 'dp', fiscal: 'invoices',
+  contabil: 'accounting', comercial: 'sales', financeiro: 'receivables',
+};
+const ROLE_LABEL = {
+  admin: 'Administrador', dp: 'Depto. Pessoal', fiscal: 'Fiscal',
+  contabil: 'Contábil', comercial: 'Comercial', financeiro: 'Financeiro',
+};
+
+function getFirstTab(role) {
+  return ROLE_FIRST_TAB[role] || 'dashboard';
+}
+
+function applyRoleFilter(role) {
+  if (role === 'admin') return;
+  const allowed = ROLE_MODULES[role] || [];
+
+  // Oculta botões de navegação fora do perfil
+  document.querySelectorAll('[id^="nav-"]').forEach(el => {
+    const tab = el.id.replace('nav-', '');
+    if (!allowed.includes(tab)) el.style.display = 'none';
+  });
+
+  // Oculta seções da sidebar sem nenhum item visível
+  document.querySelectorAll('.cx-section').forEach(section => {
+    let sibling = section.nextElementSibling;
+    let hasVisible = false;
+    while (sibling && !sibling.classList.contains('cx-section')) {
+      if (sibling.tagName === 'BUTTON' && sibling.style.display !== 'none') {
+        hasVisible = true; break;
+      }
+      sibling = sibling.nextElementSibling;
+    }
+    if (!hasVisible) section.style.display = 'none';
+  });
+
+  // Oculta ações rápidas do header (Receita/Despesa/Venda/NF-e)
+  const headerActions = document.querySelector('header .overflow-x-auto');
+  if (headerActions) headerActions.style.display = 'none';
+
+  // Oculta AI quick launch (irrelevante para perfis restritos)
+  const aiLaunch = document.querySelector('.cx-command');
+  if (aiLaunch) aiLaunch.style.display = 'none';
+
+  // Exibe perfil do usuário na sidebar
+  const profileEl = document.getElementById('sidebar-role-badge');
+  if (profileEl) { profileEl.textContent = ROLE_LABEL[role] || role; profileEl.classList.remove('hidden'); }
+
+  // Oculta seção Administração para não-admins
+  const sectionAdmin = document.getElementById('section-admin');
+  if (sectionAdmin) sectionAdmin.style.display = 'none';
+  const navUsers = document.getElementById('nav-users');
+  if (navUsers) navUsers.style.display = 'none';
+}
 
 // Formatters
 const formatCurrency = (val) => {
@@ -126,6 +191,21 @@ async function preloadLookups() {
 
 // Navigation & Tab Switching
 async function switchTab(tab) {
+  // Verifica acesso pelo perfil
+  if (currentUserRole !== 'admin') {
+    const allowed = ROLE_MODULES[currentUserRole] || [];
+    if (!allowed.includes(tab)) {
+      const main = document.getElementById('main-content');
+      if (main) main.innerHTML = `
+        <div class="flex flex-col items-center justify-center h-64 gap-3 text-slate-500">
+          <i data-lucide="lock" class="w-10 h-10 text-slate-600"></i>
+          <p class="font-semibold text-slate-400">Acesso negado</p>
+          <p class="text-sm">Seu perfil <strong>${ROLE_LABEL[currentUserRole] || currentUserRole}</strong> não tem permissão para este módulo.</p>
+        </div>`;
+      if (window.lucide) lucide.createIcons();
+      return;
+    }
+  }
   currentTab = tab;
   if (typeof closeSidebar === 'function') closeSidebar();
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
@@ -240,6 +320,10 @@ async function switchTab(tab) {
     case 'dirbi':
       if (typeof renderDirbi === 'function') await renderDirbi(main);
       else main.innerHTML = '<div class="p-6 text-slate-400">Módulo DIRBI não carregado.</div>';
+      break;
+    case 'users':
+      if (typeof renderUsers === 'function') await renderUsers(main);
+      else main.innerHTML = '<div class="p-6 text-slate-400">Módulo Usuários não carregado.</div>';
       break;
     default:
       main.innerHTML = `<div class="p-6">Módulo "${tab}" em desenvolvimento.</div>`;
@@ -3807,10 +3891,20 @@ async function submitCertificate(e) {
 // Initial Boot
 document.addEventListener('DOMContentLoaded', () => {
   const theme = localStorage.getItem('cortex_theme');
-  if (theme === 'dark') {
-    document.documentElement.classList.add('dark');
+  if (theme === 'dark') document.documentElement.classList.add('dark');
+
+  try {
+    const userStr = localStorage.getItem('cortex_user');
+    if (userStr) {
+      const user = JSON.parse(userStr);
+      currentUserRole = user.role || 'admin';
+      applyRoleFilter(currentUserRole);
+    }
+  } catch (e) {}
+
+  switchTab(getFirstTab(currentUserRole));
+  if (currentUserRole === 'admin') {
+    refreshNotificationBadge();
+    setInterval(refreshNotificationBadge, 30000);
   }
-  switchTab('dashboard');
-  refreshNotificationBadge();
-  setInterval(refreshNotificationBadge, 30000);
 });
