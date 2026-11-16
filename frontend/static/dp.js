@@ -2592,26 +2592,53 @@ async function renderEsocialPeriodico(el) {
   };
 }
 
-// ── SEFIP/GFIP ───────────────────────────────────────────────────────────────
+// ── SEFIP/GFIP + FGTS Digital ────────────────────────────────────────────────
+function _sefipIsFgtsDigital(comp) {
+  // FGTS Digital obrigatório a partir de 2024-03
+  if (!comp) return false;
+  const [ano, mes] = comp.split('-').map(Number);
+  return (ano > 2024) || (ano === 2024 && mes >= 3);
+}
+
 async function renderSefip(el) {
   const today = new Date();
   const comp = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}`;
   el.innerHTML = `
     <div class="page-header">
       <div>
-        <h2 style="font-family:var(--font-display);font-size:1.4rem;font-weight:700;color:var(--text);margin:0">SEFIP / GFIP</h2>
-        <p style="font-size:.8rem;color:var(--muted);margin:.25rem 0 0">Geração do arquivo GRF e resumo da GPS</p>
+        <h2 style="font-family:var(--font-display);font-size:1.4rem;font-weight:700;color:var(--text);margin:0">FGTS / GFIP</h2>
+        <p style="font-size:.8rem;color:var(--muted);margin:.25rem 0 0">SEFIP/GRF para competências até fev/2024 · FGTS Digital (XML) a partir de mar/2024</p>
       </div>
       <div class="d-flex gap-2 align-items-center">
-        <input type="month" id="sefipComp" class="form-control" style="width:150px" value="${comp}">
-        <button class="btn btn-primary" onclick="window.sefipCalc()">Calcular SEFIP</button>
+        <input type="month" id="sefipComp" class="form-control" style="width:150px" value="${comp}" onchange="window.sefipUpdateBadge()">
+        <button class="btn btn-primary" onclick="window.sefipCalc()">Calcular</button>
       </div>
     </div>
+    <div id="sefipBadge" class="mb-3"></div>
     <div id="sefipResult"></div>`;
+
+  window.sefipUpdateBadge = () => {
+    const c = document.getElementById('sefipComp').value;
+    const badge = document.getElementById('sefipBadge');
+    if (_sefipIsFgtsDigital(c)) {
+      badge.innerHTML = `<div class="alert alert-info d-flex align-items-center gap-2 py-2 mb-0" style="font-size:.85rem">
+        <i data-lucide="info" style="width:16px;height:16px;flex-shrink:0"></i>
+        <span><strong>FGTS Digital</strong> — Competência a partir de mar/2024. O arquivo gerado é XML para importação no portal <strong>fgts.digital.caixa.gov.br</strong>.</span>
+      </div>`;
+    } else {
+      badge.innerHTML = `<div class="alert alert-warning d-flex align-items-center gap-2 py-2 mb-0" style="font-size:.85rem">
+        <i data-lucide="archive" style="width:16px;height:16px;flex-shrink:0"></i>
+        <span><strong>SEFIP/GRF (legado)</strong> — Competência anterior a mar/2024. Use este arquivo para <strong>fiscalizações e retificações retroativas</strong>. Formato aceito pela Caixa para períodos até fev/2024.</span>
+      </div>`;
+    }
+    if (window.lucide) lucide.createIcons();
+  };
+  window.sefipUpdateBadge();
 
   window.sefipCalc = async () => {
     const c = document.getElementById('sefipComp').value;
     const res = document.getElementById('sefipResult');
+    const isFgts = _sefipIsFgtsDigital(c);
     res.innerHTML = '<p class="text-muted text-center py-4">Calculando...</p>';
     try {
       const d = await apiFetch(`/api/dp/sefip/${c}`);
@@ -2624,11 +2651,22 @@ async function renderSefip(el) {
         ['RAT (3%)', 'R$ '+Number(d.total_rat).toFixed(2)],
         ['Terceiros (5,8%)', 'R$ '+Number(d.total_terceiros).toFixed(2)],
       ];
+
+      const btnDownload = isFgts
+        ? `<button class="btn btn-success" onclick="window.open('/api/dp/fgts-digital/${c}/xml','_blank')">
+             <i data-lucide="download" style="width:15px;height:15px;margin-right:6px"></i>Baixar XML — FGTS Digital
+           </button>
+           <span class="text-muted small ms-2">Importar em fgts.digital.caixa.gov.br</span>`
+        : `<button class="btn btn-primary" onclick="window.open('/api/dp/sefip/${c}/arquivo','_blank')">
+             <i data-lucide="download" style="width:15px;height:15px;margin-right:6px"></i>Baixar Arquivo SEFIP (GRF)
+           </button>
+           <span class="text-muted small ms-2">Válido para fiscalizações e retificações até fev/2024</span>`;
+
       res.innerHTML = `
         <div class="row g-3 mb-4">
           <div class="col-md-5">
             <div class="card p-3">
-              <h5 class="mb-3">GPS — Guia da Previdência Social</h5>
+              <h5 class="mb-3">${isFgts ? 'FGTS Digital — Resumo' : 'GPS — Guia da Previdência Social'}</h5>
               ${rows.map(([l,v])=>`<div class="d-flex justify-content-between border-bottom py-1"><span class="text-muted">${l}</span><strong>${v}</strong></div>`).join('')}
               <div class="d-flex justify-content-between pt-2 mt-1"><strong>Total GPS</strong><strong class="text-primary fs-5">R$ ${Number(d.total_gps).toFixed(2)}</strong></div>
               <div class="text-muted small mt-2">FPAS: ${d.fpas} | Cód. Terceiros: ${d.cod_terceiros}</div>
@@ -2648,7 +2686,8 @@ async function renderSefip(el) {
             </div>
           </div>
         </div>
-        <button class="btn btn-primary" onclick="window.open('/api/dp/sefip/${c}/arquivo','_blank')">Baixar Arquivo SEFIP (GRF)</button>`;
+        <div class="d-flex align-items-center gap-3">${btnDownload}</div>`;
+      if (window.lucide) lucide.createIcons();
     } catch(e) { res.innerHTML = `<div class="alert alert-danger">Erro: ${e.message}</div>`; }
   };
 }
