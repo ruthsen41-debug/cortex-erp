@@ -214,6 +214,27 @@ function openNewEmpModal() {
       <h3 class="font-bold text-slate-800 dark:text-slate-100 mb-5 text-lg flex items-center gap-2">
         <i data-lucide="user-plus" class="w-5 h-5 text-violet-500"></i> Novo Funcionário
       </h3>
+
+      <!-- Foto 3x4 -->
+      <div class="flex items-start gap-5 mb-5 pb-5 border-b border-slate-100 dark:border-slate-800">
+        <div>
+          <div id="new-emp-photo-preview"
+            style="width:90px;height:120px;border-radius:6px;overflow:hidden;border:2px dashed #d1d5db;background:#f9fafb;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-direction:column;gap:4px"
+            onclick="document.getElementById('new-emp-photo-input').click()">
+            <i data-lucide="camera" style="width:28px;height:28px;color:#9ca3af"></i>
+            <span style="font-size:10px;color:#9ca3af">Foto 3x4</span>
+          </div>
+          <input type="file" id="new-emp-photo-input" accept="image/*" style="display:none" onchange="newEmpPhotoPreview(this)">
+        </div>
+        <div style="flex:1">
+          <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+            <strong>Foto opcional.</strong> Clique para selecionar.<br>
+            Formatos aceitos: JPG, PNG.<br>
+            Tamanho recomendado: 3×4 cm (retrato).
+          </p>
+        </div>
+      </div>
+
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="md:col-span-2">
           ${labelCls('Nome completo *')}
@@ -311,6 +332,17 @@ async function saveNewEmp() {
       return;
     }
     const emp = await r.json();
+
+    // Salva foto se foi selecionada
+    if (_newEmpPhotoBase64 && emp.id) {
+      await fetch(`/api/dp/employees/${emp.id}/photo`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ photo: _newEmpPhotoBase64 }),
+      });
+      emp.photo = _newEmpPhotoBase64;
+      _newEmpPhotoBase64 = null;
+    }
+
     dpEmployees.push(emp);
     closeModal();
     await switchDpTab('funcionarios', true);
@@ -442,6 +474,21 @@ async function deactivateEmp(id, name) {
     await switchDpTab('funcionarios', true);
     if (window.lucide) lucide.createIcons();
   } catch { alert('Erro de conexão.'); }
+}
+
+// ── FOTO — preview no modal de novo funcionário ───────────────
+let _newEmpPhotoBase64 = null;
+function newEmpPhotoPreview(input) {
+  const file = input.files[0];
+  if (!file) return;
+  if (file.size > 2 * 1024 * 1024) { alert('Foto muito grande. Use uma imagem menor que 2MB.'); return; }
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    _newEmpPhotoBase64 = e.target.result;
+    const preview = document.getElementById('new-emp-photo-preview');
+    if (preview) preview.innerHTML = `<img src="${_newEmpPhotoBase64}" style="width:100%;height:100%;object-fit:cover">`;
+  };
+  reader.readAsDataURL(file);
 }
 
 // ── FOTO DO FUNCIONÁRIO ───────────────────────────────────────
