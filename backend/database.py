@@ -1869,6 +1869,8 @@ def migrate_db(conn: sqlite3.Connection) -> None:
             cur.execute("ALTER TABLE employees ADD COLUMN email TEXT DEFAULT ''")
         if "telefone" not in emp_cols:
             cur.execute("ALTER TABLE employees ADD COLUMN telefone TEXT DEFAULT ''")
+        if "photo" not in emp_cols:
+            cur.execute("ALTER TABLE employees ADD COLUMN photo TEXT DEFAULT NULL")
     except Exception:
         pass
 

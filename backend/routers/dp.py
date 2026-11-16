@@ -122,6 +122,27 @@ def update_employee(
     return row
 
 
+@router.put("/employees/{emp_id}/photo")
+def update_employee_photo(
+    emp_id: int,
+    data: Dict[str, Any] = Body(...),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Salva foto do funcionário em base64 (formato data:image/...)."""
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    if not conn.execute(
+        "SELECT 1 FROM employees WHERE id = ? AND company_id = ?", (emp_id, company_id)
+    ).fetchone():
+        conn.close()
+        raise HTTPException(status_code=404, detail="Funcionário não encontrado.")
+    photo = data.get("photo") or None
+    conn.execute("UPDATE employees SET photo = ? WHERE id = ? AND company_id = ?", (photo, emp_id, company_id))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
 @router.delete("/employees/{emp_id}")
 def deactivate_employee(emp_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
     conn = get_conn()

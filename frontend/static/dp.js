@@ -147,6 +147,13 @@ async function renderFuncionarios(el) {
 
   const rows = dpEmployees.map(emp => `
     <tr class="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
+      <td class="px-3 py-2">
+        ${emp.photo
+          ? `<img src="${emp.photo}" style="width:45px;height:60px;object-fit:cover;border-radius:4px;border:1px solid #e5e7eb" title="${emp.name}">`
+          : `<div style="width:45px;height:60px;border-radius:4px;border:1px dashed #d1d5db;display:flex;align-items:center;justify-content:center;background:#f9fafb;cursor:pointer" onclick="openEditEmpModal(${emp.id})" title="Adicionar foto">
+               <i data-lucide="camera" style="width:16px;height:16px;color:#9ca3af"></i>
+             </div>`}
+      </td>
       <td class="px-4 py-3 text-sm font-medium text-slate-800 dark:text-slate-200">
         ${emp.name}
         ${emp.is_prolabore ? '<span class="ml-2 text-[10px] font-bold text-purple-500 bg-purple-50 dark:bg-purple-900/30 px-1.5 py-0.5 rounded-full">PRÓ-LABORE</span>' : ''}
@@ -186,6 +193,7 @@ async function renderFuncionarios(el) {
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
           <thead><tr class="text-xs text-slate-400 uppercase border-b border-slate-100 dark:border-slate-800">
+            <th class="px-3 py-2 text-left font-semibold">Foto</th>
             <th class="px-4 py-2 text-left font-semibold">Nome</th>
             <th class="px-4 py-2 text-left font-semibold">CPF</th>
             <th class="px-4 py-2 text-left font-semibold">Cargo</th>
@@ -324,6 +332,27 @@ async function openEditEmpModal(id) {
       <h3 class="font-bold text-slate-800 dark:text-slate-100 mb-5 text-lg flex items-center gap-2">
         <i data-lucide="user-cog" class="w-5 h-5 text-violet-500"></i> Editar Funcionário
       </h3>
+
+      <!-- Foto 3x4 -->
+      <div class="flex items-start gap-5 mb-5 pb-5 border-b border-slate-100 dark:border-slate-800">
+        <div>
+          <div id="edit-emp-photo-preview" style="width:90px;height:120px;border-radius:6px;overflow:hidden;border:2px solid #e5e7eb;background:#f9fafb;display:flex;align-items:center;justify-content:center;cursor:pointer" onclick="document.getElementById('edit-emp-photo-input').click()">
+            ${emp.photo
+              ? `<img src="${emp.photo}" style="width:100%;height:100%;object-fit:cover">`
+              : `<div style="text-align:center;color:#9ca3af"><i data-lucide="camera" style="width:28px;height:28px;margin:0 auto 4px;display:block"></i><span style="font-size:10px">Foto 3x4</span></div>`}
+          </div>
+          <input type="file" id="edit-emp-photo-input" accept="image/*" style="display:none" onchange="empPhotoPreview(${emp.id}, this)">
+          ${emp.photo ? `<button onclick="empPhotoRemove(${emp.id})" style="margin-top:6px;width:100%;font-size:11px;color:#ef4444;background:none;border:none;cursor:pointer">Remover foto</button>` : ''}
+        </div>
+        <div style="flex:1">
+          <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+            Clique na imagem para selecionar a foto.<br>
+            Formatos: JPG, PNG. Tamanho recomendado: 3×4 cm.<br>
+            A foto será exibida na lista e no portal do funcionário.
+          </p>
+        </div>
+      </div>
+
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="md:col-span-2">
           ${labelCls('Nome completo *')}
@@ -410,6 +439,53 @@ async function deactivateEmp(id, name) {
     if (!r.ok) { alert('Erro ao desligar funcionário.'); return; }
     const idx = dpEmployees.findIndex(e => e.id === id);
     if (idx >= 0) dpEmployees[idx].active = false;
+    await switchDpTab('funcionarios', true);
+    if (window.lucide) lucide.createIcons();
+  } catch { alert('Erro de conexão.'); }
+}
+
+// ── FOTO DO FUNCIONÁRIO ───────────────────────────────────────
+async function empPhotoPreview(empId, input) {
+  const file = input.files[0];
+  if (!file) return;
+  if (file.size > 2 * 1024 * 1024) { alert('Foto muito grande. Use uma imagem menor que 2MB.'); return; }
+
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    const base64 = e.target.result;
+
+    // Atualiza preview imediato
+    const preview = document.getElementById('edit-emp-photo-preview');
+    if (preview) preview.innerHTML = `<img src="${base64}" style="width:100%;height:100%;object-fit:cover">`;
+
+    // Salva via API
+    try {
+      const r = await fetch(`/api/dp/employees/${empId}/photo`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ photo: base64 }),
+      });
+      if (!r.ok) { alert('Erro ao salvar foto.'); return; }
+      const idx = dpEmployees.findIndex(e => e.id === empId);
+      if (idx >= 0) dpEmployees[idx].photo = base64;
+      showToast('Foto salva com sucesso!', 'success');
+    } catch { alert('Erro de conexão ao salvar foto.'); }
+  };
+  reader.readAsDataURL(file);
+}
+
+async function empPhotoRemove(empId) {
+  if (!confirm('Remover a foto deste funcionário?')) return;
+  try {
+    const r = await fetch(`/api/dp/employees/${empId}/photo`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ photo: null }),
+    });
+    if (!r.ok) { alert('Erro ao remover foto.'); return; }
+    const idx = dpEmployees.findIndex(e => e.id === empId);
+    if (idx >= 0) dpEmployees[idx].photo = null;
+    closeModal();
     await switchDpTab('funcionarios', true);
     if (window.lucide) lucide.createIcons();
   } catch { alert('Erro de conexão.'); }
