@@ -17,12 +17,14 @@
   function applyChartDefaults() {
     if (!window.Chart) return;
     const dark = document.documentElement.classList.contains('dark');
-    Chart.defaults.color = dark ? '#8d97c4' : '#5a6390';
-    Chart.defaults.borderColor = dark ? 'rgba(129,140,248,.10)' : 'rgba(99,102,241,.12)';
+    Chart.defaults.color = dark ? '#8d97c4' : '#6b7280';
+    Chart.defaults.borderColor = dark ? 'rgba(129,140,248,.10)' : 'rgba(229,231,235,1)';
     Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
     Chart.defaults.plugins.legend.labels.usePointStyle = true;
-    Chart.defaults.plugins.tooltip.backgroundColor = 'rgba(8,12,28,.94)';
-    Chart.defaults.plugins.tooltip.borderColor = 'rgba(129,140,248,.4)';
+    Chart.defaults.plugins.tooltip.backgroundColor = dark ? 'rgba(8,12,28,.94)' : '#fff';
+    Chart.defaults.plugins.tooltip.borderColor = dark ? 'rgba(129,140,248,.4)' : '#e5e7eb';
+    Chart.defaults.plugins.tooltip.titleColor = dark ? '#e9edff' : '#111827';
+    Chart.defaults.plugins.tooltip.bodyColor = dark ? '#8d97c4' : '#6b7280';
     Chart.defaults.plugins.tooltip.borderWidth = 1;
     Chart.defaults.plugins.tooltip.padding = 10;
     Chart.defaults.plugins.tooltip.cornerRadius = 10;

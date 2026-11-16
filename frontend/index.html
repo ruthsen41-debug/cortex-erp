@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="pt-BR" class="h-full dark">
+<html lang="pt-BR" class="h-full">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -10,8 +10,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
   <script>
-    // Tema escuro por padrão; só vai para o claro se o usuário escolheu antes (evita "flash").
-    try { if (localStorage.getItem('cortex_theme') === 'light') document.documentElement.classList.remove('dark'); } catch (e) {}
+    // Tema claro por padrão (Bizneo style); vai para escuro se o usuário escolheu antes.
+    try { if (localStorage.getItem('cortex_theme') === 'dark') document.documentElement.classList.add('dark'); } catch (e) {}
   </script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -41,170 +41,146 @@
   <div id="sidebar-overlay" class="fixed inset-0 z-30 bg-black/60 backdrop-blur-sm hidden md:hidden" onclick="closeSidebar()"></div>
 
   <!-- SIDEBAR DE NAVEGAÇÃO -->
-  <aside id="sidebar" class="cx-sidebar w-64 text-slate-300 flex flex-col shrink-0 select-none fixed inset-y-0 left-0 z-40 -translate-x-full md:translate-x-0 md:static md:z-auto transition-transform duration-300">
-    <div class="p-4 flex items-center gap-3 border-b border-white/5">
+  <aside id="sidebar" class="cx-sidebar flex flex-col shrink-0 select-none fixed inset-y-0 left-0 z-40 -translate-x-full md:translate-x-0 md:static md:z-auto transition-all duration-300" style="width:220px">
+    <!-- Logo + toggle -->
+    <div class="cx-sb-header">
       <div class="cx-logo">CX</div>
-      <div>
-        <div class="text-white font-display font-bold text-base tracking-tight flex items-center gap-1.5">
-          Cortex ERP
-          <span class="font-mono text-[9px] tracking-widest bg-cyan-400/10 text-cyan-300 border border-cyan-400/30 px-1.5 py-0.5 rounded-md">PRO+</span>
-        </div>
-        <div class="font-mono text-[10px] tracking-wider text-slate-500 uppercase">Gestão · Fiscal · IA</div>
+      <div class="cx-sb-brand">
+        <span class="cx-sb-name">Cortex ERP</span>
+        <span class="cx-sb-tag">PRO+</span>
       </div>
+      <button onclick="toggleSidebarCompact()" class="cx-sb-toggle" title="Compactar sidebar">
+        <i data-lucide="panel-left-close" class="w-4 h-4"></i>
+      </button>
     </div>
 
-    <nav class="flex-1 overflow-y-auto custom-scroll p-3 space-y-1 text-sm">
-      <div class="cx-section px-3 py-1 font-bold uppercase">Visão &amp; Inteligência</div>
-      <button onclick="switchTab('dashboard')" id="nav-dashboard" class="nav-item active w-full flex items-center gap-3 px-3 py-2.5">
-        <i data-lucide="layout-dashboard" class="w-4 h-4 text-cyan-300"></i>
-        <span>Visão Geral &amp; CFO IA</span>
+    <nav class="flex-1 overflow-y-auto custom-scroll cx-nav">
+
+      <div class="cx-section">Visão &amp; IA</div>
+      <button onclick="switchTab('dashboard')" id="nav-dashboard" class="nav-item active" data-label="Visão Geral &amp; CFO IA">
+        <i data-lucide="layout-dashboard" class="nav-icon"></i><span class="nav-label">Visão Geral &amp; CFO IA</span>
       </button>
 
-      <div class="cx-section pt-4 px-3 py-1 font-bold uppercase">Financeiro</div>
-      <button onclick="switchTab('receivables')" id="nav-receivables" class="nav-item w-full flex items-center justify-between px-3 py-2.5">
-        <span class="flex items-center gap-3"><i data-lucide="arrow-up-right" class="w-4 h-4 text-emerald-400"></i><span>Contas a Receber</span></span>
+      <div class="cx-section">Financeiro</div>
+      <button onclick="switchTab('receivables')" id="nav-receivables" class="nav-item" data-label="Contas a Receber">
+        <i data-lucide="arrow-up-right" class="nav-icon text-emerald-500"></i><span class="nav-label">Contas a Receber</span>
+        <span id="badge-receivables" class="nav-badge hidden"></span>
       </button>
-      <button onclick="switchTab('payables')" id="nav-payables" class="nav-item w-full flex items-center justify-between px-3 py-2.5">
-        <span class="flex items-center gap-3"><i data-lucide="arrow-down-left" class="w-4 h-4 text-rose-400"></i><span>Contas a Pagar</span></span>
+      <button onclick="switchTab('payables')" id="nav-payables" class="nav-item" data-label="Contas a Pagar">
+        <i data-lucide="arrow-down-left" class="nav-icon text-rose-500"></i><span class="nav-label">Contas a Pagar</span>
       </button>
-      <button onclick="switchTab('ofx')" id="nav-ofx" class="nav-item w-full flex items-center justify-between px-3 py-2.5">
-        <span class="flex items-center gap-3"><i data-lucide="file-check-2" class="w-4 h-4 text-amber-400"></i><span>Conciliação OFX</span></span>
-        <span id="badge-ofx" class="font-mono text-[10px] bg-amber-400/15 text-amber-300 border border-amber-400/25 px-1.5 py-0.5 rounded-md">0</span>
-      </button>
-
-      <div class="cx-section pt-4 px-3 py-1 font-bold uppercase">Comercial &amp; Operações</div>
-      <button onclick="switchTab('crm')" id="nav-crm" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
-        <i data-lucide="kanban" class="w-4 h-4 text-fuchsia-400"></i>
-        <span>CRM Funil Kanban</span>
-      </button>
-      <button onclick="switchTab('sales')" id="nav-sales" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
-        <i data-lucide="shopping-bag" class="w-4 h-4 text-blue-400"></i>
-        <span>Vendas &amp; Orçamentos</span>
-      </button>
-      <button onclick="switchTab('pdv')" id="nav-pdv" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
-        <i data-lucide="monitor-smartphone" class="w-4 h-4 text-cyan-400"></i>
-        <span>PDV Frente de Caixa</span>
-      </button>
-      <button onclick="switchTab('os')" id="nav-os" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
-        <i data-lucide="wrench" class="w-4 h-4 text-orange-400"></i>
-        <span>Ordens de Serviço &amp; Contratos</span>
+      <button onclick="switchTab('ofx')" id="nav-ofx" class="nav-item" data-label="Conciliação OFX">
+        <i data-lucide="file-check-2" class="nav-icon text-amber-500"></i><span class="nav-label">Conciliação OFX</span>
+        <span id="badge-ofx" class="nav-badge">0</span>
       </button>
 
-      <div class="cx-section pt-4 px-3 py-1 font-bold uppercase">Estoque, Compras &amp; Fiscal</div>
-      <button onclick="switchTab('inventory')" id="nav-inventory" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
-        <i data-lucide="package-search" class="w-4 h-4 text-indigo-400"></i>
-        <span>Estoque, XML &amp; Cadastros</span>
+      <div class="cx-section">Comercial &amp; Operações</div>
+      <button onclick="switchTab('crm')" id="nav-crm" class="nav-item" data-label="CRM Funil Kanban">
+        <i data-lucide="kanban" class="nav-icon text-fuchsia-500"></i><span class="nav-label">CRM Funil Kanban</span>
       </button>
-      <button onclick="switchTab('purchases')" id="nav-purchases" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
-        <i data-lucide="shopping-cart" class="w-4 h-4 text-orange-400"></i>
-        <span>Compras &amp; Fornecedores</span>
+      <button onclick="switchTab('sales')" id="nav-sales" class="nav-item" data-label="Vendas &amp; Orçamentos">
+        <i data-lucide="shopping-bag" class="nav-icon text-blue-500"></i><span class="nav-label">Vendas &amp; Orçamentos</span>
       </button>
-      <button onclick="switchTab('contracts')" id="nav-contracts" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
-        <i data-lucide="file-check-2" class="w-4 h-4 text-teal-400"></i>
-        <span>Contratos Recorrentes</span>
+      <button onclick="switchTab('pdv')" id="nav-pdv" class="nav-item" data-label="PDV Frente de Caixa">
+        <i data-lucide="monitor-smartphone" class="nav-icon text-cyan-500"></i><span class="nav-label">PDV Frente de Caixa</span>
       </button>
-      <button onclick="switchTab('returns')" id="nav-returns" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
-        <i data-lucide="undo-2" class="w-4 h-4 text-rose-400"></i>
-        <span>Devoluções &amp; RMA</span>
-      </button>
-      <button onclick="switchTab('quotes')" id="nav-quotes" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
-        <i data-lucide="file-text" class="w-4 h-4 text-yellow-400"></i>
-        <span>Pedidos &amp; Orçamentos</span>
-      </button>
-      <button onclick="switchTab('invoices')" id="nav-invoices" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
-        <i data-lucide="receipt" class="w-4 h-4 text-emerald-400"></i>
-        <span>Emissor NF-e / NFS-e</span>
-      </button>
-      <button onclick="switchTab('reports')" id="nav-reports" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
-        <i data-lucide="bar-chart-4" class="w-4 h-4 text-pink-400"></i>
-        <span>DRE &amp; Relatórios</span>
-      </button>
-      <button onclick="switchTab('settings')" id="nav-settings" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
-        <i data-lucide="building-2" class="w-4 h-4 text-orange-400"></i>
-        <span>Configurações da Empresa</span>
+      <button onclick="switchTab('os')" id="nav-os" class="nav-item" data-label="Ordens de Serviço">
+        <i data-lucide="wrench" class="nav-icon text-orange-500"></i><span class="nav-label">Ordens de Serviço</span>
       </button>
 
-      <div class="cx-section pt-4 px-3 py-1 font-bold uppercase">Contabilidade &amp; DP</div>
-      <button onclick="switchTab('accounting')" id="nav-accounting" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
-        <i data-lucide="book-marked" class="w-4 h-4 text-violet-400"></i>
-        <span>Módulo Contábil</span>
+      <div class="cx-section">Estoque &amp; Fiscal</div>
+      <button onclick="switchTab('inventory')" id="nav-inventory" class="nav-item" data-label="Estoque &amp; Cadastros">
+        <i data-lucide="package-search" class="nav-icon text-indigo-500"></i><span class="nav-label">Estoque &amp; Cadastros</span>
       </button>
-      <button onclick="switchTab('dp')" id="nav-dp" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
-        <i data-lucide="users-round" class="w-4 h-4 text-teal-400"></i>
-        <span>Depto. Pessoal &amp; Folha</span>
+      <button onclick="switchTab('purchases')" id="nav-purchases" class="nav-item" data-label="Compras &amp; Fornecedores">
+        <i data-lucide="shopping-cart" class="nav-icon text-orange-500"></i><span class="nav-label">Compras &amp; Fornecedores</span>
       </button>
-      <button onclick="switchTab('sped')" id="nav-sped" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
-        <i data-lucide="file-code-2" class="w-4 h-4 text-amber-400"></i>
-        <span>SPED / EFD / ECF</span>
+      <button onclick="switchTab('contracts')" id="nav-contracts" class="nav-item" data-label="Contratos Recorrentes">
+        <i data-lucide="file-check-2" class="nav-icon text-teal-500"></i><span class="nav-label">Contratos Recorrentes</span>
       </button>
-      <button onclick="switchTab('simples')" id="nav-simples" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
-        <i data-lucide="landmark" class="w-4 h-4 text-green-400"></i>
-        <span>Simples Nacional &amp; DAS</span>
+      <button onclick="switchTab('returns')" id="nav-returns" class="nav-item" data-label="Devoluções &amp; RMA">
+        <i data-lucide="undo-2" class="nav-icon text-rose-500"></i><span class="nav-label">Devoluções &amp; RMA</span>
       </button>
-      <button onclick="switchTab('patrimony')" id="nav-patrimony" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
-        <i data-lucide="building" class="w-4 h-4 text-purple-400"></i>
-        <span>Patrimônio &amp; Ativos Fixos</span>
+      <button onclick="switchTab('quotes')" id="nav-quotes" class="nav-item" data-label="Pedidos &amp; Orçamentos">
+        <i data-lucide="file-text" class="nav-icon text-yellow-500"></i><span class="nav-label">Pedidos &amp; Orçamentos</span>
       </button>
-
-      <button onclick="switchTab('lalur')" id="nav-lalur" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
-        <i data-lucide="book-open" class="w-4 h-4 text-orange-400"></i>
-        <span>LALUR (Lucro Real)</span>
+      <button onclick="switchTab('invoices')" id="nav-invoices" class="nav-item" data-label="Emissor NF-e / NFS-e">
+        <i data-lucide="receipt" class="nav-icon text-emerald-500"></i><span class="nav-label">Emissor NF-e / NFS-e</span>
       </button>
-
-      <div class="cx-section pt-4 px-3 py-1 font-bold uppercase">Escritório Contábil</div>
-      <button onclick="switchTab('honorarios')" id="nav-honorarios" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
-        <i data-lucide="handshake" class="w-4 h-4 text-yellow-400"></i>
-        <span>Honorários Contábeis</span>
+      <button onclick="switchTab('reports')" id="nav-reports" class="nav-item" data-label="DRE &amp; Relatórios">
+        <i data-lucide="bar-chart-4" class="nav-icon text-pink-500"></i><span class="nav-label">DRE &amp; Relatórios</span>
       </button>
-      <button onclick="switchTab('conventions')" id="nav-conventions" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
-        <i data-lucide="scroll-text" class="w-4 h-4 text-teal-400"></i>
-        <span>Convenções Coletivas (CCT)</span>
-      </button>
-      <button onclick="switchTab('nfe_manifest')" id="nav-nfe_manifest" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
-        <i data-lucide="file-search" class="w-4 h-4 text-blue-400"></i>
-        <span>Manifesto do Destinatário</span>
-      </button>
-      <button onclick="switchTab('certificates')" id="nav-certificates" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
-        <i data-lucide="key-round" class="w-4 h-4 text-pink-400"></i>
-        <span>Certificados Digitais</span>
+      <button onclick="switchTab('settings')" id="nav-settings" class="nav-item" data-label="Configurações">
+        <i data-lucide="building-2" class="nav-icon text-slate-500"></i><span class="nav-label">Configurações</span>
       </button>
 
-      <div class="cx-section pt-4 px-3 py-1 font-bold uppercase">Governança</div>
-      <button onclick="switchTab('obligations')" id="nav-obligations" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
-        <i data-lucide="calendar-check" class="w-4 h-4 text-sky-400"></i>
-        <span>Calendário de Obrigações</span>
+      <div class="cx-section">Contabilidade &amp; DP</div>
+      <button onclick="switchTab('accounting')" id="nav-accounting" class="nav-item" data-label="Módulo Contábil">
+        <i data-lucide="book-marked" class="nav-icon text-violet-500"></i><span class="nav-label">Módulo Contábil</span>
       </button>
-      <button onclick="switchTab('dirbi')" id="nav-dirbi" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
-        <i data-lucide="receipt" class="w-4 h-4 text-amber-400"></i>
-        <span>DIRBI</span>
+      <button onclick="switchTab('dp')" id="nav-dp" class="nav-item" data-label="Depto. Pessoal &amp; Folha">
+        <i data-lucide="users-round" class="nav-icon text-teal-500"></i><span class="nav-label">Depto. Pessoal &amp; Folha</span>
       </button>
-      <button onclick="switchTab('audit')" id="nav-audit" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
-        <i data-lucide="shield-check" class="w-4 h-4 text-cyan-400"></i>
-        <span>Auditoria do Sistema</span>
+      <button onclick="switchTab('sped')" id="nav-sped" class="nav-item" data-label="SPED / EFD / ECF">
+        <i data-lucide="file-code-2" class="nav-icon text-amber-500"></i><span class="nav-label">SPED / EFD / ECF</span>
+      </button>
+      <button onclick="switchTab('simples')" id="nav-simples" class="nav-item" data-label="Simples Nacional &amp; DAS">
+        <i data-lucide="landmark" class="nav-icon text-green-500"></i><span class="nav-label">Simples Nacional &amp; DAS</span>
+      </button>
+      <button onclick="switchTab('patrimony')" id="nav-patrimony" class="nav-item" data-label="Patrimônio &amp; Ativos">
+        <i data-lucide="building" class="nav-icon text-purple-500"></i><span class="nav-label">Patrimônio &amp; Ativos</span>
+      </button>
+      <button onclick="switchTab('lalur')" id="nav-lalur" class="nav-item" data-label="LALUR (Lucro Real)">
+        <i data-lucide="book-open" class="nav-icon text-orange-500"></i><span class="nav-label">LALUR (Lucro Real)</span>
       </button>
 
-      <div class="cx-section pt-4 px-3 py-1 font-bold uppercase" id="section-admin">Administração</div>
-      <button onclick="switchTab('users')" id="nav-users" class="nav-item w-full flex items-center gap-3 px-3 py-2.5">
-        <i data-lucide="users" class="w-4 h-4 text-violet-400"></i>
-        <span>Usuários do Sistema</span>
+      <div class="cx-section">Escritório Contábil</div>
+      <button onclick="switchTab('honorarios')" id="nav-honorarios" class="nav-item" data-label="Honorários Contábeis">
+        <i data-lucide="handshake" class="nav-icon text-yellow-500"></i><span class="nav-label">Honorários Contábeis</span>
+      </button>
+      <button onclick="switchTab('conventions')" id="nav-conventions" class="nav-item" data-label="Convenções Coletivas">
+        <i data-lucide="scroll-text" class="nav-icon text-teal-500"></i><span class="nav-label">Convenções Coletivas</span>
+      </button>
+      <button onclick="switchTab('nfe_manifest')" id="nav-nfe_manifest" class="nav-item" data-label="Manifesto Destinatário">
+        <i data-lucide="file-search" class="nav-icon text-blue-500"></i><span class="nav-label">Manifesto Destinatário</span>
+      </button>
+      <button onclick="switchTab('certificates')" id="nav-certificates" class="nav-item" data-label="Certificados Digitais">
+        <i data-lucide="key-round" class="nav-icon text-pink-500"></i><span class="nav-label">Certificados Digitais</span>
+      </button>
+
+      <div class="cx-section">Governança</div>
+      <button onclick="switchTab('obligations')" id="nav-obligations" class="nav-item" data-label="Calendário de Obrigações">
+        <i data-lucide="calendar-check" class="nav-icon text-sky-500"></i><span class="nav-label">Calendário de Obrigações</span>
+      </button>
+      <button onclick="switchTab('dirbi')" id="nav-dirbi" class="nav-item" data-label="DIRBI">
+        <i data-lucide="receipt" class="nav-icon text-amber-500"></i><span class="nav-label">DIRBI</span>
+      </button>
+      <button onclick="switchTab('audit')" id="nav-audit" class="nav-item" data-label="Auditoria do Sistema">
+        <i data-lucide="shield-check" class="nav-icon text-cyan-500"></i><span class="nav-label">Auditoria do Sistema</span>
+      </button>
+
+      <div class="cx-section" id="section-admin">Administração</div>
+      <button onclick="switchTab('users')" id="nav-users" class="nav-item" data-label="Usuários do Sistema">
+        <i data-lucide="users" class="nav-icon text-violet-500"></i><span class="nav-label">Usuários do Sistema</span>
       </button>
     </nav>
 
-    <div class="p-3 border-t border-white/5 text-xs text-slate-400 flex items-center gap-2">
-      <div class="min-w-0 flex-1">
-        <div id="sidebar-company-name" class="font-semibold text-slate-100 truncate">Cortex ERP Solutions</div>
-        <div class="flex items-center gap-2 flex-wrap">
-          <div id="sidebar-company-env" class="font-mono text-[10px] text-emerald-400 flex items-center gap-1.5">
-            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399] animate-pulse"></span> SEFAZ ATIVO
-          </div>
-          <span id="sidebar-role-badge" class="font-mono text-[9px] tracking-widest bg-violet-400/10 text-violet-300 border border-violet-400/30 px-1.5 py-0.5 rounded-md hidden"></span>
+    <div class="cx-sb-footer">
+      <div class="cx-sb-company">
+        <div id="sidebar-company-name" class="cx-sb-cname">Cortex ERP Solutions</div>
+        <div id="sidebar-company-env" class="cx-sb-env">
+          <span class="cx-sb-dot"></span><span class="cx-sb-env-label">SEFAZ ATIVO</span>
         </div>
-      <button id="btn-logout" onclick="cortexLogout()" title="Sair" class="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 transition">
-        <i data-lucide="log-out" class="w-4 h-4"></i>
-      </button>
-      <button onclick="toggleDarkMode()" title="Alternar Tema Claro/Escuro" class="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-slate-200 transition">
-        <i data-lucide="moon" class="w-4 h-4"></i>
-      </button>
+        <span id="sidebar-role-badge" class="cx-sb-role hidden"></span>
+      </div>
+      <div class="cx-sb-actions">
+        <button id="btn-logout" onclick="cortexLogout()" title="Sair" class="cx-sb-btn">
+          <i data-lucide="log-out" class="w-4 h-4"></i>
+        </button>
+        <button onclick="toggleDarkMode()" title="Alternar Tema" class="cx-sb-btn">
+          <i data-lucide="sun-moon" class="w-4 h-4"></i>
+        </button>
+      </div>
     </div>
   </aside>
 
@@ -303,6 +279,20 @@
       s.classList.add('-translate-x-full');
       o.classList.add('hidden');
     }
+    function toggleSidebarCompact() {
+      const s = document.getElementById('sidebar');
+      const compact = s.classList.toggle('cx-sb-compact');
+      s.style.width = compact ? '56px' : '220px';
+      try { localStorage.setItem('cortex_sb_compact', compact ? '1' : '0'); } catch(e) {}
+    }
+    // Restaura estado compacto
+    try {
+      if (localStorage.getItem('cortex_sb_compact') === '1') {
+        const s = document.getElementById('sidebar');
+        s.classList.add('cx-sb-compact');
+        s.style.width = '56px';
+      }
+    } catch(e) {}
   </script>
   <script>
     // PWA Service Worker Registration
