@@ -66,6 +66,9 @@ function dpTabs() {
     { id: 'fgts',              icon: 'piggy-bank',    label: 'Extrato FGTS' },
     { id: 'employee_portal',   icon: 'circle-user',   label: 'Portal' },
     { id: 'documentos',        icon: 'file-text',     label: 'Documentos' },
+    { id: 'esocial_tabelas',   icon: 'database',      label: 'eSocial Tabelas' },
+    { id: 'dctfweb',           icon: 'landmark',      label: 'DCTFWeb' },
+    { id: 'compliance',        icon: 'shield-check',  label: 'Compliance' },
     { id: 'rel_custo',         icon: 'calculator',    label: 'Custo CLT' },
     { id: 'rel_provisoes',     icon: 'piggy-bank',    label: 'Provisões' },
     { id: 'rel_folha_analitica', icon: 'table-2',     label: 'Folha Analítica' },
@@ -143,6 +146,9 @@ async function switchDpTab(tab, noRebuildTabs = false) {
     case 'fgts':               await renderFgts(body); break;
     case 'employee_portal':    await renderPortalFuncionario(body); break;
     case 'documentos':         renderDocumentos(body); break;
+    case 'esocial_tabelas':    await renderEsocialTabelas(body); break;
+    case 'dctfweb':            await renderDctfweb(body); break;
+    case 'compliance':         await renderCompliance(body); break;
     case 'rel_custo':          await renderRelCusto(body); break;
     case 'rel_provisoes':      await renderRelProvisoes(body); break;
     case 'rel_folha_analitica': await renderRelFolhaAnalitica(body); break;
@@ -5083,5 +5089,668 @@ async function renderRelTurnover(el) {
 
   window._loadTurnover = doLoad;
   await doLoad(anoAtual);
+}
+
+// ─── ESOCIAL TABELAS ──────────────────────────────────────────────────────────
+
+async function renderEsocialTabelas(el) {
+  const fDate2 = s => s ? s.slice(0,10).split('-').reverse().join('/') : '-';
+  let lotacoes = [], processos = [], exclusoes = [], horarios = [];
+
+  const loadAll = async () => {
+    [lotacoes, processos, exclusoes] = await Promise.all([
+      fetch('/api/dp/lotacoes', { headers: authHeaders() }).then(r => r.json()).catch(() => []),
+      fetch('/api/dp/processos-administrativos', { headers: authHeaders() }).then(r => r.json()).catch(() => []),
+      fetch('/api/dp/esocial/exclusoes', { headers: authHeaders() }).then(r => r.json()).catch(() => []),
+    ]);
+    horarios = dpEmployees.length ? await fetch('/api/dp/work-schedules', { headers: authHeaders() }).then(r => r.json()).catch(() => []) : [];
+    render();
+  };
+
+  const render = () => {
+    const lotRows = lotacoes.map(l => `
+      <tr class="border-b border-slate-100 dark:border-slate-800 text-sm">
+        <td class="px-3 py-2 font-mono">${l.cod_lotacao}</td>
+        <td class="px-3 py-2">${l.descricao || '-'}</td>
+        <td class="px-3 py-2">${l.tp_lotacao} / FPAS ${l.fpas}</td>
+        <td class="px-3 py-2">${l.ini_valid}</td>
+        <td class="px-3 py-2 text-right">
+          <a href="/api/dp/esocial/s1020/${l.id}" class="text-xs px-2 py-1 bg-cyan-100 text-cyan-700 rounded-lg mr-1">S-1020 XML</a>
+          <button onclick="window._delLotacao(${l.id})" class="text-xs px-2 py-1 bg-red-100 text-red-600 rounded-lg">×</button>
+        </td>
+      </tr>`).join('');
+
+    const procRows = processos.map(p => `
+      <tr class="border-b border-slate-100 dark:border-slate-800 text-sm">
+        <td class="px-3 py-2 font-mono">${p.nr_proc}</td>
+        <td class="px-3 py-2">${p.ind_proc === '1' ? 'Administrativo' : 'Judicial'}</td>
+        <td class="px-3 py-2">${p.cod_susp || '-'}</td>
+        <td class="px-3 py-2">${p.ini_valid}${p.fim_valid ? ' → ' + p.fim_valid : ''}</td>
+        <td class="px-3 py-2 text-right">
+          <a href="/api/dp/esocial/s1070/${p.id}" class="text-xs px-2 py-1 bg-cyan-100 text-cyan-700 rounded-lg mr-1">S-1070 XML</a>
+          <button onclick="window._delProcesso(${p.id})" class="text-xs px-2 py-1 bg-red-100 text-red-600 rounded-lg">×</button>
+        </td>
+      </tr>`).join('');
+
+    const exclRows = exclusoes.slice(0,10).map(e => `
+      <tr class="border-b border-slate-100 dark:border-slate-800 text-sm">
+        <td class="px-3 py-2 font-semibold text-orange-600">${e.evento_tipo}</td>
+        <td class="px-3 py-2 font-mono text-xs">${e.evento_id}</td>
+        <td class="px-3 py-2">${e.motivo || '-'}</td>
+        <td class="px-3 py-2 text-slate-400">${fDate2(e.created_at)}</td>
+      </tr>`).join('');
+
+    el.innerHTML = `
+      <div class="space-y-6">
+        <!-- Eventos de download direto -->
+        <div class="grid grid-cols-2 gap-4">
+          <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5">
+            <div class="font-semibold text-sm mb-3 flex items-center gap-2"><i data-lucide="building-2" class="w-4 h-4 text-indigo-500"></i>Eventos do Empregador</div>
+            <div class="space-y-2">
+              <a href="/api/dp/esocial/s1000" class="flex items-center justify-between p-3 border border-slate-200 dark:border-slate-700 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition">
+                <div><div class="font-semibold text-sm">S-1000</div><div class="text-xs text-slate-500">Informações do Empregador</div></div>
+                <span class="text-xs px-2 py-1 bg-indigo-100 text-indigo-700 rounded-lg">Download XML</span>
+              </a>
+              <a href="/api/dp/esocial/s1005" class="flex items-center justify-between p-3 border border-slate-200 dark:border-slate-700 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition">
+                <div><div class="font-semibold text-sm">S-1005</div><div class="text-xs text-slate-500">Tabela de Estabelecimentos</div></div>
+                <span class="text-xs px-2 py-1 bg-indigo-100 text-indigo-700 rounded-lg">Download XML</span>
+              </a>
+            </div>
+          </div>
+          <!-- S-3000 Exclusão -->
+          <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5">
+            <div class="font-semibold text-sm mb-3 flex items-center gap-2"><i data-lucide="trash-2" class="w-4 h-4 text-red-500"></i>S-3000 — Exclusão de Evento</div>
+            <div class="space-y-2">
+              <input id="s3000-tipo" placeholder="Tipo (ex: S-2200)" class="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-white dark:bg-slate-900">
+              <input id="s3000-id" placeholder="ID do evento (nrRec)" class="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-white dark:bg-slate-900">
+              <input id="s3000-motivo" placeholder="Motivo (opcional)" class="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-white dark:bg-slate-900">
+              <button onclick="window._gerarS3000()" class="w-full py-2 bg-red-600 text-white rounded-xl text-sm font-semibold hover:bg-red-700">Gerar S-3000 XML</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Lotações Tributárias (S-1020) -->
+        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden">
+          <div class="px-4 py-3 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+            <div class="font-semibold text-sm">S-1020 — Lotações Tributárias (${lotacoes.length})</div>
+            <button onclick="window._showLotacaoModal()" class="text-xs px-3 py-1.5 bg-indigo-600 text-white rounded-xl font-semibold">+ Nova</button>
+          </div>
+          <table class="w-full">
+            <thead class="bg-slate-50 dark:bg-slate-800 text-xs text-slate-500 uppercase">
+              <tr><th class="px-3 py-2 text-left">Código</th><th class="px-3 py-2 text-left">Descrição</th><th class="px-3 py-2 text-left">Tipo/FPAS</th><th class="px-3 py-2 text-left">Início</th><th class="px-3 py-2"></th></tr>
+            </thead>
+            <tbody>${lotRows || '<tr><td colspan="5" class="text-center py-8 text-slate-400">Nenhuma lotação cadastrada.</td></tr>'}</tbody>
+          </table>
+        </div>
+
+        <!-- Processos Administrativos (S-1070) -->
+        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden">
+          <div class="px-4 py-3 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+            <div class="font-semibold text-sm">S-1070 — Processos Adm./Judiciais (${processos.length})</div>
+            <button onclick="window._showProcessoModal()" class="text-xs px-3 py-1.5 bg-indigo-600 text-white rounded-xl font-semibold">+ Novo</button>
+          </div>
+          <table class="w-full">
+            <thead class="bg-slate-50 dark:bg-slate-800 text-xs text-slate-500 uppercase">
+              <tr><th class="px-3 py-2 text-left">Nº Processo</th><th class="px-3 py-2 text-left">Tipo</th><th class="px-3 py-2 text-left">Cód. Suspensão</th><th class="px-3 py-2 text-left">Validade</th><th class="px-3 py-2"></th></tr>
+            </thead>
+            <tbody>${procRows || '<tr><td colspan="5" class="text-center py-8 text-slate-400">Nenhum processo cadastrado.</td></tr>'}</tbody>
+          </table>
+        </div>
+
+        <!-- Histórico S-3000 -->
+        ${exclusoes.length ? `<div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden">
+          <div class="px-4 py-3 border-b border-slate-100 dark:border-slate-800 font-semibold text-sm">Histórico de Exclusões S-3000</div>
+          <table class="w-full">
+            <thead class="bg-slate-50 dark:bg-slate-800 text-xs text-slate-500 uppercase">
+              <tr><th class="px-3 py-2 text-left">Evento</th><th class="px-3 py-2 text-left">ID</th><th class="px-3 py-2 text-left">Motivo</th><th class="px-3 py-2 text-left">Data</th></tr>
+            </thead>
+            <tbody>${exclRows}</tbody>
+          </table>
+        </div>` : ''}
+
+        <!-- Modal Lotação -->
+        <div id="modal-lotacao" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+          <div class="bg-white dark:bg-slate-900 rounded-2xl shadow-xl p-6 w-full max-w-md">
+            <h3 class="font-bold text-lg mb-4">Nova Lotação Tributária</h3>
+            <div class="space-y-3">
+              <div><label class="text-xs font-semibold text-slate-500">Código da Lotação</label><input id="lot-cod" class="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 mt-1 bg-white dark:bg-slate-900" placeholder="ex: LOT001"></div>
+              <div><label class="text-xs font-semibold text-slate-500">Descrição</label><input id="lot-desc" class="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 mt-1 bg-white dark:bg-slate-900"></div>
+              <div class="grid grid-cols-2 gap-3">
+                <div><label class="text-xs font-semibold text-slate-500">FPAS</label><input id="lot-fpas" value="515" class="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 mt-1 bg-white dark:bg-slate-900"></div>
+                <div><label class="text-xs font-semibold text-slate-500">Início Validade</label><input id="lot-ini" type="month" class="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 mt-1 bg-white dark:bg-slate-900"></div>
+              </div>
+            </div>
+            <div class="flex gap-3 mt-5">
+              <button onclick="document.getElementById('modal-lotacao').classList.add('hidden')" class="flex-1 py-2 border border-slate-200 rounded-xl text-sm">Cancelar</button>
+              <button onclick="window._saveLotacao()" class="flex-1 py-2 bg-indigo-600 text-white rounded-xl text-sm font-semibold">Salvar</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal Processo -->
+        <div id="modal-processo" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+          <div class="bg-white dark:bg-slate-900 rounded-2xl shadow-xl p-6 w-full max-w-md">
+            <h3 class="font-bold text-lg mb-4">Novo Processo Adm./Judicial</h3>
+            <div class="space-y-3">
+              <div><label class="text-xs font-semibold text-slate-500">Número do Processo</label><input id="proc-nr" class="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 mt-1 bg-white dark:bg-slate-900"></div>
+              <div class="grid grid-cols-2 gap-3">
+                <div><label class="text-xs font-semibold text-slate-500">Tipo</label>
+                  <select id="proc-ind" class="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 mt-1 bg-white dark:bg-slate-900">
+                    <option value="1">Administrativo</option><option value="2">Judicial</option>
+                  </select></div>
+                <div><label class="text-xs font-semibold text-slate-500">Início Validade</label><input id="proc-ini" type="month" class="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 mt-1 bg-white dark:bg-slate-900"></div>
+              </div>
+              <div><label class="text-xs font-semibold text-slate-500">Código Suspensão (opcional)</label><input id="proc-susp" class="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 mt-1 bg-white dark:bg-slate-900"></div>
+              <div><label class="text-xs font-semibold text-slate-500">Observações</label><input id="proc-obs" class="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 mt-1 bg-white dark:bg-slate-900"></div>
+            </div>
+            <div class="flex gap-3 mt-5">
+              <button onclick="document.getElementById('modal-processo').classList.add('hidden')" class="flex-1 py-2 border border-slate-200 rounded-xl text-sm">Cancelar</button>
+              <button onclick="window._saveProcesso()" class="flex-1 py-2 bg-indigo-600 text-white rounded-xl text-sm font-semibold">Salvar</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+
+    if (window.lucide) lucide.createIcons();
+
+    window._showLotacaoModal = () => document.getElementById('modal-lotacao').classList.remove('hidden');
+    window._showProcessoModal = () => document.getElementById('modal-processo').classList.remove('hidden');
+
+    window._saveLotacao = async () => {
+      await fetch('/api/dp/lotacoes', { method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cod_lotacao: document.getElementById('lot-cod').value, descricao: document.getElementById('lot-desc').value,
+          fpas: document.getElementById('lot-fpas').value, ini_valid: document.getElementById('lot-ini').value }) });
+      document.getElementById('modal-lotacao').classList.add('hidden');
+      await loadAll();
+    };
+
+    window._delLotacao = async (id) => {
+      if (!confirm('Remover esta lotação?')) return;
+      await fetch(`/api/dp/lotacoes/${id}`, { method: 'DELETE', headers: authHeaders() });
+      await loadAll();
+    };
+
+    window._saveProcesso = async () => {
+      await fetch('/api/dp/processos-administrativos', { method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nr_proc: document.getElementById('proc-nr').value, ind_proc: document.getElementById('proc-ind').value,
+          ini_valid: document.getElementById('proc-ini').value, cod_susp: document.getElementById('proc-susp').value,
+          observacoes: document.getElementById('proc-obs').value }) });
+      document.getElementById('modal-processo').classList.add('hidden');
+      await loadAll();
+    };
+
+    window._delProcesso = async (id) => {
+      if (!confirm('Remover este processo?')) return;
+      await fetch(`/api/dp/processos-administrativos/${id}`, { method: 'DELETE', headers: authHeaders() });
+      await loadAll();
+    };
+
+    window._gerarS3000 = async () => {
+      const tipo = document.getElementById('s3000-tipo')?.value;
+      const id = document.getElementById('s3000-id')?.value;
+      if (!tipo || !id) return alert('Preencha o tipo e o ID do evento.');
+      const r = await fetch('/api/dp/esocial/s3000', { method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ evento_tipo: tipo, evento_id: id, motivo: document.getElementById('s3000-motivo')?.value || '' }) });
+      if (r.ok) {
+        const blob = await r.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = 'S-3000.xml'; a.click();
+        await loadAll();
+      }
+    };
+  };
+
+  el.innerHTML = `<div class="flex items-center justify-center p-10 text-slate-400"><div class="animate-spin rounded-full h-7 w-7 border-b-2 border-violet-500 mr-3"></div>Carregando...</div>`;
+  await loadAll();
+}
+
+
+// ─── DCTFWeb ──────────────────────────────────────────────────────────────────
+
+async function renderDctfweb(el) {
+  const hoje = new Date();
+  const defComp = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`;
+  const fBRL = v => parseFloat(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+  const doLoad = async (comp) => {
+    el.innerHTML = `<div class="flex items-center justify-center p-10 text-slate-400"><div class="animate-spin rounded-full h-7 w-7 border-b-2 border-violet-500 mr-3"></div>Carregando...</div>`;
+    const [dctf] = await Promise.all([
+      fetch(`/api/dp/dctfweb/${comp}`, { headers: authHeaders() }).then(r => r.json()).catch(() => ({})),
+    ]);
+
+    const v = dctf.valores || {};
+    const noRun = !dctf.run ? `<div class="text-center py-10 text-slate-400"><i data-lucide="file-x" class="w-10 h-10 mx-auto mb-2 text-slate-300"></i><p>Folha não processada para <strong>${comp}</strong>.</p></div>` : '';
+
+    const linhaRows = (dctf.linhas || []).map(l => `
+      <tr class="border-b border-slate-100 dark:border-slate-800 text-sm">
+        <td class="px-3 py-2 font-mono text-slate-500">${l.codigo}</td>
+        <td class="px-3 py-2">${l.descricao}</td>
+        <td class="px-3 py-2 text-right font-semibold">${fBRL(l.valor)}</td>
+      </tr>`).join('');
+
+    el.innerHTML = `
+      <div class="space-y-5">
+        <div class="flex items-center gap-3">
+          <label class="text-sm font-semibold text-slate-600">Competência:</label>
+          <input type="month" value="${comp}" id="dctf-comp"
+            class="border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 text-sm bg-white dark:bg-slate-900">
+          <button onclick="window._loadDctf(document.getElementById('dctf-comp').value)"
+            class="px-4 py-1.5 bg-violet-600 text-white rounded-xl text-sm font-semibold hover:bg-violet-700">Carregar</button>
+        </div>
+        ${noRun}
+        ${dctf.run ? `
+        <div class="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-2xl p-4 text-sm text-amber-800 dark:text-amber-200">
+          <strong>${dctf.company?.razao_social || ''}</strong> — CNPJ: ${dctf.company?.cnpj || ''} — Competência: ${comp}
+        </div>
+        <div class="grid grid-cols-4 gap-4">
+          ${kpiDP('BC CLT', fBRL(v.bc_clt), 'base de cálculo', 'users', 'text-slate-700')}
+          ${kpiDP('INSS Empregado', fBRL(v.inss_empregado), 'descontado na folha', 'minus-circle', 'text-orange-600')}
+          ${kpiDP('INSS Patronal', fBRL(v.inss_patronal), '20% CLT + 11% pró-labore', 'building-2', 'text-red-600')}
+          ${kpiDP('Total a Recolher', fBRL(v.total_recolher), 'GPS + DCTFWeb', 'landmark', 'text-indigo-700')}
+        </div>
+        <div class="grid grid-cols-2 gap-5">
+          <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden">
+            <div class="px-4 py-3 border-b font-semibold text-sm">Linhas DCTFWeb — INSS</div>
+            <table class="w-full">
+              <thead class="bg-slate-50 dark:bg-slate-800 text-xs text-slate-500 uppercase">
+                <tr><th class="px-3 py-2 text-left">Código</th><th class="px-3 py-2 text-left">Descrição</th><th class="px-3 py-2 text-right">Valor</th></tr>
+              </thead>
+              <tbody>${linhaRows}</tbody>
+              <tfoot class="bg-indigo-50 dark:bg-indigo-900/20 font-bold text-sm">
+                <tr><td class="px-3 py-2" colspan="2">TOTAL INSS</td><td class="px-3 py-2 text-right text-indigo-700">${fBRL(v.total_recolher)}</td></tr>
+              </tfoot>
+            </table>
+          </div>
+          <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4">
+            <div class="font-semibold text-sm">Downloads eSocial</div>
+            <a href="/api/dp/esocial/s5001/${comp}" class="flex items-center justify-between p-3 border border-slate-200 dark:border-slate-700 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition">
+              <div><div class="font-semibold text-sm">S-5001</div><div class="text-xs text-slate-500">Totalizador INSS — base para DCTFWeb</div></div>
+              <span class="text-xs px-2 py-1 bg-cyan-100 text-cyan-700 rounded-lg">XML</span>
+            </a>
+            <a href="/api/dp/esocial/s5011/${comp}" class="flex items-center justify-between p-3 border border-slate-200 dark:border-slate-700 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition">
+              <div><div class="font-semibold text-sm">S-5011</div><div class="text-xs text-slate-500">Totalizador FGTS — ${fBRL(v.fgts)}</div></div>
+              <span class="text-xs px-2 py-1 bg-cyan-100 text-cyan-700 rounded-lg">XML</span>
+            </a>
+            <div class="mt-2 p-3 bg-slate-50 dark:bg-slate-800 rounded-xl text-xs text-slate-500">
+              <strong>Como usar:</strong> Acesse o Portal eSocial (esocial.gov.br) → DCTFWeb → Nova Declaração → informe os valores acima. Os XMLs S-5001/S-5011 são para auditoria interna dos totais calculados.
+            </div>
+          </div>
+        </div>` : ''}
+      </div>`;
+    window._loadDctf = doLoad;
+    if (window.lucide) lucide.createIcons();
+  };
+
+  window._loadDctf = doLoad;
+  await doLoad(defComp);
+}
+
+
+// ─── COMPLIANCE ───────────────────────────────────────────────────────────────
+
+async function renderCompliance(el) {
+  const fDate2 = s => s ? s.slice(0,10).split('-').reverse().join('/') : '-';
+  const fBRL = v => parseFloat(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const hoje = new Date();
+  const defComp = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`;
+
+  let subTab = 'alertas';
+  const switchSub = async (tab) => {
+    subTab = tab;
+    document.querySelectorAll('.comp-sub-btn').forEach(b => {
+      b.className = b.className.replace('bg-violet-600 text-white', 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300');
+    });
+    const active = document.getElementById(`comp-sub-${tab}`);
+    if (active) active.className = active.className.replace('bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300', 'bg-violet-600 text-white');
+    const body = document.getElementById('comp-body');
+    if (!body) return;
+    body.innerHTML = `<div class="flex items-center justify-center p-10 text-slate-400"><div class="animate-spin rounded-full h-6 w-6 border-b-2 border-violet-500 mr-3"></div>Carregando...</div>`;
+    if (tab === 'alertas') await renderCompAlertas(body);
+    else if (tab === 'estabilidades') await renderCompEstabilidades(body);
+    else if (tab === 'contratos') await renderCompContratos(body);
+    else if (tab === 'cct') await renderCompCct(body, defComp);
+  };
+
+  const subTabs = [
+    { id: 'alertas', label: 'Dashboard' },
+    { id: 'estabilidades', label: 'Estabilidades' },
+    { id: 'contratos', label: 'Contratos Exp.' },
+    { id: 'cct', label: 'CCT Assistencial' },
+  ];
+
+  el.innerHTML = `
+    <div class="space-y-4">
+      <div class="flex gap-2 flex-wrap">
+        ${subTabs.map(t => `<button id="comp-sub-${t.id}" onclick="window._switchCompSub('${t.id}')"
+          class="comp-sub-btn px-3 py-1.5 rounded-xl text-xs font-semibold transition
+            ${t.id === subTab ? 'bg-violet-600 text-white' : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}">${t.label}</button>`).join('')}
+      </div>
+      <div id="comp-body"></div>
+    </div>`;
+
+  window._switchCompSub = switchSub;
+  await switchSub('alertas');
+}
+
+async function renderCompAlertas(el) {
+  const fDate2 = s => s ? s.slice(0,10).split('-').reverse().join('/') : '-';
+  const data = await fetch('/api/dp/alertas', { headers: authHeaders() }).then(r => r.json()).catch(() => ({}));
+
+  const tipoLabel = t => ({ gestante: '🤰 Gestante', acidentado: '🩹 Acidentado', cipa: '🏭 CIPA' }[t] || t);
+  const stabRows = (data.estabilidades || []).map(s => `
+    <div class="flex items-center justify-between p-3 border-b border-slate-100 dark:border-slate-800">
+      <div>
+        <div class="text-sm font-medium">${s.employee_name}</div>
+        <div class="text-xs text-slate-500">${tipoLabel(s.tipo)} — até ${fDate2(s.data_fim_estabilidade)}</div>
+      </div>
+      <span class="text-xs px-2 py-1 bg-amber-100 text-amber-700 rounded-lg">${((new Date(s.data_fim_estabilidade) - new Date()) / 86400000) | 0}d restantes</span>
+    </div>`).join('');
+
+  const contRows = (data.contratos || []).map(c => `
+    <div class="flex items-center justify-between p-3 border-b border-slate-100 dark:border-slate-800">
+      <div class="text-sm font-medium">${c.name}</div>
+      <span class="text-xs px-2 py-1 ${c.dias_restantes <= 7 ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'} rounded-lg">${c.dias_restantes}d p/ vencer</span>
+    </div>`).join('');
+
+  el.innerHTML = `
+    <div class="grid grid-cols-3 gap-4 mb-5">
+      ${kpiDP('Estabilidades Ativas', data.estabilidades_ativas || 0, 'gestante + acidentado + CIPA', 'shield', 'text-amber-600')}
+      ${kpiDP('Contratos Vencendo', data.contratos_vencendo || 0, 'próximos 30 dias', 'clock', data.contratos_vencendo > 0 ? 'text-red-600' : 'text-green-600')}
+      ${kpiDP('CCT Ativas', data.cct_ativas || 0, 'contribuições assistenciais', 'handshake', 'text-indigo-600')}
+    </div>
+    <div class="grid grid-cols-2 gap-5">
+      <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden">
+        <div class="px-4 py-3 border-b font-semibold text-sm text-amber-600">Estabilidades Próximas do Vencimento</div>
+        ${stabRows || '<div class="text-center py-8 text-slate-400 text-sm">Nenhuma estabilidade ativa.</div>'}
+        <div class="px-4 py-2 border-t">
+          <button onclick="window._switchCompSub('estabilidades')" class="text-xs text-indigo-600 hover:underline">Ver todas →</button>
+        </div>
+      </div>
+      <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden">
+        <div class="px-4 py-3 border-b font-semibold text-sm text-orange-600">Contratos de Experiência Vencendo</div>
+        ${contRows || '<div class="text-center py-8 text-slate-400 text-sm">Nenhum vencendo em 30 dias.</div>'}
+        <div class="px-4 py-2 border-t">
+          <button onclick="window._switchCompSub('contratos')" class="text-xs text-indigo-600 hover:underline">Ver todos →</button>
+        </div>
+      </div>
+    </div>`;
+  if (window.lucide) lucide.createIcons();
+}
+
+async function renderCompEstabilidades(el) {
+  const fDate2 = s => s ? s.slice(0,10).split('-').reverse().join('/') : '-';
+  const rows = await fetch('/api/dp/estabilidades', { headers: authHeaders() }).then(r => r.json()).catch(() => []);
+
+  const tipoOpts = [['gestante','Gestante'],['acidentado','Acidentado (B91)'],['cipa','Membro CIPA']];
+  const tipoLabel = t => ({ gestante: 'Gestante', acidentado: 'Acidentado', cipa: 'CIPA' }[t] || t);
+  const tipoColor = t => ({ gestante: 'bg-pink-100 text-pink-700', acidentado: 'bg-blue-100 text-blue-700', cipa: 'bg-yellow-100 text-yellow-700' }[t] || 'bg-slate-100 text-slate-600');
+
+  const trs = rows.map(r => `
+    <tr class="border-b border-slate-100 dark:border-slate-800 text-sm ${r.vencida ? 'opacity-50' : ''}">
+      <td class="px-3 py-2 font-medium">${r.employee_name}</td>
+      <td class="px-3 py-2"><span class="px-2 py-0.5 rounded-full text-xs font-semibold ${tipoColor(r.tipo)}">${tipoLabel(r.tipo)}</span></td>
+      <td class="px-3 py-2">${fDate2(r.data_inicio)}</td>
+      <td class="px-3 py-2 font-semibold ${r.vencida ? 'text-red-500' : 'text-green-600'}">${fDate2(r.data_fim_estabilidade)}</td>
+      <td class="px-3 py-2 text-right">
+        ${r.vencida ? '<span class="text-xs text-red-500">Vencida</span>' : `<span class="text-xs text-green-600">${r.dias_restantes}d</span>`}
+      </td>
+      <td class="px-3 py-2 text-right">
+        <button onclick="window._delStab(${r.id})" class="text-xs px-2 py-1 bg-red-100 text-red-600 rounded-lg">×</button>
+      </td>
+    </tr>`).join('');
+
+  const empOpts = dpEmployees.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
+
+  el.innerHTML = `
+    <div class="space-y-4">
+      <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-2xl p-4 text-sm text-blue-800 dark:text-blue-200">
+        Estabilidades impedem rescisão sem justa causa: <strong>Gestante</strong> — 5 meses pós-parto | <strong>Acidentado</strong> — 12 meses pós-alta INSS | <strong>CIPA</strong> — mandato + 1 ano.
+      </div>
+      <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden">
+        <div class="px-4 py-3 border-b flex items-center justify-between">
+          <div class="font-semibold text-sm">Estabilidades Registradas</div>
+          <button onclick="document.getElementById('modal-stab').classList.remove('hidden')" class="text-xs px-3 py-1.5 bg-indigo-600 text-white rounded-xl font-semibold">+ Nova</button>
+        </div>
+        <table class="w-full">
+          <thead class="bg-slate-50 dark:bg-slate-800 text-xs text-slate-500 uppercase">
+            <tr><th class="px-3 py-2 text-left">Funcionário</th><th class="px-3 py-2 text-left">Tipo</th><th class="px-3 py-2 text-left">Início</th><th class="px-3 py-2 text-left">Fim Estabilidade</th><th class="px-3 py-2 text-right">Restam</th><th class="px-3 py-2"></th></tr>
+          </thead>
+          <tbody>${trs || '<tr><td colspan="6" class="text-center py-8 text-slate-400">Nenhuma estabilidade registrada.</td></tr>'}</tbody>
+        </table>
+      </div>
+      <!-- Modal -->
+      <div id="modal-stab" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+        <div class="bg-white dark:bg-slate-900 rounded-2xl shadow-xl p-6 w-full max-w-md">
+          <h3 class="font-bold text-lg mb-4">Registrar Estabilidade</h3>
+          <div class="space-y-3">
+            <div><label class="text-xs font-semibold text-slate-500">Funcionário</label><select id="stab-emp" class="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 mt-1 bg-white dark:bg-slate-900"><option value="">-- selecione --</option>${empOpts}</select></div>
+            <div><label class="text-xs font-semibold text-slate-500">Tipo</label>
+              <select id="stab-tipo" class="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 mt-1 bg-white dark:bg-slate-900">
+                ${tipoOpts.map(([v,l]) => `<option value="${v}">${l}</option>`).join('')}
+              </select>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div><label class="text-xs font-semibold text-slate-500">Data Início</label><input id="stab-ini" type="date" class="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 mt-1 bg-white dark:bg-slate-900"></div>
+              <div><label class="text-xs font-semibold text-slate-500">Data Fim Estabilidade</label><input id="stab-fim" type="date" class="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 mt-1 bg-white dark:bg-slate-900"></div>
+            </div>
+            <div><label class="text-xs font-semibold text-slate-500">Data Referência (parto/alta/eleição)</label><input id="stab-ref" type="date" class="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 mt-1 bg-white dark:bg-slate-900"></div>
+            <div><label class="text-xs font-semibold text-slate-500">Observações</label><input id="stab-obs" class="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 mt-1 bg-white dark:bg-slate-900"></div>
+          </div>
+          <div class="flex gap-3 mt-5">
+            <button onclick="document.getElementById('modal-stab').classList.add('hidden')" class="flex-1 py-2 border border-slate-200 rounded-xl text-sm">Cancelar</button>
+            <button onclick="window._saveStab()" class="flex-1 py-2 bg-indigo-600 text-white rounded-xl text-sm font-semibold">Salvar</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+  if (window.lucide) lucide.createIcons();
+
+  window._saveStab = async () => {
+    const emp = document.getElementById('stab-emp').value;
+    const fim = document.getElementById('stab-fim').value;
+    if (!emp || !fim) return alert('Preencha funcionário e data fim.');
+    await fetch('/api/dp/estabilidades', { method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ employee_id: +emp, tipo: document.getElementById('stab-tipo').value,
+        data_inicio: document.getElementById('stab-ini').value, data_fim_estabilidade: fim,
+        data_referencia: document.getElementById('stab-ref').value,
+        observacoes: document.getElementById('stab-obs').value }) });
+    document.getElementById('modal-stab').classList.add('hidden');
+    await renderCompEstabilidades(el);
+  };
+  window._delStab = async (id) => {
+    if (!confirm('Remover esta estabilidade?')) return;
+    await fetch(`/api/dp/estabilidades/${id}`, { method: 'DELETE', headers: authHeaders() });
+    await renderCompEstabilidades(el);
+  };
+}
+
+async function renderCompContratos(el) {
+  const fDate2 = s => s ? s.slice(0,10).split('-').reverse().join('/') : '-';
+  const rows = await fetch('/api/dp/alertas/contratos-experiencia?dias=60', { headers: authHeaders() }).then(r => r.json()).catch(() => []);
+
+  const trs = rows.map(r => `
+    <tr class="border-b border-slate-100 dark:border-slate-800 text-sm">
+      <td class="px-3 py-2 font-medium">${r.name}</td>
+      <td class="px-3 py-2 text-slate-500">${r.role || '-'}</td>
+      <td class="px-3 py-2 text-slate-500">${r.department || '-'}</td>
+      <td class="px-3 py-2">${fDate2(r.admission_date)}</td>
+      <td class="px-3 py-2 text-xs">${r.fase}</td>
+      <td class="px-3 py-2 font-semibold">${fDate2(r.data_vencimento)}</td>
+      <td class="px-3 py-2 text-right">
+        <span class="inline-block px-2 py-0.5 rounded-full text-xs font-bold ${r.urgente ? 'bg-red-100 text-red-700' : r.dias_restantes <= 15 ? 'bg-orange-100 text-orange-700' : 'bg-yellow-100 text-yellow-700'}">${r.dias_restantes}d</span>
+      </td>
+    </tr>`).join('');
+
+  el.innerHTML = `
+    <div class="space-y-4">
+      <div class="bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-2xl p-4 text-sm text-orange-800 dark:text-orange-200">
+        Contrato de experiência: <strong>45 dias</strong> prorrogável por mais <strong>45 dias</strong> (máx. 90 dias — art. 445 CLT). Ao vencer sem prorrogação ou efetivação, converte-se automaticamente em indeterminado.
+      </div>
+      ${kpiDP('Contratos Monitorados', rows.length, 'vencendo em até 60 dias', 'clock', rows.length > 0 ? 'text-orange-600' : 'text-green-600')}
+      <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden">
+        <table class="w-full">
+          <thead class="bg-slate-50 dark:bg-slate-800 text-xs text-slate-500 uppercase">
+            <tr><th class="px-3 py-2 text-left">Funcionário</th><th class="px-3 py-2 text-left">Cargo</th><th class="px-3 py-2 text-left">Depto</th><th class="px-3 py-2 text-left">Admissão</th><th class="px-3 py-2 text-left">Fase</th><th class="px-3 py-2 text-left">Vencimento</th><th class="px-3 py-2 text-right">Dias</th></tr>
+          </thead>
+          <tbody>${trs || '<tr><td colspan="7" class="text-center py-10 text-slate-400">Nenhum contrato de experiência vencendo em 60 dias.</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>`;
+  if (window.lucide) lucide.createIcons();
+}
+
+async function renderCompCct(el, defComp) {
+  const fDate2 = s => s ? s.slice(0,10).split('-').reverse().join('/') : '-';
+  const fBRL = v => parseFloat(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+  const loadCct = async (comp) => {
+    const [cctas, descontos] = await Promise.all([
+      fetch('/api/dp/cct-assistencial', { headers: authHeaders() }).then(r => r.json()).catch(() => []),
+      fetch(`/api/dp/cct-assistencial/descontos/${comp}`, { headers: authHeaders() }).then(r => r.json()).catch(() => ({})),
+    ]);
+
+    const cctRows = cctas.map(c => `
+      <tr class="border-b border-slate-100 dark:border-slate-800 text-sm">
+        <td class="px-3 py-2 font-medium">${c.descricao}</td>
+        <td class="px-3 py-2">${c.sindicato || '-'}</td>
+        <td class="px-3 py-2 text-right font-semibold text-indigo-600">${c.percentual}%</td>
+        <td class="px-3 py-2">${fDate2(c.data_inicio)}${c.data_fim ? ' → ' + fDate2(c.data_fim) : ''}</td>
+        <td class="px-3 py-2">${c.prazo_oposicao_dias}d oposição</td>
+        <td class="px-3 py-2 text-right">
+          <button onclick="window._showOposicoes(${c.id}, '${c.descricao}')" class="text-xs px-2 py-1 bg-orange-100 text-orange-700 rounded-lg mr-1">Oposições</button>
+          <button onclick="window._delCct(${c.id})" class="text-xs px-2 py-1 bg-red-100 text-red-600 rounded-lg">×</button>
+        </td>
+      </tr>`).join('');
+
+    const descRows = (descontos.contribuicoes || []).flatMap(c =>
+      c.linhas.slice(0,3).map(l => `
+        <tr class="border-b border-slate-100 dark:border-slate-800 text-sm">
+          <td class="px-3 py-2 font-medium">${l.name}</td>
+          <td class="px-3 py-2 text-xs text-slate-500">${c.cct.descricao}</td>
+          <td class="px-3 py-2 text-right">${fBRL(l.salary)}</td>
+          <td class="px-3 py-2 text-right font-semibold text-red-600">${fBRL(l.desconto)}</td>
+        </tr>`)
+    ).join('');
+
+    el.innerHTML = `
+      <div class="space-y-5">
+        <div class="flex items-center gap-3">
+          <label class="text-sm font-semibold">Competência:</label>
+          <input type="month" value="${comp}" id="cct-comp" class="border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 text-sm bg-white dark:bg-slate-900">
+          <button onclick="window._loadCct(document.getElementById('cct-comp').value)" class="px-4 py-1.5 bg-violet-600 text-white rounded-xl text-sm font-semibold">Atualizar</button>
+        </div>
+        <div class="grid grid-cols-3 gap-4">
+          ${kpiDP('CCT Ativas', cctas.filter(c=>c.ativo).length, 'contribuições configuradas', 'handshake', 'text-indigo-600')}
+          ${kpiDP('Total Descontos', fBRL(descontos.grand_total || 0), `competência ${comp}`, 'minus-circle', 'text-red-600')}
+          ${kpiDP('Funcionários com Oposição', '-', 'clique em Oposições para ver', 'user-x', 'text-orange-600')}
+        </div>
+        <!-- CCT cadastradas -->
+        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden">
+          <div class="px-4 py-3 border-b flex items-center justify-between">
+            <div class="font-semibold text-sm">Contribuições Assistenciais Cadastradas</div>
+            <button onclick="document.getElementById('modal-cct').classList.remove('hidden')" class="text-xs px-3 py-1.5 bg-indigo-600 text-white rounded-xl font-semibold">+ Nova</button>
+          </div>
+          <table class="w-full">
+            <thead class="bg-slate-50 dark:bg-slate-800 text-xs text-slate-500 uppercase">
+              <tr><th class="px-3 py-2 text-left">Descrição</th><th class="px-3 py-2 text-left">Sindicato</th><th class="px-3 py-2 text-right">%</th><th class="px-3 py-2 text-left">Vigência</th><th class="px-3 py-2 text-left">Prazo Opós.</th><th class="px-3 py-2"></th></tr>
+            </thead>
+            <tbody>${cctRows || '<tr><td colspan="6" class="text-center py-8 text-slate-400">Nenhuma CCT cadastrada.</td></tr>'}</tbody>
+          </table>
+        </div>
+        <!-- Preview descontos -->
+        ${(descontos.contribuicoes || []).length ? `
+        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden">
+          <div class="px-4 py-3 border-b font-semibold text-sm">Preview Descontos — ${comp} (excluindo oposições)</div>
+          <table class="w-full">
+            <thead class="bg-slate-50 dark:bg-slate-800 text-xs text-slate-500 uppercase">
+              <tr><th class="px-3 py-2 text-left">Funcionário</th><th class="px-3 py-2 text-left">CCT</th><th class="px-3 py-2 text-right">Salário</th><th class="px-3 py-2 text-right">Desconto</th></tr>
+            </thead>
+            <tbody>${descRows}</tbody>
+            <tfoot class="bg-indigo-50 dark:bg-indigo-900/20 font-bold text-sm">
+              <tr><td class="px-3 py-2" colspan="3">TOTAL</td><td class="px-3 py-2 text-right text-indigo-700">${fBRL(descontos.grand_total || 0)}</td></tr>
+            </tfoot>
+          </table>
+        </div>` : ''}
+        <!-- Modal nova CCT -->
+        <div id="modal-cct" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+          <div class="bg-white dark:bg-slate-900 rounded-2xl shadow-xl p-6 w-full max-w-md">
+            <h3 class="font-bold text-lg mb-4">Nova Contribuição Assistencial</h3>
+            <div class="space-y-3">
+              <div><label class="text-xs font-semibold text-slate-500">Descrição</label><input id="cct-desc" placeholder="ex: Contribuição Assistencial 2024/2025" class="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 mt-1 bg-white dark:bg-slate-900"></div>
+              <div><label class="text-xs font-semibold text-slate-500">Sindicato</label><input id="cct-sind" class="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 mt-1 bg-white dark:bg-slate-900"></div>
+              <div class="grid grid-cols-3 gap-3">
+                <div><label class="text-xs font-semibold text-slate-500">% do Salário</label><input id="cct-pct" type="number" value="1" step="0.1" class="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 mt-1 bg-white dark:bg-slate-900"></div>
+                <div><label class="text-xs font-semibold text-slate-500">Início</label><input id="cct-ini" type="date" class="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 mt-1 bg-white dark:bg-slate-900"></div>
+                <div><label class="text-xs font-semibold text-slate-500">Prazo Oposição (d)</label><input id="cct-prazo" type="number" value="10" class="w-full text-sm border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 mt-1 bg-white dark:bg-slate-900"></div>
+              </div>
+            </div>
+            <div class="flex gap-3 mt-5">
+              <button onclick="document.getElementById('modal-cct').classList.add('hidden')" class="flex-1 py-2 border border-slate-200 rounded-xl text-sm">Cancelar</button>
+              <button onclick="window._saveCct()" class="flex-1 py-2 bg-indigo-600 text-white rounded-xl text-sm font-semibold">Salvar</button>
+            </div>
+          </div>
+        </div>
+        <!-- Modal oposições -->
+        <div id="modal-oposicoes" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+          <div class="bg-white dark:bg-slate-900 rounded-2xl shadow-xl p-6 w-full max-w-lg" id="modal-oposicoes-content"></div>
+        </div>
+      </div>`;
+
+    window._loadCct = loadCct;
+    if (window.lucide) lucide.createIcons();
+
+    window._saveCct = async () => {
+      await fetch('/api/dp/cct-assistencial', { method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ descricao: document.getElementById('cct-desc').value, sindicato: document.getElementById('cct-sind').value,
+          percentual: +document.getElementById('cct-pct').value, data_inicio: document.getElementById('cct-ini').value,
+          prazo_oposicao_dias: +document.getElementById('cct-prazo').value }) });
+      document.getElementById('modal-cct').classList.add('hidden');
+      await loadCct(comp);
+    };
+
+    window._delCct = async (id) => {
+      if (!confirm('Remover esta CCT?')) return;
+      await fetch(`/api/dp/cct-assistencial/${id}`, { method: 'DELETE', headers: authHeaders() });
+      await loadCct(comp);
+    };
+
+    window._showOposicoes = async (cctId, descricao) => {
+      const opList = await fetch(`/api/dp/cct-assistencial/${cctId}/oposicoes`, { headers: authHeaders() }).then(r => r.json()).catch(() => []);
+      const empOpts = dpEmployees.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
+      const opRows = opList.map(o => `
+        <div class="flex items-center justify-between p-3 border-b border-slate-100 dark:border-slate-800 text-sm">
+          <span>${o.employee_name}</span>
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-slate-400">${fDate2(o.data_oposicao)}</span>
+            <button onclick="window._removeOposicao(${cctId}, ${o.employee_id})" class="text-xs px-2 py-1 bg-red-100 text-red-600 rounded-lg">Remover</button>
+          </div>
+        </div>`).join('');
+      document.getElementById('modal-oposicoes-content').innerHTML = `
+        <h3 class="font-bold text-lg mb-3">Oposições — ${descricao}</h3>
+        <div class="mb-4">${opRows || '<div class="text-center py-4 text-slate-400 text-sm">Nenhuma oposição registrada.</div>'}</div>
+        <div class="flex gap-2">
+          <select id="op-emp" class="flex-1 text-sm border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-white dark:bg-slate-900"><option value="">-- funcionário --</option>${empOpts}</select>
+          <button onclick="window._addOposicao(${cctId})" class="px-3 py-2 bg-orange-600 text-white rounded-xl text-sm font-semibold">+ Registrar</button>
+        </div>
+        <button onclick="document.getElementById('modal-oposicoes').classList.add('hidden')" class="mt-4 w-full py-2 border border-slate-200 rounded-xl text-sm">Fechar</button>`;
+      document.getElementById('modal-oposicoes').classList.remove('hidden');
+      window._removeOposicao = async (cid, eid) => {
+        await fetch(`/api/dp/cct-assistencial/${cid}/oposicao/${eid}`, { method: 'DELETE', headers: authHeaders() });
+        await window._showOposicoes(cid, descricao);
+      };
+      window._addOposicao = async (cid) => {
+        const emp = document.getElementById('op-emp').value;
+        if (!emp) return alert('Selecione um funcionário.');
+        await fetch(`/api/dp/cct-assistencial/${cid}/oposicao`, { method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ employee_id: +emp, data_oposicao: new Date().toISOString().slice(0,10) }) });
+        await window._showOposicoes(cid, descricao);
+      };
+    };
+  };
+
+  window._loadCct = loadCct;
+  el.innerHTML = `<div class="flex items-center justify-center p-10 text-slate-400"><div class="animate-spin rounded-full h-7 w-7 border-b-2 border-violet-500 mr-3"></div>Carregando...</div>`;
+  await loadCct(defComp);
 }
 

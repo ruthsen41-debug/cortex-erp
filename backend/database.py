@@ -1878,6 +1878,84 @@ def migrate_db(conn: sqlite3.Connection) -> None:
     except Exception:
         pass
 
+    # ── Compliance DP — eSocial Tabelas, DCTFWeb, Estabilidades, CCT ──────────
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS lotacoes_tributarias (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        cod_lotacao TEXT NOT NULL,
+        descricao TEXT DEFAULT '',
+        tp_lotacao TEXT DEFAULT '01',
+        ini_valid TEXT NOT NULL,
+        fim_valid TEXT DEFAULT '',
+        fpas TEXT DEFAULT '515',
+        cod_terco TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS processos_administrativos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        nr_proc TEXT NOT NULL,
+        ind_proc TEXT DEFAULT '1',
+        tp_proc TEXT DEFAULT '1',
+        cod_susp TEXT DEFAULT '',
+        ini_valid TEXT NOT NULL,
+        fim_valid TEXT DEFAULT '',
+        observacoes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS esocial_exclusoes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        evento_tipo TEXT NOT NULL,
+        evento_id TEXT NOT NULL,
+        motivo TEXT DEFAULT '',
+        xml_gerado TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS employee_stability (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        employee_id INTEGER NOT NULL,
+        tipo TEXT NOT NULL,
+        data_inicio TEXT NOT NULL,
+        data_fim_estabilidade TEXT NOT NULL,
+        data_referencia TEXT DEFAULT '',
+        observacoes TEXT DEFAULT '',
+        ativo INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (employee_id) REFERENCES employees(id)
+    )""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS cct_assistencial (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        descricao TEXT NOT NULL,
+        percentual REAL DEFAULT 1.0,
+        data_inicio TEXT NOT NULL,
+        data_fim TEXT DEFAULT '',
+        sindicato TEXT DEFAULT '',
+        prazo_oposicao_dias INTEGER DEFAULT 10,
+        ativo INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS cct_oposicoes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        cct_id INTEGER NOT NULL,
+        employee_id INTEGER NOT NULL,
+        data_oposicao TEXT NOT NULL,
+        observacoes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(cct_id, employee_id),
+        FOREIGN KEY (cct_id) REFERENCES cct_assistencial(id),
+        FOREIGN KEY (employee_id) REFERENCES employees(id)
+    )""")
+
     # ── LALUR — Livro de Apuração do Lucro Real ───────────────
     cur.execute("""
     CREATE TABLE IF NOT EXISTS lalur_lancamentos (

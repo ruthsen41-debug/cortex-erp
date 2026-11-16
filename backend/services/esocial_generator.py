@@ -337,3 +337,214 @@ def gerar_s2299(empresa: Dict, funcionario: Dict,
         </evtDeslig>"""
     xml += _footer()
     return xml
+
+
+# ── S-1000 — Informações do Empregador ──────────────────────────────────────
+def gerar_s1000(company: dict) -> str:
+    cnpj = re.sub(r"\D", "", _c(company.get("cnpj", "")))
+    today = _date.today()
+    ini = today.strftime("%Y-%m")
+    evt_id = f"ID1{cnpj[:8]}{today.strftime('%Y%m%d%H%M%S')}00001"
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<eSocial xmlns="http://www.esocial.gov.br/schema/evt/evtInfoEmpregador/v02_05_00">
+  <evtInfoEmpregador Id="{evt_id}">
+    <ideEvento><tpAmb>2</tpAmb><procEmi>1</procEmi><verProc>1.0</verProc></ideEvento>
+    <ideEmpregador><tpInsc>1</tpInsc><nrInsc>{cnpj[:8]}</nrInsc></ideEmpregador>
+    <infoEmpregador>
+      <inclAlteracao>
+        <idePeriodo><iniValid>{ini}</iniValid></idePeriodo>
+        <infoCadastro>
+          <nmRazao>{_c(company.get("razao_social",""))}</nmRazao>
+          <classTrib>03</classTrib><indCoop>0</indCoop><indConstr>0</indConstr>
+          <indDesFolha>0</indDesFolha><indOptReg>0</indOptReg>
+          <indEntEd>N</indEntEd><indEtt>N</indEtt><nrRegEtt>0</nrRegEtt>
+          <contato>
+            <nmCtt>{_c(company.get("responsavel",""))}</nmCtt>
+            <cpfCtt>{re.sub(r"\D","",_c(company.get("cpf_responsavel","")))}</cpfCtt>
+            <email>{_c(company.get("email",""))}</email>
+          </contato>
+        </infoCadastro>
+      </inclAlteracao>
+    </infoEmpregador>
+  </evtInfoEmpregador>
+</eSocial>"""
+
+
+# ── S-1005 — Tabela de Estabelecimentos ─────────────────────────────────────
+def gerar_s1005(company: dict) -> str:
+    cnpj = re.sub(r"\D", "", _c(company.get("cnpj", "")))
+    today = _date.today()
+    evt_id = f"ID1{cnpj[:8]}{today.strftime('%Y%m%d%H%M%S')}00002"
+    ini = today.strftime("%Y-%m")
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<eSocial xmlns="http://www.esocial.gov.br/schema/evt/evtTabEstab/v04_01_00">
+  <evtTabEstab Id="{evt_id}">
+    <ideEvento><tpAmb>2</tpAmb><procEmi>1</procEmi><verProc>1.0</verProc></ideEvento>
+    <ideEmpregador><tpInsc>1</tpInsc><nrInsc>{cnpj[:8]}</nrInsc></ideEmpregador>
+    <infoEstab>
+      <inclAlteracao>
+        <ideEstab><tpInsc>1</tpInsc><nrInsc>{cnpj}</nrInsc></ideEstab>
+        <dadosEstab>
+          <cnaePrep>{re.sub(r"\D","",_c(company.get("cnae",""))) or "0000000"}</cnaePrep>
+          <aliqGilrat><aliqRat>2.00</aliqRat><fap>1.0000</fap><aliqRatAjust>2.00</aliqRatAjust></aliqGilrat>
+          <infoEFR><ideEFR>Sem EFR</ideEFR></infoEFR>
+          <situacao><dtInicio>{_c(company.get("data_fundacao","")) or today.isoformat()}</dtInicio></situacao>
+          <iniValid>{ini}</iniValid>
+        </dadosEstab>
+      </inclAlteracao>
+    </infoEstab>
+  </evtTabEstab>
+</eSocial>"""
+
+
+# ── S-1020 — Tabela de Lotações Tributárias ──────────────────────────────────
+def gerar_s1020(company: dict, lotacao: dict) -> str:
+    cnpj = re.sub(r"\D", "", _c(company.get("cnpj", "")))
+    today = _date.today()
+    evt_id = f"ID1{cnpj[:8]}{today.strftime('%Y%m%d%H%M%S')}00003"
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<eSocial xmlns="http://www.esocial.gov.br/schema/evt/evtTabLotacao/v04_02_00">
+  <evtTabLotacao Id="{evt_id}">
+    <ideEvento><tpAmb>2</tpAmb><procEmi>1</procEmi><verProc>1.0</verProc></ideEvento>
+    <ideEmpregador><tpInsc>1</tpInsc><nrInsc>{cnpj[:8]}</nrInsc></ideEmpregador>
+    <infoLotacao>
+      <inclAlteracao>
+        <ideLotacao><codLotacao>{_c(lotacao.get("cod_lotacao",""))}</codLotacao></ideLotacao>
+        <dadosLotacao>
+          <tpLotacao>{_c(lotacao.get("tp_lotacao","01"))}</tpLotacao>
+          <fpasLotacao>
+            <fpas>{_c(lotacao.get("fpas","515"))}</fpas>
+            <codTerco>{_c(lotacao.get("cod_terco",""))}</codTerco>
+          </fpasLotacao>
+          <iniValid>{_c(lotacao.get("ini_valid",""))}</iniValid>
+          {f'<fimValid>{_c(lotacao.get("fim_valid",""))}</fimValid>' if lotacao.get("fim_valid") else ""}
+        </dadosLotacao>
+      </inclAlteracao>
+    </infoLotacao>
+  </evtTabLotacao>
+</eSocial>"""
+
+
+# ── S-1050 — Tabela de Horários/Turnos ───────────────────────────────────────
+def gerar_s1050(company: dict, horario: dict) -> str:
+    cnpj = re.sub(r"\D", "", _c(company.get("cnpj", "")))
+    today = _date.today()
+    evt_id = f"ID1{cnpj[:8]}{today.strftime('%Y%m%d%H%M%S')}00004"
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<eSocial xmlns="http://www.esocial.gov.br/schema/evt/evtTabHorTur/v04_02_00">
+  <evtTabHorTur Id="{evt_id}">
+    <ideEvento><tpAmb>2</tpAmb><procEmi>1</procEmi><verProc>1.0</verProc></ideEvento>
+    <ideEmpregador><tpInsc>1</tpInsc><nrInsc>{cnpj[:8]}</nrInsc></ideEmpregador>
+    <infoHorContratual>
+      <inclAlteracao>
+        <ideHorContratual><codHorContratual>{str(horario.get("id","1")).zfill(4)}</codHorContratual></ideHorContratual>
+        <dadosHorContratual>
+          <dscHorContratual>{_c(horario.get("name",""))}</dscHorContratual>
+          <tpJornada>1</tpJornada>
+          <nrDiasJornada>5</nrDiasJornada>
+          <horarioSemanal>
+            <horSemana><dia>2</dia><horaIni>08:00</horaIni><horaFim>17:00</horaFim><horaIniInt>12:00</horaIniInt><horaFimInt>13:00</horaFimInt></horSemana>
+          </horarioSemanal>
+          <iniValid>{today.strftime("%Y-%m")}</iniValid>
+        </dadosHorContratual>
+      </inclAlteracao>
+    </infoHorContratual>
+  </evtTabHorTur>
+</eSocial>"""
+
+
+# ── S-1070 — Processos Administrativos/Judiciais ─────────────────────────────
+def gerar_s1070(company: dict, processo: dict) -> str:
+    cnpj = re.sub(r"\D", "", _c(company.get("cnpj", "")))
+    today = _date.today()
+    evt_id = f"ID1{cnpj[:8]}{today.strftime('%Y%m%d%H%M%S')}00005"
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<eSocial xmlns="http://www.esocial.gov.br/schema/evt/evtTabProcesso/v04_02_00">
+  <evtTabProcesso Id="{evt_id}">
+    <ideEvento><tpAmb>2</tpAmb><procEmi>1</procEmi><verProc>1.0</verProc></ideEvento>
+    <ideEmpregador><tpInsc>1</tpInsc><nrInsc>{cnpj[:8]}</nrInsc></ideEmpregador>
+    <infoProcesso>
+      <inclAlteracao>
+        <ideProcesso><nrProc>{_c(processo.get("nr_proc",""))}</nrProc></ideProcesso>
+        <dadosProcesso>
+          <indProc>{_c(processo.get("ind_proc","1"))}</indProc>
+          <tpProc>{_c(processo.get("tp_proc","1"))}</tpProc>
+          {f'<codSusp>{_c(processo.get("cod_susp",""))}</codSusp>' if processo.get("cod_susp") else ""}
+          <iniValid>{_c(processo.get("ini_valid",""))}</iniValid>
+          {f'<fimValid>{_c(processo.get("fim_valid",""))}</fimValid>' if processo.get("fim_valid") else ""}
+        </dadosProcesso>
+      </inclAlteracao>
+    </infoProcesso>
+  </evtTabProcesso>
+</eSocial>"""
+
+
+# ── S-3000 — Exclusão de Eventos ─────────────────────────────────────────────
+def gerar_s3000(company: dict, evento_tipo: str, evento_id: str, motivo: str = "") -> str:
+    cnpj = re.sub(r"\D", "", _c(company.get("cnpj", "")))
+    today = _date.today()
+    evt_id = f"ID1{cnpj[:8]}{today.strftime('%Y%m%d%H%M%S')}00006"
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<eSocial xmlns="http://www.esocial.gov.br/schema/evt/evtExclusao/v01_01_00">
+  <evtExclusao Id="{evt_id}">
+    <ideEvento><tpAmb>2</tpAmb><procEmi>1</procEmi><verProc>1.0</verProc></ideEvento>
+    <ideEmpregador><tpInsc>1</tpInsc><nrInsc>{cnpj[:8]}</nrInsc></ideEmpregador>
+    <infoExclusao>
+      <tpEvento>{_c(evento_tipo)}</tpEvento>
+      <nrRec>{_c(evento_id)}</nrRec>
+      {f'<motivo>{_c(motivo)}</motivo>' if motivo else ""}
+    </infoExclusao>
+  </evtExclusao>
+</eSocial>"""
+
+
+# ── S-5001 — Totalizadores de INSS ───────────────────────────────────────────
+def gerar_s5001(company: dict, competencia: str, items: list) -> str:
+    cnpj = re.sub(r"\D", "", _c(company.get("cnpj", "")))
+    today = _date.today()
+    evt_id = f"ID1{cnpj[:8]}{today.strftime('%Y%m%d%H%M%S')}00007"
+    total_bruto = sum(float(i.get("gross_salary", 0)) for i in items)
+    total_inss_emp = sum(float(i.get("inss", 0)) for i in items)
+    n = len(items)
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<eSocial xmlns="http://www.esocial.gov.br/schema/lote/retornoProcessamento/v1_3_0">
+  <evtTotalContrib Id="{evt_id}">
+    <ideEvento><indRetif>1</indRetif><nrRec>SIMULADO-{today.strftime('%Y%m%d')}</nrRec><tpAmb>2</tpAmb><procEmi>1</procEmi><verProc>1.0</verProc></ideEvento>
+    <ideEmpregador><tpInsc>1</tpInsc><nrInsc>{cnpj[:8]}</nrInsc></ideEmpregador>
+    <idePeriodo><iniValid>{competencia}</iniValid><fimValid>{competencia}</fimValid></idePeriodo>
+    <infoCS>
+      <qtdTrabalhadores>{n}</qtdTrabalhadores>
+      <baseCS><vrBcCp01>{_n(total_bruto)}</vrBcCp01><vrBcCpMen>{_n(total_bruto)}</vrBcCpMen></baseCS>
+      <inss>
+        <vrCpSeg>{_n(total_inss_emp)}</vrCpSeg>
+        <vrCpPatr>{_n(total_bruto * 0.20)}</vrCpPatr>
+        <vrCpTerceiros>{_n(total_bruto * 0.058)}</vrCpTerceiros>
+        <vrRat>{_n(total_bruto * 0.01)}</vrRat>
+        <vrTotal>{_n(total_inss_emp + total_bruto * 0.279)}</vrTotal>
+      </inss>
+    </infoCS>
+  </evtTotalContrib>
+</eSocial>"""
+
+
+# ── S-5011 — Totalizadores de FGTS ───────────────────────────────────────────
+def gerar_s5011(company: dict, competencia: str, items: list) -> str:
+    cnpj = re.sub(r"\D", "", _c(company.get("cnpj", "")))
+    today = _date.today()
+    evt_id = f"ID1{cnpj[:8]}{today.strftime('%Y%m%d%H%M%S')}00008"
+    total_fgts = sum(float(i.get("fgts", 0)) for i in items)
+    total_bruto = sum(float(i.get("gross_salary", 0)) for i in items)
+    n = len(items)
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<eSocial xmlns="http://www.esocial.gov.br/schema/lote/retornoProcessamento/v1_3_0">
+  <evtTotalFGTS Id="{evt_id}">
+    <ideEvento><indRetif>1</indRetif><nrRec>SIMULADO-FGTS-{today.strftime('%Y%m%d')}</nrRec><tpAmb>2</tpAmb><procEmi>1</procEmi><verProc>1.0</verProc></ideEvento>
+    <ideEmpregador><tpInsc>1</tpInsc><nrInsc>{cnpj[:8]}</nrInsc></ideEmpregador>
+    <idePeriodo><iniValid>{competencia}</iniValid><fimValid>{competencia}</fimValid></idePeriodo>
+    <infoFGTS>
+      <qtdTrabalhadores>{n}</qtdTrabalhadores>
+      <vrBcFGTSTotal>{_n(total_bruto)}</vrBcFGTSTotal>
+      <vrFGTSTotal>{_n(total_fgts)}</vrFGTSTotal>
+    </infoFGTS>
+  </evtTotalFGTS>
+</eSocial>"""
