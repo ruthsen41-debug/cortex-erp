@@ -147,18 +147,55 @@ html:not(.dark) .cx-sb-tag { background: #eff6ff; color: #3b82f6; border-color: 
 html:not(.dark) .cx-sb-toggle { color: #9ca3af; }
 html:not(.dark) .cx-sb-toggle:hover { color: #374151; }
 
-/* Compact mode — icons only */
+/* Compact mode — icons only (padrão, estilo Bizneo) */
 .cx-sb-compact .cx-sb-brand,
 .cx-sb-compact .cx-sb-tag,
 .cx-sb-compact .nav-label,
 .cx-sb-compact .nav-badge,
 .cx-sb-compact .cx-sb-company,
 .cx-sb-compact .cx-section { display: none !important; }
-.cx-sb-compact .cx-sb-toggle { margin-left: auto; }
-.cx-sb-compact .cx-sb-header { justify-content: center; }
-.cx-sb-compact .nav-item { justify-content: center; padding: 10px 0 !important; }
-.cx-sb-compact .cx-sb-footer { justify-content: center; padding: 10px 0; }
-.cx-sb-compact .cx-sb-actions { flex-direction: column; }
+
+.cx-sb-compact .cx-sb-header {
+  justify-content: center; padding: 14px 0 12px; gap: 0;
+}
+.cx-sb-compact .cx-sb-toggle { margin: 0; }
+
+.cx-sb-compact .cx-nav { padding: 8px 4px; }
+
+.cx-sb-compact .nav-item {
+  justify-content: center;
+  padding: 10px 0 !important;
+  gap: 0;
+  position: relative;
+}
+/* Tooltip JS do modo compacto — estilizado aqui */
+#cx-nav-tooltip {
+  position: fixed;
+  left: 68px;
+  background: #1e2235;
+  color: #fff;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  padding: 6px 12px;
+  border-radius: 7px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .12s;
+  z-index: 9999;
+  box-shadow: 0 4px 14px rgba(0,0,0,.22);
+}
+#cx-nav-tooltip.visible { opacity: 1; }
+html:not(.dark) #cx-nav-tooltip { background: #111827; }
+
+.cx-sb-compact .cx-sb-footer {
+  flex-direction: column; align-items: center;
+  padding: 10px 0 14px; gap: 6px;
+}
+.cx-sb-compact .cx-sb-actions { flex-direction: column; gap: 4px; }
+.cx-sb-compact .cx-sb-dot { display: none; }
+.cx-sb-compact .cx-sb-env-label { display: none; }
 
 /* Nav sections */
 .cx-nav { padding: 8px 8px; }

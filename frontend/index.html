@@ -41,7 +41,7 @@
   <div id="sidebar-overlay" class="fixed inset-0 z-30 bg-black/60 backdrop-blur-sm hidden md:hidden" onclick="closeSidebar()"></div>
 
   <!-- SIDEBAR DE NAVEGAÇÃO -->
-  <aside id="sidebar" class="cx-sidebar flex flex-col shrink-0 select-none fixed inset-y-0 left-0 z-40 -translate-x-full md:translate-x-0 md:static md:z-auto transition-all duration-300" style="width:220px">
+  <aside id="sidebar" class="cx-sidebar cx-sb-compact flex flex-col shrink-0 select-none fixed inset-y-0 left-0 z-40 -translate-x-full md:translate-x-0 md:static md:z-auto transition-all duration-300" style="width:56px">
     <!-- Logo + toggle -->
     <div class="cx-sb-header">
       <div class="cx-logo">CX</div>
@@ -283,16 +283,39 @@
       const s = document.getElementById('sidebar');
       const compact = s.classList.toggle('cx-sb-compact');
       s.style.width = compact ? '56px' : '220px';
-      try { localStorage.setItem('cortex_sb_compact', compact ? '1' : '0'); } catch(e) {}
+      try { localStorage.setItem('cortex_sb_expanded', compact ? '0' : '1'); } catch(e) {}
     }
-    // Restaura estado compacto
+    // Por padrão compact; expande só se o usuário escolheu antes
     try {
-      if (localStorage.getItem('cortex_sb_compact') === '1') {
+      if (localStorage.getItem('cortex_sb_expanded') === '1') {
         const s = document.getElementById('sidebar');
-        s.classList.add('cx-sb-compact');
-        s.style.width = '56px';
+        s.classList.remove('cx-sb-compact');
+        s.style.width = '220px';
       }
     } catch(e) {}
+
+    // Tooltip flutuante para sidebar compacto
+    (function() {
+      const tip = document.createElement('div');
+      tip.id = 'cx-nav-tooltip';
+      document.body.appendChild(tip);
+      document.addEventListener('mouseover', function(e) {
+        const sb = document.getElementById('sidebar');
+        if (!sb || !sb.classList.contains('cx-sb-compact')) return;
+        const btn = e.target.closest('.nav-item[data-label]');
+        if (!btn) return;
+        const label = btn.getAttribute('data-label').replace(/&amp;/g,'&');
+        if (!label) return;
+        const rect = btn.getBoundingClientRect();
+        tip.textContent = label;
+        tip.style.top = (rect.top + rect.height / 2 - 13) + 'px';
+        tip.classList.add('visible');
+      });
+      document.addEventListener('mouseout', function(e) {
+        if (!e.target.closest('.nav-item[data-label]')) return;
+        tip.classList.remove('visible');
+      });
+    })();
   </script>
   <script>
     // PWA Service Worker Registration
