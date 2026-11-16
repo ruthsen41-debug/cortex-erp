@@ -152,7 +152,11 @@ def deactivate_employee(emp_id: int, current_user: Dict[str, Any] = Depends(get_
     ).fetchone():
         conn.close()
         raise HTTPException(status_code=404, detail="Funcionário não encontrado.")
-    conn.execute("UPDATE employees SET active = 0 WHERE id = ?", (emp_id,))
+    today = date.today().isoformat()
+    conn.execute(
+        "UPDATE employees SET active = 0, termination_date = ? WHERE id = ?",
+        (today, emp_id)
+    )
     conn.commit()
     conn.close()
     return {"ok": True}
@@ -3484,3 +3488,698 @@ th{{background:#eee;font-weight:bold}}.total{{font-weight:bold;background:#f5f5f
 <p style="text-align:right;font-size:.75em">Emitido em {date.today().strftime('%d/%m/%Y')}</p>
 </body></html>"""
     return Response(content=html, media_type="text/html")
+
+
+# ─── DOCUMENTOS TRABALHISTAS ──────────────────────────────────────────────────
+
+_DOC_CSS = """body{font-family:Arial,sans-serif;max-width:900px;margin:40px auto;padding:20px 30px;color:#000;background:#fff;font-size:13px}
+h1{text-align:center;font-size:1.1em;text-transform:uppercase;border-bottom:2px solid #000;padding-bottom:8px;margin-bottom:16px}
+h2{font-size:.95em;text-transform:uppercase;margin-top:20px;margin-bottom:4px}
+p{line-height:1.8;text-align:justify;margin:6px 0}
+table{width:100%;border-collapse:collapse;margin:10px 0}th,td{border:1px solid #555;padding:5px 9px;font-size:.85em}
+th{background:#eee;font-weight:bold}.sig{margin-top:50px;display:flex;gap:40px;flex-wrap:wrap}
+.sig div{flex:1;min-width:180px;text-align:center;border-top:1px solid #000;padding-top:6px;font-size:.8em}
+@media print{body{margin:0}}"""
+
+
+def _get_emp_company(emp_id: int, cid: int, conn):
+    emp = conn.execute("SELECT * FROM employees WHERE id=? AND company_id=?", (emp_id, cid)).fetchone()
+    if not emp:
+        conn.close()
+        raise HTTPException(404, "Funcionário não encontrado")
+    emp = dict(emp)
+    company = dict(conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone() or {})
+    return emp, company
+
+
+def _fmt(v): return str(v) if v else ""
+def _brl(v):
+    try: return f"R$ {float(v):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    except: return "R$ 0,00"
+
+
+@router.get("/employees/{emp_id}/documento/contrato")
+def gerar_contrato(
+    emp_id: int,
+    tipo: str = Query(default="experiencia", pattern="^(experiencia|indeterminado)$"),
+    current_user=Depends(get_current_user)
+):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    emp, co = _get_emp_company(emp_id, cid, conn)
+    conn.close()
+    today = date.today()
+    adm = emp.get("admission_date", str(today))
+    try:
+        adm_dt = datetime.strptime(adm[:10], "%Y-%m-%d").date()
+    except Exception:
+        adm_dt = today
+    adm_ext = adm_dt.strftime("%d/%m/%Y")
+    today_ext = today.strftime("%d/%m/%Y")
+    cidade = co.get("cidade", "___________") or "___________"
+    uf = co.get("uf", "__") or "__"
+
+    if tipo == "experiencia":
+        prazo_bloco = f"""<h2>CLÁUSULA 2ª — PRAZO</h2>
+<p>O presente contrato é por prazo determinado, na modalidade CONTRATO DE EXPERIÊNCIA, nos termos do art. 443, § 2º, "c" da CLT, com duração inicial de <b>45 (quarenta e cinco) dias</b> contados de {adm_ext}, podendo ser prorrogado por mais <b>45 (quarenta e cinco) dias</b>, totalizando o prazo máximo de 90 (noventa) dias.</p>
+<p>Caso o EMPREGADO continue prestando serviços após o término do prazo sem manifestação das partes, o contrato converter-se-á automaticamente em contrato por prazo indeterminado.</p>"""
+    else:
+        prazo_bloco = f"""<h2>CLÁUSULA 2ª — PRAZO</h2>
+<p>O presente contrato é por prazo <b>INDETERMINADO</b>, nos termos da Consolidação das Leis do Trabalho, com início em {adm_ext}.</p>"""
+
+    html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Contrato de Trabalho</title>
+<style>{_DOC_CSS}</style></head><body>
+<h1>Contrato Individual de Trabalho — {"Experiência" if tipo=="experiencia" else "Prazo Indeterminado"}</h1>
+<p>Pelo presente instrumento particular, de um lado:</p>
+<p><b>EMPREGADOR:</b> {_fmt(co.get("razao_social"))} — CNPJ: {_fmt(co.get("cnpj"))} — Endereço: {_fmt(co.get("logradouro"))}, {_fmt(co.get("numero"))}, {_fmt(co.get("bairro"))}, {_fmt(co.get("cidade"))}/{_fmt(co.get("uf"))};</p>
+<p>e, de outro lado:</p>
+<p><b>EMPREGADO(A):</b> {_fmt(emp.get("name"))} — CPF: {_fmt(emp.get("cpf"))} — RG: {_fmt(emp.get("rg"))} — PIS/PASEP: {_fmt(emp.get("pis_pasep"))} — Endereço: {_fmt(emp.get("address"))};</p>
+<p>Resolvem celebrar o presente Contrato Individual de Trabalho, regido pela Consolidação das Leis do Trabalho (CLT) e demais legislações aplicáveis, mediante as seguintes cláusulas e condições:</p>
+
+<h2>CLÁUSULA 1ª — FUNÇÃO E LOCAL</h2>
+<p>O(A) EMPREGADO(A) é contratado(a) para exercer a função de <b>{_fmt(emp.get("role"))}</b> (CBO {_fmt(emp.get("cbo"))}), no departamento <b>{_fmt(emp.get("department"))}</b>, no estabelecimento do EMPREGADOR acima qualificado, podendo ser transferido(a) para outro local conforme necessidade da empresa, observado o art. 469 da CLT.</p>
+
+{prazo_bloco}
+
+<h2>CLÁUSULA 3ª — REMUNERAÇÃO</h2>
+<p>O(A) EMPREGADO(A) perceberá salário mensal de <b>{_brl(emp.get("salary"))}</b>, pago até o 5º dia útil do mês subsequente ao trabalhado, mediante crédito em conta-corrente ou outro meio acordado entre as partes.</p>
+
+<h2>CLÁUSULA 4ª — JORNADA DE TRABALHO</h2>
+<p>A jornada de trabalho será de <b>44 (quarenta e quatro) horas semanais</b>, distribuídas de segunda a sexta-feira, nos horários definidos pelo EMPREGADOR, respeitados os limites legais e os intervalos previstos na CLT.</p>
+
+<h2>CLÁUSULA 5ª — DISPOSIÇÕES GERAIS</h2>
+<p>O(A) EMPREGADO(A) se compromete a cumprir as normas internas, regulamentos e ordens de serviço do EMPREGADOR, guardar sigilo sobre informações confidenciais e zelar pelo patrimônio da empresa. O descumprimento das obrigações contratuais sujeitará o infrator às penalidades previstas em lei.</p>
+<p>Declaram as partes que leram e concordam com todas as cláusulas deste contrato, firmando-o em 2 (duas) vias de igual teor e forma.</p>
+
+<p style="text-align:right">{cidade}/{uf}, {today_ext}.</p>
+
+<div class="sig">
+  <div>{_fmt(co.get("razao_social"))}<br>EMPREGADOR</div>
+  <div>{_fmt(emp.get("name"))}<br>EMPREGADO(A)</div>
+  <div>Testemunha 1:<br><br>CPF: _______________</div>
+  <div>Testemunha 2:<br><br>CPF: _______________</div>
+</div>
+</body></html>"""
+    return Response(content=html, media_type="text/html")
+
+
+@router.get("/employees/{emp_id}/documento/advertencia")
+def gerar_advertencia(
+    emp_id: int,
+    motivo: str = Query(default=""),
+    data_ocorrencia: str = Query(default=""),
+    current_user=Depends(get_current_user)
+):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    emp, co = _get_emp_company(emp_id, cid, conn)
+    conn.close()
+    today = date.today()
+    cidade = co.get("cidade", "___________") or "___________"
+    uf = co.get("uf", "__") or "__"
+    data_oc = data_ocorrencia or today.strftime("%d/%m/%Y")
+    motivo_txt = motivo or "_______________________________________________"
+
+    html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Carta de Advertência</title>
+<style>{_DOC_CSS}</style></head><body>
+<h1>Carta de Advertência</h1>
+<p style="text-align:right">{cidade}/{uf}, {today.strftime("%d/%m/%Y")}.</p>
+<p><b>Ao(À) Sr.(a):</b> {_fmt(emp.get("name"))}<br>
+<b>Cargo:</b> {_fmt(emp.get("role"))} — <b>Depto:</b> {_fmt(emp.get("department"))}<br>
+<b>Matrícula:</b> {_fmt(emp.get("matricula"))} — <b>CPF:</b> {_fmt(emp.get("cpf"))}</p>
+
+<p>Comunicamos que, em <b>{data_oc}</b>, V.Sa. incorreu na seguinte irregularidade:</p>
+<p style="border-left:3px solid #555;padding-left:12px;margin:12px 0"><i>{motivo_txt}</i></p>
+
+<p>Tal conduta contraria as normas internas desta empresa, bem como os deveres previstos nos arts. 482 e 483 da CLT e na Convenção Coletiva de Trabalho vigente.</p>
+<p>Em decorrência, aplicamos a presente <b>ADVERTÊNCIA ESCRITA</b>, alertando que a reincidência ou o cometimento de nova infração poderá ensejar penalidade mais grave, incluindo <b>suspensão disciplinar</b> ou até <b>dispensa por justa causa</b>, conforme a gravidade e a reiteração do ato.</p>
+<p>Solicitamos que V.Sa. assine o presente documento em sinal de ciência, sem que isso implique concordância com o seu conteúdo.</p>
+
+<div class="sig" style="margin-top:40px">
+  <div>{_fmt(co.get("razao_social"))}<br>EMPREGADOR</div>
+  <div>{_fmt(emp.get("name"))}<br>EMPREGADO(A) — Ciente em: ___/___/______</div>
+  <div>Testemunha:<br><br>CPF: _______________</div>
+</div>
+<p style="margin-top:30px;font-size:.8em">( ) Recusa-se a assinar. Testemunhas: _____________________ e _____________________</p>
+</body></html>"""
+    return Response(content=html, media_type="text/html")
+
+
+@router.get("/employees/{emp_id}/documento/suspensao")
+def gerar_suspensao(
+    emp_id: int,
+    motivo: str = Query(default=""),
+    data_ocorrencia: str = Query(default=""),
+    dias: int = Query(default=1, ge=1, le=30),
+    current_user=Depends(get_current_user)
+):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    emp, co = _get_emp_company(emp_id, cid, conn)
+    conn.close()
+    today = date.today()
+    cidade = co.get("cidade", "___________") or "___________"
+    uf = co.get("uf", "__") or "__"
+    data_oc = data_ocorrencia or today.strftime("%d/%m/%Y")
+    motivo_txt = motivo or "_______________________________________________"
+    try:
+        inicio_dt = datetime.strptime(data_ocorrencia[:10], "%Y-%m-%d").date() if data_ocorrencia else today
+    except Exception:
+        inicio_dt = today
+    fim_dt = inicio_dt + timedelta(days=dias - 1)
+    desconto = float(emp.get("salary", 0)) / 30 * dias
+
+    html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Carta de Suspensão</title>
+<style>{_DOC_CSS}</style></head><body>
+<h1>Carta de Suspensão Disciplinar</h1>
+<p style="text-align:right">{cidade}/{uf}, {today.strftime("%d/%m/%Y")}.</p>
+<p><b>Ao(À) Sr.(a):</b> {_fmt(emp.get("name"))}<br>
+<b>Cargo:</b> {_fmt(emp.get("role"))} — <b>Depto:</b> {_fmt(emp.get("department"))}<br>
+<b>Matrícula:</b> {_fmt(emp.get("matricula"))} — <b>CPF:</b> {_fmt(emp.get("cpf"))}</p>
+
+<p>Em razão da infração praticada em <b>{data_oc}</b>:</p>
+<p style="border-left:3px solid #555;padding-left:12px;margin:12px 0"><i>{motivo_txt}</i></p>
+
+<p>E considerando o histórico disciplinar de V.Sa., aplicamos a presente <b>SUSPENSÃO DISCIPLINAR de {dias} ({_escreve_dias(dias)}) dia(s)</b>, com base no art. 474 da CLT.</p>
+<p>O período de suspensão compreende de <b>{inicio_dt.strftime("%d/%m/%Y")}</b> a <b>{fim_dt.strftime("%d/%m/%Y")}</b>, durante o qual V.Sa. não deverá comparecer ao trabalho, acarretando desconto proporcional de <b>{_brl(desconto)}</b> no salário do mês.</p>
+<p>Alertamos que a reincidência em infrações poderá ensejar <b>dispensa por justa causa</b>, nos termos do art. 482 da CLT.</p>
+<p>Solicitamos a assinatura em sinal de ciência.</p>
+
+<div class="sig" style="margin-top:40px">
+  <div>{_fmt(co.get("razao_social"))}<br>EMPREGADOR</div>
+  <div>{_fmt(emp.get("name"))}<br>EMPREGADO(A) — Ciente em: ___/___/______</div>
+  <div>Testemunha:<br><br>CPF: _______________</div>
+</div>
+<p style="margin-top:30px;font-size:.8em">( ) Recusa-se a assinar. Testemunhas: _____________________ e _____________________</p>
+</body></html>"""
+    return Response(content=html, media_type="text/html")
+
+
+def _escreve_dias(n: int) -> str:
+    nums = {1:"um",2:"dois",3:"três",4:"quatro",5:"cinco",6:"seis",7:"sete",8:"oito",9:"nove",10:"dez",
+            15:"quinze",20:"vinte",30:"trinta"}
+    return nums.get(n, str(n))
+
+
+@router.get("/employees/{emp_id}/documento/quitacao-anual")
+def gerar_quitacao_anual(
+    emp_id: int,
+    ano: int = Query(default=0),
+    current_user=Depends(get_current_user)
+):
+    cid = current_user.get("company_id", 1)
+    if not ano:
+        ano = date.today().year - 1
+    conn = get_conn()
+    emp, co = _get_emp_company(emp_id, cid, conn)
+    conn.close()
+    today = date.today()
+    cidade = co.get("cidade", "___________") or "___________"
+    uf = co.get("uf", "__") or "__"
+
+    html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Carta-Quitação Anual</title>
+<style>{_DOC_CSS}</style></head><body>
+<h1>Termo de Quitação Anual de Obrigações Trabalhistas<br>
+<small style="font-size:.8em">Art. 507-B da Consolidação das Leis do Trabalho</small></h1>
+
+<p>Pelo presente instrumento, de um lado <b>{_fmt(co.get("razao_social"))}</b>, CNPJ nº {_fmt(co.get("cnpj"))}, doravante denominado <b>EMPREGADOR</b>; e de outro lado <b>{_fmt(emp.get("name"))}</b>, CPF nº {_fmt(emp.get("cpf"))}, Matrícula {_fmt(emp.get("matricula"))}, cargo <b>{_fmt(emp.get("role"))}</b>, doravante denominado <b>EMPREGADO(A)</b>;</p>
+
+<p>Declaram, para todos os fins de direito, que no ano de <b>{ano}</b>, todas as obrigações trabalhistas referentes às seguintes verbas foram integralmente cumpridas:</p>
+
+<table>
+  <tr><th>#</th><th>Verba / Obrigação</th><th>Situação</th></tr>
+  <tr><td>1</td><td>Salários mensais (jan a dez/{ano})</td><td>Quitado</td></tr>
+  <tr><td>2</td><td>13º Salário — 1ª e 2ª parcelas</td><td>Quitado</td></tr>
+  <tr><td>3</td><td>Férias gozadas e/ou convertidas em pecúnia</td><td>Quitado</td></tr>
+  <tr><td>4</td><td>FGTS — depósitos mensais do exercício</td><td>Quitado</td></tr>
+  <tr><td>5</td><td>Vale-transporte / Vale-refeição / Benefícios convencionados</td><td>Quitado</td></tr>
+  <tr><td>6</td><td>Horas extras, adicional noturno e demais adicionais legais</td><td>Quitado</td></tr>
+  <tr><td>7</td><td>Contribuição Previdenciária (INSS — cota empregado)</td><td>Descontado e recolhido</td></tr>
+  <tr><td>8</td><td>Imposto de Renda Retido na Fonte (IRRF)</td><td>Descontado e recolhido</td></tr>
+</table>
+
+<p>O(A) EMPREGADO(A) declara que não possui qualquer crédito ou reclamação perante o EMPREGADOR referente ao período acima mencionado, sem prejuízo de eventuais parcelas vincendas decorrentes do contrato de trabalho vigente.</p>
+<p>Este termo é firmado voluntariamente por ambas as partes, nos termos do art. 507-B da CLT, com fins meramente declaratórios, não implicando novação ou quitação de parcelas não expressamente discriminadas.</p>
+<p>Firmado perante o sindicato da categoria, conforme exigência legal.</p>
+
+<p style="text-align:right;margin-top:20px">{cidade}/{uf}, {today.strftime("%d/%m/%Y")}.</p>
+
+<div class="sig">
+  <div>{_fmt(co.get("razao_social"))}<br>EMPREGADOR</div>
+  <div>{_fmt(emp.get("name"))}<br>EMPREGADO(A)</div>
+  <div>Representante Sindical<br><br>CPF: _______________</div>
+</div>
+</body></html>"""
+    return Response(content=html, media_type="text/html")
+
+
+@router.get("/documento/ferias-coletivas")
+def gerar_recibo_ferias_coletivas(
+    inicio: str = Query(...),
+    fim: str = Query(...),
+    departamento: str = Query(default=""),
+    current_user=Depends(get_current_user)
+):
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    company = dict(conn.execute("SELECT * FROM companies WHERE id=?", (cid,)).fetchone() or {})
+    q = "SELECT * FROM employees WHERE company_id=? AND active=1"
+    params = [cid]
+    if departamento:
+        q += " AND department=?"
+        params.append(departamento)
+    empregados = rows_to_dicts(conn.execute(q, params).fetchall())
+    conn.close()
+    today = date.today()
+    cidade = company.get("cidade", "___________") or "___________"
+    uf = company.get("uf", "__") or "__"
+    try:
+        inicio_dt = datetime.strptime(inicio[:10], "%Y-%m-%d").date()
+        fim_dt = datetime.strptime(fim[:10], "%Y-%m-%d").date()
+        dias = (fim_dt - inicio_dt).days + 1
+        inicio_ext = inicio_dt.strftime("%d/%m/%Y")
+        fim_ext = fim_dt.strftime("%d/%m/%Y")
+    except Exception:
+        dias = 0; inicio_ext = inicio; fim_ext = fim
+
+    linhas = "".join(
+        f"<tr><td>{i+1}</td><td>{e.get('name','')}</td><td>{e.get('cpf','')}</td>"
+        f"<td>{e.get('role','')}</td><td>{_brl(e.get('salary',0))}</td>"
+        f"<td style='text-align:center'>___/___/______</td></tr>"
+        for i, e in enumerate(empregados)
+    )
+    dept_txt = f" — Departamento: {departamento}" if departamento else ""
+
+    html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Recibo Férias Coletivas</title>
+<style>{_DOC_CSS}</style></head><body>
+<h1>Recibo de Férias Coletivas{dept_txt}</h1>
+<p><b>EMPRESA:</b> {_fmt(company.get("razao_social"))} — CNPJ: {_fmt(company.get("cnpj"))}</p>
+<p>Comunicamos que nos termos do art. 139 da CLT, foram concedidas <b>FÉRIAS COLETIVAS</b> aos empregados abaixo relacionados, pelo período de <b>{inicio_ext} a {fim_ext} ({dias} dias corridos)</b>.</p>
+
+<table>
+  <tr><th>#</th><th>Nome</th><th>CPF</th><th>Cargo</th><th>Salário Base</th><th>Assinatura / Data Ciência</th></tr>
+  {linhas if linhas else '<tr><td colspan="6" style="text-align:center">Nenhum funcionário encontrado</td></tr>'}
+</table>
+
+<p style="font-size:.8em;margin-top:8px">Período aquisitivo considera o início da concessão como data de referência. O pagamento das férias, acrescido de 1/3 constitucional, foi efetuado até 2 dias antes do início do período, conforme art. 145 da CLT.</p>
+
+<p style="text-align:right;margin-top:20px">{cidade}/{uf}, {today.strftime("%d/%m/%Y")}.</p>
+<div class="sig">
+  <div>{_fmt(company.get("razao_social"))}<br>Representante da Empresa</div>
+  <div>Visto do Sindicato da Categoria<br><br>Data: ___/___/______</div>
+</div>
+</body></html>"""
+    return Response(content=html, media_type="text/html")
+
+
+# ─── RELATÓRIOS GERENCIAIS ────────────────────────────────────────────────────
+
+def _calc_inss_simples(gross: float) -> float:
+    brackets = [(1412.00, 0.075), (2666.68, 0.090), (4000.03, 0.120), (7786.02, 0.140)]
+    total, prev = 0.0, 0.0
+    for limit, rate in brackets:
+        if gross <= 0:
+            break
+        base = min(gross, limit) - prev
+        if base <= 0:
+            break
+        total += base * rate
+        prev = limit
+        if gross <= limit:
+            break
+    return min(total, 908.86)
+
+
+@router.get("/relatorios/custo-funcionario")
+def relatorio_custo_funcionario(
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Custo total por funcionário: salário + encargos patronais + benefícios + provisões."""
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+
+    employees = rows_to_dicts(conn.execute(
+        "SELECT * FROM employees WHERE company_id = ? AND active = 1 ORDER BY name",
+        (company_id,)
+    ).fetchall())
+
+    benefits_raw = rows_to_dicts(conn.execute(
+        """SELECT eb.employee_id, COALESCE(SUM(eb.valor_bruto), 0) as total_empresa
+           FROM employee_benefits eb
+           WHERE eb.company_id = ? AND eb.ativo = 1
+           GROUP BY eb.employee_id""",
+        (company_id,)
+    ).fetchall())
+    ben_map = {b["employee_id"]: b["total_empresa"] for b in benefits_raw}
+    conn.close()
+
+    result = []
+    total_bruto = total_custo = 0.0
+
+    for emp in employees:
+        salary = float(emp.get("salary") or 0)
+        is_prl = bool(emp.get("is_prolabore"))
+
+        inss_patronal = round(salary * 0.11 if is_prl else salary * 0.20, 2)
+        fgts = round(salary * 0.08 if not is_prl else 0, 2)
+        rat = round(salary * 0.01 if not is_prl else 0, 2)
+        terceiros = round(salary * 0.058 if not is_prl else 0, 2)
+        beneficios = round(float(ben_map.get(emp["id"], 0)), 2)
+        prov_decimo = round(salary / 12, 2)
+        prov_ferias = round((salary / 12) * (4 / 3), 2)
+        custo_total = round(
+            salary + inss_patronal + fgts + rat + terceiros + beneficios + prov_decimo + prov_ferias, 2
+        )
+
+        total_bruto += salary
+        total_custo += custo_total
+
+        result.append({
+            "id": emp["id"],
+            "name": emp["name"],
+            "role": emp.get("role", ""),
+            "department": emp.get("department", ""),
+            "salary": salary,
+            "inss_patronal": inss_patronal,
+            "fgts": fgts,
+            "rat": rat,
+            "terceiros": terceiros,
+            "beneficios": beneficios,
+            "prov_decimo": prov_decimo,
+            "prov_ferias": prov_ferias,
+            "custo_total": custo_total,
+            "multiplicador": round(custo_total / salary, 2) if salary else 0,
+        })
+
+    return {
+        "employees": result,
+        "totais": {
+            "total_salarios": round(total_bruto, 2),
+            "total_custo": round(total_custo, 2),
+            "multiplicador_medio": round(total_custo / total_bruto, 2) if total_bruto else 0,
+        },
+    }
+
+
+@router.get("/relatorios/provisoes")
+def relatorio_provisoes(
+    competencia: str = Query(default=""),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Provisões mensais: 13º + férias + encargos sobre férias."""
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+
+    if not competencia:
+        competencia = date.today().strftime("%Y-%m")
+
+    try:
+        ref_date = date.fromisoformat(competencia + "-01")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Competência inválida. Use YYYY-MM.")
+
+    employees = rows_to_dicts(conn.execute(
+        "SELECT * FROM employees WHERE company_id = ? AND active = 1 ORDER BY name",
+        (company_id,)
+    ).fetchall())
+    conn.close()
+
+    result = []
+    tot_decimo = tot_ferias = tot_inss_ferias = tot_fgts_ferias = tot_fgts_decimo = 0.0
+
+    for emp in employees:
+        salary = float(emp.get("salary") or 0)
+        is_prl = bool(emp.get("is_prolabore"))
+        try:
+            adm = date.fromisoformat(emp["admission_date"][:10])
+        except (ValueError, TypeError):
+            adm = ref_date
+
+        meses = ref_date.month if adm.year == ref_date.year else 12
+        meses = max(1, min(12, meses))
+
+        prov_decimo = round(salary * meses / 12, 2)
+        prov_ferias_base = round(salary * meses / 12, 2)
+        prov_ferias_terco = round(prov_ferias_base / 3, 2)
+        prov_ferias_total = round(prov_ferias_base + prov_ferias_terco, 2)
+
+        inss_ferias = round(_calc_inss_simples(prov_ferias_base), 2) if not is_prl else 0.0
+        fgts_ferias = round(prov_ferias_total * 0.08, 2) if not is_prl else 0.0
+        fgts_decimo = round(prov_decimo * 0.08, 2) if not is_prl else 0.0
+
+        tot_decimo += prov_decimo
+        tot_ferias += prov_ferias_total
+        tot_inss_ferias += inss_ferias
+        tot_fgts_ferias += fgts_ferias
+        tot_fgts_decimo += fgts_decimo
+
+        result.append({
+            "id": emp["id"],
+            "name": emp["name"],
+            "department": emp.get("department", ""),
+            "salary": salary,
+            "meses": meses,
+            "prov_decimo": prov_decimo,
+            "prov_ferias_base": prov_ferias_base,
+            "prov_ferias_terco": prov_ferias_terco,
+            "prov_ferias_total": prov_ferias_total,
+            "inss_ferias": inss_ferias,
+            "fgts_ferias": fgts_ferias,
+            "fgts_decimo": fgts_decimo,
+            "total_provisao": round(
+                prov_decimo + prov_ferias_total + inss_ferias + fgts_ferias + fgts_decimo, 2
+            ),
+        })
+
+    return {
+        "competencia": competencia,
+        "employees": result,
+        "totais": {
+            "prov_decimo": round(tot_decimo, 2),
+            "prov_ferias": round(tot_ferias, 2),
+            "inss_ferias": round(tot_inss_ferias, 2),
+            "fgts_ferias": round(tot_fgts_ferias, 2),
+            "fgts_decimo": round(tot_fgts_decimo, 2),
+            "total": round(tot_decimo + tot_ferias + tot_inss_ferias + tot_fgts_ferias + tot_fgts_decimo, 2),
+        },
+    }
+
+
+@router.get("/relatorios/folha-analitica")
+def relatorio_folha_analitica(
+    competencia: str = Query(default=""),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Folha analítica por competência."""
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+
+    if not competencia:
+        competencia = date.today().strftime("%Y-%m")
+
+    run = conn.execute(
+        "SELECT * FROM payroll_runs WHERE company_id = ? AND competence = ? ORDER BY id DESC LIMIT 1",
+        (company_id, competencia)
+    ).fetchone()
+
+    if not run:
+        conn.close()
+        return {"competencia": competencia, "run": None, "items": [], "totais": {}}
+
+    run = dict(run)
+    items_raw = rows_to_dicts(conn.execute(
+        """SELECT pi.*, e.name, e.role, e.department, e.cpf, e.matricula
+           FROM payroll_items pi
+           JOIN employees e ON e.id = pi.employee_id
+           WHERE pi.run_id = ?
+           ORDER BY e.name""",
+        (run["id"],)
+    ).fetchall())
+    conn.close()
+
+    items = []
+    for it in items_raw:
+        total_descontos = sum([
+            float(it.get("inss") or 0),
+            float(it.get("irrf") or 0),
+            float(it.get("vt_discount") or 0),
+            float(it.get("other_discounts") or 0),
+        ])
+        items.append({
+            "employee_id": it["employee_id"],
+            "name": it["name"],
+            "cpf": it.get("cpf", ""),
+            "matricula": it.get("matricula", ""),
+            "role": it.get("role", ""),
+            "department": it.get("department", ""),
+            "proventos": {
+                "salario_base": float(it.get("gross_salary") or 0),
+                "total": float(it.get("gross_salary") or 0),
+            },
+            "descontos": {
+                "inss": float(it.get("inss") or 0),
+                "irrf": float(it.get("irrf") or 0),
+                "vt": float(it.get("vt_discount") or 0),
+                "outros": float(it.get("other_discounts") or 0),
+                "total": round(total_descontos, 2),
+            },
+            "liquido": float(it.get("net_salary") or 0),
+            "fgts": float(it.get("fgts") or 0),
+        })
+
+    totais = {
+        "total_bruto": round(sum(i["proventos"]["total"] for i in items), 2),
+        "total_inss": round(sum(i["descontos"]["inss"] for i in items), 2),
+        "total_irrf": round(sum(i["descontos"]["irrf"] for i in items), 2),
+        "total_vt": round(sum(i["descontos"]["vt"] for i in items), 2),
+        "total_descontos": round(sum(i["descontos"]["total"] for i in items), 2),
+        "total_liquido": round(sum(i["liquido"] for i in items), 2),
+        "total_fgts": round(sum(i["fgts"] for i in items), 2),
+    }
+
+    return {"competencia": competencia, "run": run, "items": items, "totais": totais}
+
+
+@router.get("/relatorios/mapa-lotacao")
+def relatorio_mapa_lotacao(
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Headcount por departamento e cargo."""
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+
+    all_employees = rows_to_dicts(conn.execute(
+        "SELECT name, role, department, salary, active FROM employees WHERE company_id = ? ORDER BY name",
+        (company_id,)
+    ).fetchall())
+    conn.close()
+
+    from collections import defaultdict
+    dept_map: dict = defaultdict(lambda: {"ativos": 0, "inativos": 0, "total_salary": 0.0})
+
+    for emp in all_employees:
+        dept = emp.get("department") or "Sem Departamento"
+        salary = float(emp.get("salary") or 0)
+        if emp.get("active"):
+            dept_map[dept]["ativos"] += 1
+            dept_map[dept]["total_salary"] += salary
+        else:
+            dept_map[dept]["inativos"] += 1
+
+    total_ativos = sum(d["ativos"] for d in dept_map.values())
+
+    departamentos = []
+    for dept, data in sorted(dept_map.items()):
+        ativos = data["ativos"]
+        media_sal = round(data["total_salary"] / ativos, 2) if ativos else 0
+        departamentos.append({
+            "departamento": dept,
+            "ativos": ativos,
+            "inativos": data["inativos"],
+            "total": ativos + data["inativos"],
+            "media_salarial": media_sal,
+            "percent_headcount": round(ativos / total_ativos * 100, 1) if total_ativos else 0,
+        })
+
+    cargo_map: dict = defaultdict(lambda: {"ativos": 0, "total_salary": 0.0})
+    for emp in all_employees:
+        if emp.get("active"):
+            cargo = emp.get("role") or "Sem Cargo"
+            cargo_map[cargo]["ativos"] += 1
+            cargo_map[cargo]["total_salary"] += float(emp.get("salary") or 0)
+
+    cargos = sorted(
+        [{"cargo": k, "ativos": v["ativos"],
+          "media_salarial": round(v["total_salary"] / v["ativos"], 2) if v["ativos"] else 0}
+         for k, v in cargo_map.items()],
+        key=lambda x: -x["ativos"]
+    )[:15]
+
+    return {
+        "total_ativos": total_ativos,
+        "total_inativos": sum(d["inativos"] for d in dept_map.values()),
+        "departamentos": departamentos,
+        "cargos": cargos,
+    }
+
+
+@router.get("/relatorios/turnover")
+def relatorio_turnover(
+    ano: int = Query(default=0),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Taxa de turnover por mês: admissões e desligamentos no período."""
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+
+    if not ano:
+        ano = date.today().year
+
+    all_employees = rows_to_dicts(conn.execute(
+        "SELECT id, name, role, department, admission_date, termination_date, active FROM employees WHERE company_id = ?",
+        (company_id,)
+    ).fetchall())
+    conn.close()
+
+    meses_labels = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
+                    "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
+    admissoes_mes = [0] * 12
+    demissoes_mes = [0] * 12
+    admitidos_ano, demitidos_ano = [], []
+
+    for emp in all_employees:
+        try:
+            adm = date.fromisoformat(emp["admission_date"][:10])
+            if adm.year == ano:
+                admissoes_mes[adm.month - 1] += 1
+                admitidos_ano.append({"name": emp["name"], "role": emp.get("role", ""),
+                                       "department": emp.get("department", ""),
+                                       "data": emp["admission_date"][:10]})
+        except (ValueError, TypeError):
+            pass
+
+        td = emp.get("termination_date")
+        if td:
+            try:
+                dem = date.fromisoformat(td[:10])
+                if dem.year == ano:
+                    demissoes_mes[dem.month - 1] += 1
+                    demitidos_ano.append({"name": emp["name"], "role": emp.get("role", ""),
+                                          "department": emp.get("department", ""),
+                                          "data": td[:10]})
+            except (ValueError, TypeError):
+                pass
+
+    headcount_inicio = sum(
+        1 for emp in all_employees
+        if emp.get("admission_date") and emp["admission_date"][:4] < str(ano)
+        and (emp.get("active") or (emp.get("termination_date") and emp["termination_date"][:4] >= str(ano)))
+    )
+    headcount_atual = sum(1 for emp in all_employees if emp.get("active"))
+
+    total_adm = sum(admissoes_mes)
+    total_dem = sum(demissoes_mes)
+    headcount_medio = (headcount_inicio + headcount_atual) / 2 if (headcount_inicio + headcount_atual) > 0 else 1
+    taxa_turnover = round((total_adm + total_dem) / 2 / headcount_medio * 100, 1)
+
+    mensal = []
+    for i in range(12):
+        hc = headcount_inicio + sum(admissoes_mes[:i + 1]) - sum(demissoes_mes[:i + 1])
+        mensal.append({
+            "mes": meses_labels[i],
+            "admissoes": admissoes_mes[i],
+            "demissoes": demissoes_mes[i],
+            "headcount_estimado": max(0, hc),
+        })
+
+    return {
+        "ano": ano,
+        "total_admissoes": total_adm,
+        "total_demissoes": total_dem,
+        "headcount_inicio_ano": headcount_inicio,
+        "headcount_atual": headcount_atual,
+        "taxa_turnover_anual": taxa_turnover,
+        "mensal": mensal,
+        "admitidos": admitidos_ano,
+        "demitidos": demitidos_ano,
+    }

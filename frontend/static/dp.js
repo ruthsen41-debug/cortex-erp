@@ -65,6 +65,12 @@ function dpTabs() {
     { id: 'estagiarios',       icon: 'graduation-cap',label: 'Estágio & Aprendiz' },
     { id: 'fgts',              icon: 'piggy-bank',    label: 'Extrato FGTS' },
     { id: 'employee_portal',   icon: 'circle-user',   label: 'Portal' },
+    { id: 'documentos',        icon: 'file-text',     label: 'Documentos' },
+    { id: 'rel_custo',         icon: 'calculator',    label: 'Custo CLT' },
+    { id: 'rel_provisoes',     icon: 'piggy-bank',    label: 'Provisões' },
+    { id: 'rel_folha_analitica', icon: 'table-2',     label: 'Folha Analítica' },
+    { id: 'rel_mapa_lotacao',  icon: 'map',           label: 'Mapa de Lotação' },
+    { id: 'rel_turnover',      icon: 'trending-down', label: 'Turnover' },
   ];
   return `<div class="flex gap-1 overflow-x-auto pb-1 flex-wrap">
     ${tabs.map(t => `
@@ -136,6 +142,12 @@ async function switchDpTab(tab, noRebuildTabs = false) {
     case 'estagiarios':        await renderEstagiarios(body); break;
     case 'fgts':               await renderFgts(body); break;
     case 'employee_portal':    await renderPortalFuncionario(body); break;
+    case 'documentos':         renderDocumentos(body); break;
+    case 'rel_custo':          await renderRelCusto(body); break;
+    case 'rel_provisoes':      await renderRelProvisoes(body); break;
+    case 'rel_folha_analitica': await renderRelFolhaAnalitica(body); break;
+    case 'rel_mapa_lotacao':   await renderRelMapaLotacao(body); break;
+    case 'rel_turnover':       await renderRelTurnover(body); break;
   }
   if (window.lucide) lucide.createIcons();
 }
@@ -4558,5 +4570,518 @@ async function renderPortalFuncionario(el) {
   } else {
     await renderPortal(selEmp);
   }
+}
+
+// ── DOCUMENTOS TRABALHISTAS ──────────────────────────────────────────────────
+function renderDocumentos(el) {
+  const opts = dpEmployees.filter(e => e.active).map(e =>
+    `<option value="${e.id}">${e.name}</option>`).join('');
+  const depts = [...new Set(dpEmployees.map(e => e.department).filter(Boolean))];
+  const deptOpts = `<option value="">— Todos —</option>` + depts.map(d =>
+    `<option value="${d}">${d}</option>`).join('');
+
+  const docCard = (icon, title, color, formHtml, btnId, btnLabel, onClickFn) => `
+    <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs flex flex-col gap-3">
+      <div class="flex items-center gap-2 mb-1">
+        <i data-lucide="${icon}" class="w-5 h-5 ${color}"></i>
+        <span class="font-bold text-slate-800 dark:text-slate-100 text-sm">${title}</span>
+      </div>
+      ${formHtml}
+      <button id="${btnId}" onclick="${onClickFn}"
+        class="mt-auto w-full flex items-center justify-center gap-2 ${color.replace('text-','bg-').replace('-500','-600').replace('-600','-600')} hover:opacity-90 text-white text-xs font-semibold px-4 py-2 rounded-xl transition">
+        <i data-lucide="printer" class="w-3.5 h-3.5"></i> ${btnLabel}
+      </button>
+    </div>`;
+
+  el.innerHTML = `
+    <h2 class="font-bold text-slate-800 dark:text-slate-100 text-lg mb-5">Documentos Trabalhistas</h2>
+    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+
+      ${docCard('file-signature','Contrato de Trabalho','text-violet-600',`
+        <div>${labelCls('Funcionário')}<select id="doc-ctr-emp" class="${inputCls()}">${opts}</select></div>
+        <div>${labelCls('Tipo de Contrato')}
+          <select id="doc-ctr-tipo" class="${inputCls()}">
+            <option value="experiencia">Contrato de Experiência (45+45 dias)</option>
+            <option value="indeterminado">Prazo Indeterminado</option>
+          </select>
+        </div>`,
+        'btn-contrato','Gerar Contrato','window._docContrato()')}
+
+      ${docCard('alert-triangle','Carta de Advertência','text-amber-600',`
+        <div>${labelCls('Funcionário')}<select id="doc-adv-emp" class="${inputCls()}">${opts}</select></div>
+        <div>${labelCls('Data da Ocorrência')}<input type="date" id="doc-adv-data" class="${inputCls()}" value="${new Date().toISOString().slice(0,10)}"></div>
+        <div>${labelCls('Motivo / Infração')}<textarea id="doc-adv-motivo" class="${inputCls()}" rows="2" placeholder="Descreva a infração praticada..."></textarea></div>`,
+        'btn-advertencia','Gerar Advertência','window._docAdvertencia()')}
+
+      ${docCard('ban','Carta de Suspensão','text-rose-600',`
+        <div>${labelCls('Funcionário')}<select id="doc-sus-emp" class="${inputCls()}">${opts}</select></div>
+        <div class="flex gap-2">
+          <div class="flex-1">${labelCls('Início da Suspensão')}<input type="date" id="doc-sus-data" class="${inputCls()}" value="${new Date().toISOString().slice(0,10)}"></div>
+          <div style="width:80px">${labelCls('Dias')}<input type="number" id="doc-sus-dias" class="${inputCls()}" value="1" min="1" max="30"></div>
+        </div>
+        <div>${labelCls('Motivo / Infração')}<textarea id="doc-sus-motivo" class="${inputCls()}" rows="2" placeholder="Descreva a infração praticada..."></textarea></div>`,
+        'btn-suspensao','Gerar Suspensão','window._docSuspensao()')}
+
+      ${docCard('check-square','Carta-Quitação Anual (Art. 507-B)','text-emerald-600',`
+        <div>${labelCls('Funcionário')}<select id="doc-quit-emp" class="${inputCls()}">${opts}</select></div>
+        <div>${labelCls('Ano de Referência')}<input type="number" id="doc-quit-ano" class="${inputCls()}" value="${new Date().getFullYear()-1}" min="2010" max="${new Date().getFullYear()}"></div>
+        <p class="text-xs text-slate-400">Termo de quitação das obrigações do ano — reduz passivo trabalhista. Exige assinatura perante o sindicato da categoria.</p>`,
+        'btn-quitacao','Gerar Termo de Quitação','window._docQuitacao()')}
+
+      ${docCard('umbrella','Recibo de Férias Coletivas','text-blue-600',`
+        <div>${labelCls('Departamento (opcional)')}<select id="doc-fc-dept" class="${inputCls()}">${deptOpts}</select></div>
+        <div class="flex gap-2">
+          <div class="flex-1">${labelCls('Início')}<input type="date" id="doc-fc-ini" class="${inputCls()}"></div>
+          <div class="flex-1">${labelCls('Término')}<input type="date" id="doc-fc-fim" class="${inputCls()}"></div>
+        </div>
+        <p class="text-xs text-slate-400">Gera um recibo único para todos os funcionários ativos (ou do departamento selecionado) com campo de assinatura.</p>`,
+        'btn-fc','Gerar Recibo Coletivo','window._docFeriasColetivas()')}
+
+    </div>`;
+
+  if (window.lucide) lucide.createIcons();
+
+  window._docContrato = () => {
+    const emp = document.getElementById('doc-ctr-emp')?.value;
+    const tipo = document.getElementById('doc-ctr-tipo')?.value || 'experiencia';
+    if (!emp) return alert('Selecione um funcionário.');
+    window.open(`/api/dp/employees/${emp}/documento/contrato?tipo=${tipo}`, '_blank');
+  };
+
+  window._docAdvertencia = () => {
+    const emp = document.getElementById('doc-adv-emp')?.value;
+    const motivo = encodeURIComponent(document.getElementById('doc-adv-motivo')?.value || '');
+    const data = document.getElementById('doc-adv-data')?.value || '';
+    if (!emp) return alert('Selecione um funcionário.');
+    window.open(`/api/dp/employees/${emp}/documento/advertencia?motivo=${motivo}&data_ocorrencia=${data}`, '_blank');
+  };
+
+  window._docSuspensao = () => {
+    const emp = document.getElementById('doc-sus-emp')?.value;
+    const motivo = encodeURIComponent(document.getElementById('doc-sus-motivo')?.value || '');
+    const data = document.getElementById('doc-sus-data')?.value || '';
+    const dias = document.getElementById('doc-sus-dias')?.value || 1;
+    if (!emp) return alert('Selecione um funcionário.');
+    window.open(`/api/dp/employees/${emp}/documento/suspensao?motivo=${motivo}&data_ocorrencia=${data}&dias=${dias}`, '_blank');
+  };
+
+  window._docQuitacao = () => {
+    const emp = document.getElementById('doc-quit-emp')?.value;
+    const ano = document.getElementById('doc-quit-ano')?.value || (new Date().getFullYear() - 1);
+    if (!emp) return alert('Selecione um funcionário.');
+    window.open(`/api/dp/employees/${emp}/documento/quitacao-anual?ano=${ano}`, '_blank');
+  };
+
+  window._docFeriasColetivas = () => {
+    const ini = document.getElementById('doc-fc-ini')?.value;
+    const fim = document.getElementById('doc-fc-fim')?.value;
+    const dept = encodeURIComponent(document.getElementById('doc-fc-dept')?.value || '');
+    if (!ini || !fim) return alert('Informe o período de início e término.');
+    if (ini > fim) return alert('A data de início deve ser anterior ao término.');
+    window.open(`/api/dp/documento/ferias-coletivas?inicio=${ini}&fim=${fim}&departamento=${dept}`, '_blank');
+  };
+}
+
+// ─── RELATÓRIOS GERENCIAIS ────────────────────────────────────────────────────
+
+async function renderRelCusto(el) {
+  const r = await fetch('/api/dp/relatorios/custo-funcionario', { headers: authHeaders() });
+  if (!r.ok) { el.innerHTML = `<p class="text-red-500 p-6">Erro ao carregar.</p>`; return; }
+  const data = await r.json();
+  const { employees, totais } = data;
+
+  const fBRL = v => parseFloat(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const fPct = v => parseFloat(v || 0).toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + 'x';
+
+  const rows = employees.map(e => `
+    <tr class="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 text-sm">
+      <td class="px-3 py-2 font-medium">${e.name}</td>
+      <td class="px-3 py-2 text-slate-500">${e.role || '-'}</td>
+      <td class="px-3 py-2 text-slate-500">${e.department || '-'}</td>
+      <td class="px-3 py-2 text-right">${fBRL(e.salary)}</td>
+      <td class="px-3 py-2 text-right text-orange-600">${fBRL(e.inss_patronal)}</td>
+      <td class="px-3 py-2 text-right text-blue-600">${fBRL(e.fgts)}</td>
+      <td class="px-3 py-2 text-right text-slate-500">${fBRL(e.rat + e.terceiros)}</td>
+      <td class="px-3 py-2 text-right text-green-600">${fBRL(e.beneficios)}</td>
+      <td class="px-3 py-2 text-right text-purple-600">${fBRL(e.prov_decimo + e.prov_ferias)}</td>
+      <td class="px-3 py-2 text-right font-bold text-indigo-700">${fBRL(e.custo_total)}</td>
+      <td class="px-3 py-2 text-right">
+        <span class="inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-700">${fPct(e.multiplicador)}</span>
+      </td>
+    </tr>`).join('');
+
+  el.innerHTML = `
+    <div class="space-y-5">
+      <div class="grid grid-cols-3 gap-4">
+        ${kpiDP('Total Salários', fBRL(totais.total_salarios), 'soma dos brutos', 'banknote', 'text-slate-700')}
+        ${kpiDP('Custo Total Empresa', fBRL(totais.total_custo), 'inclui encargos e provisões', 'trending-up', 'text-indigo-600')}
+        ${kpiDP('Multiplicador Médio', fPct(totais.multiplicador_medio), 'custo / salário bruto', 'x', 'text-orange-600')}
+      </div>
+      <div class="text-xs text-slate-400 px-1">Encargos = INSS patronal + FGTS + RAT + Sistema S. Provisões = 13º/12 + Férias/12×(4/3).</div>
+      <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full">
+            <thead class="bg-slate-50 dark:bg-slate-800 text-xs text-slate-500 uppercase">
+              <tr>
+                <th class="px-3 py-2 text-left">Funcionário</th>
+                <th class="px-3 py-2 text-left">Cargo</th>
+                <th class="px-3 py-2 text-left">Depto</th>
+                <th class="px-3 py-2 text-right">Salário</th>
+                <th class="px-3 py-2 text-right">INSS Patr.</th>
+                <th class="px-3 py-2 text-right">FGTS</th>
+                <th class="px-3 py-2 text-right">RAT+S</th>
+                <th class="px-3 py-2 text-right">Benefícios</th>
+                <th class="px-3 py-2 text-right">Provisões</th>
+                <th class="px-3 py-2 text-right">Custo Total</th>
+                <th class="px-3 py-2 text-right">Mult.</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows || '<tr><td colspan="11" class="text-center py-10 text-slate-400">Nenhum funcionário ativo.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+  if (window.lucide) lucide.createIcons();
+}
+
+
+async function renderRelProvisoes(el) {
+  const hoje = new Date();
+  const defComp = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`;
+
+  const doLoad = async (comp) => {
+    el.innerHTML = `<div class="flex items-center justify-center p-10 text-slate-400"><div class="animate-spin rounded-full h-7 w-7 border-b-2 border-violet-500 mr-3"></div>Carregando...</div>`;
+    const r = await fetch(`/api/dp/relatorios/provisoes?competencia=${comp}`, { headers: authHeaders() });
+    if (!r.ok) { el.innerHTML = `<p class="text-red-500 p-6">Erro ao carregar.</p>`; return; }
+    const data = await r.json();
+    const { employees, totais, competencia } = data;
+    const fBRL = v => parseFloat(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+    const rows = employees.map(e => `
+      <tr class="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 text-sm">
+        <td class="px-3 py-2 font-medium">${e.name}</td>
+        <td class="px-3 py-2 text-slate-500">${e.department || '-'}</td>
+        <td class="px-3 py-2 text-right">${fBRL(e.salary)}</td>
+        <td class="px-3 py-2 text-right text-center text-xs">${e.meses}</td>
+        <td class="px-3 py-2 text-right text-blue-600">${fBRL(e.prov_decimo)}</td>
+        <td class="px-3 py-2 text-right text-green-600">${fBRL(e.prov_ferias_total)}</td>
+        <td class="px-3 py-2 text-right text-orange-600">${fBRL(e.inss_ferias)}</td>
+        <td class="px-3 py-2 text-right text-cyan-600">${fBRL(e.fgts_ferias + e.fgts_decimo)}</td>
+        <td class="px-3 py-2 text-right font-bold text-indigo-700">${fBRL(e.total_provisao)}</td>
+      </tr>`).join('');
+
+    el.innerHTML = `
+      <div class="space-y-5">
+        <div class="flex items-center gap-3">
+          <label class="text-sm font-semibold text-slate-600">Competência:</label>
+          <input type="month" value="${competencia}" id="prov-comp-input"
+            class="border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 text-sm bg-white dark:bg-slate-900">
+          <button onclick="window._loadProvisoes(document.getElementById('prov-comp-input').value)"
+            class="px-4 py-1.5 bg-violet-600 text-white rounded-xl text-sm font-semibold hover:bg-violet-700">Atualizar</button>
+        </div>
+        <div class="grid grid-cols-3 gap-4">
+          ${kpiDP('Provisão 13º', fBRL(totais.prov_decimo), 'acumulado no mês', 'gift', 'text-blue-600')}
+          ${kpiDP('Provisão Férias', fBRL(totais.prov_ferias), '+ 1/3 constitucional', 'umbrella', 'text-green-600')}
+          ${kpiDP('Total Provisões', fBRL(totais.total), 'inclui INSS e FGTS', 'piggy-bank', 'text-indigo-600')}
+        </div>
+        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full">
+              <thead class="bg-slate-50 dark:bg-slate-800 text-xs text-slate-500 uppercase">
+                <tr>
+                  <th class="px-3 py-2 text-left">Funcionário</th>
+                  <th class="px-3 py-2 text-left">Depto</th>
+                  <th class="px-3 py-2 text-right">Salário</th>
+                  <th class="px-3 py-2 text-right">Meses</th>
+                  <th class="px-3 py-2 text-right">Prov. 13º</th>
+                  <th class="px-3 py-2 text-right">Prov. Férias</th>
+                  <th class="px-3 py-2 text-right">INSS s/Férias</th>
+                  <th class="px-3 py-2 text-right">FGTS</th>
+                  <th class="px-3 py-2 text-right">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rows || '<tr><td colspan="9" class="text-center py-10 text-slate-400">Nenhum funcionário ativo.</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>`;
+    window._loadProvisoes = doLoad;
+    if (window.lucide) lucide.createIcons();
+  };
+
+  window._loadProvisoes = doLoad;
+  await doLoad(defComp);
+}
+
+
+async function renderRelFolhaAnalitica(el) {
+  const hoje = new Date();
+  const defComp = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`;
+
+  const doLoad = async (comp) => {
+    el.innerHTML = `<div class="flex items-center justify-center p-10 text-slate-400"><div class="animate-spin rounded-full h-7 w-7 border-b-2 border-violet-500 mr-3"></div>Carregando...</div>`;
+    const r = await fetch(`/api/dp/relatorios/folha-analitica?competencia=${comp}`, { headers: authHeaders() });
+    if (!r.ok) { el.innerHTML = `<p class="text-red-500 p-6">Erro.</p>`; return; }
+    const data = await r.json();
+    const { items, totais, run, competencia } = data;
+    const fBRL = v => parseFloat(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+    const noRun = !run ? `<div class="text-center py-12 text-slate-400">
+      <i data-lucide="file-x" class="w-12 h-12 mx-auto mb-3 text-slate-300"></i>
+      <p>Folha não processada para <strong>${competencia}</strong>.</p>
+      <p class="text-xs mt-1">Acesse a aba "Folha Mensal" para processar a competência.</p>
+    </div>` : '';
+
+    const rows = items.map(e => `
+      <tr class="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 text-sm">
+        <td class="px-3 py-2 text-xs text-slate-400">${e.matricula || '-'}</td>
+        <td class="px-3 py-2 font-medium">${e.name}</td>
+        <td class="px-3 py-2 text-slate-500">${e.department || '-'}</td>
+        <td class="px-3 py-2 text-right text-green-600">${fBRL(e.proventos.salario_base)}</td>
+        <td class="px-3 py-2 text-right text-green-700 font-semibold">${fBRL(e.proventos.total)}</td>
+        <td class="px-3 py-2 text-right text-red-500">${fBRL(e.descontos.inss)}</td>
+        <td class="px-3 py-2 text-right text-red-500">${fBRL(e.descontos.irrf)}</td>
+        <td class="px-3 py-2 text-right text-red-400">${fBRL(e.descontos.vt)}</td>
+        <td class="px-3 py-2 text-right text-red-700 font-semibold">${fBRL(e.descontos.total)}</td>
+        <td class="px-3 py-2 text-right font-bold text-indigo-700">${fBRL(e.liquido)}</td>
+        <td class="px-3 py-2 text-right text-cyan-600">${fBRL(e.fgts)}</td>
+      </tr>`).join('');
+
+    const totRow = items.length ? `
+      <tr class="bg-slate-50 dark:bg-slate-800 font-bold text-sm border-t-2 border-slate-200 dark:border-slate-700">
+        <td class="px-3 py-2" colspan="3">TOTAIS (${items.length} func.)</td>
+        <td class="px-3 py-2 text-right text-green-600">${fBRL(totais.total_bruto)}</td>
+        <td class="px-3 py-2 text-right text-green-700">${fBRL(totais.total_bruto)}</td>
+        <td class="px-3 py-2 text-right text-red-500">${fBRL(totais.total_inss)}</td>
+        <td class="px-3 py-2 text-right text-red-500">${fBRL(totais.total_irrf)}</td>
+        <td class="px-3 py-2 text-right text-red-400">${fBRL(totais.total_vt)}</td>
+        <td class="px-3 py-2 text-right text-red-700">${fBRL(totais.total_descontos)}</td>
+        <td class="px-3 py-2 text-right text-indigo-700">${fBRL(totais.total_liquido)}</td>
+        <td class="px-3 py-2 text-right text-cyan-600">${fBRL(totais.total_fgts)}</td>
+      </tr>` : '';
+
+    el.innerHTML = `
+      <div class="space-y-5">
+        <div class="flex items-center gap-3">
+          <label class="text-sm font-semibold text-slate-600">Competência:</label>
+          <input type="month" value="${competencia}" id="fa-comp-input"
+            class="border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 text-sm bg-white dark:bg-slate-900">
+          <button onclick="window._loadFolhaAnalitica(document.getElementById('fa-comp-input').value)"
+            class="px-4 py-1.5 bg-violet-600 text-white rounded-xl text-sm font-semibold hover:bg-violet-700">Buscar</button>
+        </div>
+        ${noRun}
+        ${run ? `
+        <div class="grid grid-cols-4 gap-4">
+          ${kpiDP('Funcionários', items.length, run.status, 'users', 'text-slate-700')}
+          ${kpiDP('Total Bruto', fBRL(totais.total_bruto), 'proventos', 'trending-up', 'text-green-600')}
+          ${kpiDP('Total Descontos', fBRL(totais.total_descontos), 'INSS+IRRF+VT', 'minus', 'text-red-500')}
+          ${kpiDP('Total Líquido', fBRL(totais.total_liquido), 'a pagar', 'banknote', 'text-indigo-600')}
+        </div>
+        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full">
+              <thead class="bg-slate-50 dark:bg-slate-800 text-xs text-slate-500 uppercase">
+                <tr>
+                  <th class="px-3 py-2 text-left">Matríc.</th>
+                  <th class="px-3 py-2 text-left">Funcionário</th>
+                  <th class="px-3 py-2 text-left">Depto</th>
+                  <th class="px-3 py-2 text-right">Salário Base</th>
+                  <th class="px-3 py-2 text-right">Total Prov.</th>
+                  <th class="px-3 py-2 text-right">INSS</th>
+                  <th class="px-3 py-2 text-right">IRRF</th>
+                  <th class="px-3 py-2 text-right">VT</th>
+                  <th class="px-3 py-2 text-right">Total Desc.</th>
+                  <th class="px-3 py-2 text-right">Líquido</th>
+                  <th class="px-3 py-2 text-right">FGTS</th>
+                </tr>
+              </thead>
+              <tbody>${rows}${totRow}</tbody>
+            </table>
+          </div>
+        </div>` : ''}
+      </div>`;
+    window._loadFolhaAnalitica = doLoad;
+    if (window.lucide) lucide.createIcons();
+  };
+
+  window._loadFolhaAnalitica = doLoad;
+  await doLoad(defComp);
+}
+
+
+async function renderRelMapaLotacao(el) {
+  const r = await fetch('/api/dp/relatorios/mapa-lotacao', { headers: authHeaders() });
+  if (!r.ok) { el.innerHTML = `<p class="text-red-500 p-6">Erro.</p>`; return; }
+  const data = await r.json();
+  const { departamentos, cargos, total_ativos, total_inativos } = data;
+  const fBRL = v => parseFloat(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+  const deptRows = departamentos.map(d => {
+    const pct = d.percent_headcount;
+    return `<tr class="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 text-sm">
+      <td class="px-3 py-3 font-medium">${d.departamento}</td>
+      <td class="px-3 py-3 text-right font-bold text-indigo-700">${d.ativos}</td>
+      <td class="px-3 py-3 text-right text-slate-400">${d.inativos}</td>
+      <td class="px-3 py-3">
+        <div class="flex items-center gap-2">
+          <div class="flex-1 bg-slate-100 dark:bg-slate-800 rounded-full h-2">
+            <div class="bg-violet-500 h-2 rounded-full" style="width:${Math.min(pct,100)}%"></div>
+          </div>
+          <span class="text-xs text-slate-500 w-10 text-right">${pct}%</span>
+        </div>
+      </td>
+      <td class="px-3 py-3 text-right text-slate-600">${fBRL(d.media_salarial)}</td>
+    </tr>`;
+  }).join('');
+
+  const cargoRows = cargos.map((c, i) => `
+    <tr class="border-b border-slate-100 dark:border-slate-800 text-sm">
+      <td class="px-3 py-2 text-slate-400 text-xs">${i + 1}</td>
+      <td class="px-3 py-2 font-medium">${c.cargo}</td>
+      <td class="px-3 py-2 text-right font-bold text-indigo-700">${c.ativos}</td>
+      <td class="px-3 py-2 text-right text-slate-600">${fBRL(c.media_salarial)}</td>
+    </tr>`).join('');
+
+  el.innerHTML = `
+    <div class="space-y-5">
+      <div class="grid grid-cols-3 gap-4">
+        ${kpiDP('Headcount Ativo', total_ativos, 'funcionários ativos', 'users', 'text-indigo-600')}
+        ${kpiDP('Desligados', total_inativos, 'histórico inativo', 'user-x', 'text-slate-500')}
+        ${kpiDP('Departamentos', departamentos.length, 'com ao menos 1 ativo', 'building-2', 'text-violet-600')}
+      </div>
+      <div class="grid grid-cols-2 gap-5">
+        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden">
+          <div class="px-4 py-3 border-b border-slate-100 dark:border-slate-800 font-semibold text-sm">Por Departamento</div>
+          <table class="w-full">
+            <thead class="bg-slate-50 dark:bg-slate-800 text-xs text-slate-500 uppercase">
+              <tr>
+                <th class="px-3 py-2 text-left">Depto</th>
+                <th class="px-3 py-2 text-right">Ativos</th>
+                <th class="px-3 py-2 text-right">Inat.</th>
+                <th class="px-3 py-2 text-left">% HC</th>
+                <th class="px-3 py-2 text-right">Média Sal.</th>
+              </tr>
+            </thead>
+            <tbody>${deptRows || '<tr><td colspan="5" class="text-center py-8 text-slate-400">Nenhum dado.</td></tr>'}</tbody>
+          </table>
+        </div>
+        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden">
+          <div class="px-4 py-3 border-b border-slate-100 dark:border-slate-800 font-semibold text-sm">Top Cargos</div>
+          <table class="w-full">
+            <thead class="bg-slate-50 dark:bg-slate-800 text-xs text-slate-500 uppercase">
+              <tr>
+                <th class="px-3 py-2">#</th>
+                <th class="px-3 py-2 text-left">Cargo</th>
+                <th class="px-3 py-2 text-right">Ativos</th>
+                <th class="px-3 py-2 text-right">Média Sal.</th>
+              </tr>
+            </thead>
+            <tbody>${cargoRows || '<tr><td colspan="4" class="text-center py-8 text-slate-400">Nenhum dado.</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+  if (window.lucide) lucide.createIcons();
+}
+
+
+async function renderRelTurnover(el) {
+  const anoAtual = new Date().getFullYear();
+
+  const doLoad = async (ano) => {
+    el.innerHTML = `<div class="flex items-center justify-center p-10 text-slate-400"><div class="animate-spin rounded-full h-7 w-7 border-b-2 border-violet-500 mr-3"></div>Carregando...</div>`;
+    const r = await fetch(`/api/dp/relatorios/turnover?ano=${ano}`, { headers: authHeaders() });
+    if (!r.ok) { el.innerHTML = `<p class="text-red-500 p-6">Erro.</p>`; return; }
+    const d = await r.json();
+
+    const barMax = Math.max(...d.mensal.map(m => Math.max(m.admissoes, m.demissoes)), 1);
+    const bars = d.mensal.map(m => {
+      const hAdm = Math.round((m.admissoes / barMax) * 80);
+      const hDem = Math.round((m.demissoes / barMax) * 80);
+      return `<div class="flex flex-col items-center gap-1 flex-1 min-w-0">
+        <div class="text-xs text-slate-400">${m.headcount_estimado}</div>
+        <div class="flex gap-0.5 items-end h-20">
+          <div class="w-3 bg-green-400 rounded-t" style="height:${hAdm}px" title="Admissões: ${m.admissoes}"></div>
+          <div class="w-3 bg-red-400 rounded-t" style="height:${hDem}px" title="Demissões: ${m.demissoes}"></div>
+        </div>
+        <div class="text-[10px] text-slate-500">${m.mes}</div>
+      </div>`;
+    }).join('');
+
+    const admRows = d.admitidos.map(e =>
+      `<tr class="border-b border-slate-100 dark:border-slate-800 text-sm">
+        <td class="px-3 py-2">${e.name}</td>
+        <td class="px-3 py-2 text-slate-500">${e.role || '-'}</td>
+        <td class="px-3 py-2 text-slate-500">${e.department || '-'}</td>
+        <td class="px-3 py-2 text-right text-green-600">${e.data}</td>
+      </tr>`).join('');
+
+    const demRows = d.demitidos.map(e =>
+      `<tr class="border-b border-slate-100 dark:border-slate-800 text-sm">
+        <td class="px-3 py-2">${e.name}</td>
+        <td class="px-3 py-2 text-slate-500">${e.role || '-'}</td>
+        <td class="px-3 py-2 text-slate-500">${e.department || '-'}</td>
+        <td class="px-3 py-2 text-right text-red-500">${e.data}</td>
+      </tr>`).join('');
+
+    el.innerHTML = `
+      <div class="space-y-5">
+        <div class="flex items-center gap-3">
+          <label class="text-sm font-semibold text-slate-600">Ano:</label>
+          <input type="number" value="${d.ano}" id="to-ano-input" min="2020" max="2099"
+            class="border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 text-sm bg-white dark:bg-slate-900 w-28">
+          <button onclick="window._loadTurnover(+document.getElementById('to-ano-input').value)"
+            class="px-4 py-1.5 bg-violet-600 text-white rounded-xl text-sm font-semibold hover:bg-violet-700">Buscar</button>
+        </div>
+        <div class="grid grid-cols-4 gap-4">
+          ${kpiDP('Headcount Atual', d.headcount_atual, `início do ano: ${d.headcount_inicio_ano}`, 'users', 'text-indigo-600')}
+          ${kpiDP('Admissões', d.total_admissoes, `em ${d.ano}`, 'user-plus', 'text-green-600')}
+          ${kpiDP('Desligamentos', d.total_demissoes, `em ${d.ano}`, 'user-minus', 'text-red-500')}
+          ${kpiDP('Turnover Anual', d.taxa_turnover_anual + '%', 'fórmula SHRM', 'trending-down', 'text-orange-600')}
+        </div>
+        <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5">
+          <div class="font-semibold text-sm mb-4">Evolução Mensal — Admissões vs. Desligamentos</div>
+          <div class="flex items-end gap-1 h-32">${bars}</div>
+          <div class="flex gap-4 mt-3 text-xs text-slate-500">
+            <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-green-400 inline-block"></span>Admissões</span>
+            <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-red-400 inline-block"></span>Desligamentos</span>
+            <span class="text-slate-400">Número sobre as barras = headcount estimado no mês</span>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-5">
+          <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden">
+            <div class="px-4 py-3 border-b border-slate-100 dark:border-slate-800 font-semibold text-sm text-green-600">
+              Admitidos em ${d.ano} (${d.total_admissoes})
+            </div>
+            <table class="w-full">
+              <thead class="bg-slate-50 dark:bg-slate-800 text-xs text-slate-500 uppercase">
+                <tr><th class="px-3 py-2 text-left">Nome</th><th class="px-3 py-2 text-left">Cargo</th><th class="px-3 py-2 text-left">Depto</th><th class="px-3 py-2 text-right">Admissão</th></tr>
+              </thead>
+              <tbody>${admRows || '<tr><td colspan="4" class="text-center py-6 text-slate-400">Nenhuma admissão.</td></tr>'}</tbody>
+            </table>
+          </div>
+          <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden">
+            <div class="px-4 py-3 border-b border-slate-100 dark:border-slate-800 font-semibold text-sm text-red-500">
+              Desligados em ${d.ano} (${d.total_demissoes})
+            </div>
+            <table class="w-full">
+              <thead class="bg-slate-50 dark:bg-slate-800 text-xs text-slate-500 uppercase">
+                <tr><th class="px-3 py-2 text-left">Nome</th><th class="px-3 py-2 text-left">Cargo</th><th class="px-3 py-2 text-left">Depto</th><th class="px-3 py-2 text-right">Desligamento</th></tr>
+              </thead>
+              <tbody>${demRows || '<tr><td colspan="4" class="text-center py-6 text-slate-400">Nenhum desligamento.</td></tr>'}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>`;
+    window._loadTurnover = doLoad;
+    if (window.lucide) lucide.createIcons();
+  };
+
+  window._loadTurnover = doLoad;
+  await doLoad(anoAtual);
 }
 
