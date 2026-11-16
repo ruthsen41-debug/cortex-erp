@@ -4,6 +4,7 @@ Eventos suportados:
   S-2200  Cadastramento Inicial / Admissão
   S-1200  Remuneração Mensal do Trabalhador
   S-2299  Desligamento
+  S-2298  Reintegração
 Versão do leiaute: S-1.3
 """
 import re
@@ -547,4 +548,30 @@ def gerar_s5011(company: dict, competencia: str, items: list) -> str:
       <vrFGTSTotal>{_n(total_fgts)}</vrFGTSTotal>
     </infoFGTS>
   </evtTotalFGTS>
+</eSocial>"""
+
+
+# ── S-2298 — Reintegração ─────────────────────────────────────────────────────
+def gerar_s2298(company: dict, employee: dict, reintegracao: dict) -> str:
+    cnpj = re.sub(r"\D", "", _c(company.get("cnpj", "")))
+    cpf = re.sub(r"\D", "", _c(employee.get("cpf", "")))
+    today = _date.today()
+    evt_id = f"ID1{cnpj[:8]}{today.strftime('%Y%m%d%H%M%S')}00009"
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<eSocial xmlns="http://www.esocial.gov.br/schema/evtReintegr/v2_6_0">
+  <evtReintegr Id="{evt_id}">
+    <ideEvento><indRetif>1</indRetif><tpAmb>2</tpAmb><procEmi>1</procEmi><verProc>1.0</verProc></ideEvento>
+    <ideEmpregador><tpInsc>1</tpInsc><nrInsc>{cnpj[:8]}</nrInsc></ideEmpregador>
+    <ideVinculo>
+      <cpfTrab>{cpf}</cpfTrab>
+      <nisTrab>{_c(employee.get("pis_pasep",""))}</nisTrab>
+      <codCateg>101</codCateg>
+    </ideVinculo>
+    <infoReintegr>
+      <dtDeslig>{_d(reintegracao.get("data_demissao",""))}</dtDeslig>
+      <dtReintegr>{_d(reintegracao.get("data_reintegracao",""))}</dtReintegr>
+      <motReintegr>01</motReintegr>
+      <nrProcJud>{_c(reintegracao.get("nr_processo",""))}</nrProcJud>
+    </infoReintegr>
+  </evtReintegr>
 </eSocial>"""

@@ -14,7 +14,8 @@ try:
     from ..schemas.dp import EmployeeCreate, EmployeeUpdate, PayrollRunCreate, TerminationRequest
     from ..services.payroll_calculator import calculate_payroll, calc_thirteenth, calc_vacation, calc_termination
     from ..services.esocial_generator import (gerar_s2200, gerar_s1200, gerar_s2299, gerar_s2230, gerar_s2210,
-        gerar_s1000, gerar_s1005, gerar_s1020, gerar_s1050, gerar_s1070, gerar_s3000, gerar_s5001, gerar_s5011)
+        gerar_s1000, gerar_s1005, gerar_s1020, gerar_s1050, gerar_s1070, gerar_s3000, gerar_s5001, gerar_s5011,
+        gerar_s2298)
 except ImportError:
     from database import get_conn
     from auth import get_current_user
@@ -22,7 +23,8 @@ except ImportError:
     from schemas.dp import EmployeeCreate, EmployeeUpdate, PayrollRunCreate, TerminationRequest
     from services.payroll_calculator import calculate_payroll, calc_thirteenth, calc_vacation, calc_termination
     from services.esocial_generator import (gerar_s2200, gerar_s1200, gerar_s2299, gerar_s2230, gerar_s2210,
-        gerar_s1000, gerar_s1005, gerar_s1020, gerar_s1050, gerar_s1070, gerar_s3000, gerar_s5001, gerar_s5011)
+        gerar_s1000, gerar_s1005, gerar_s1020, gerar_s1050, gerar_s1070, gerar_s3000, gerar_s5001, gerar_s5011,
+        gerar_s2298)
 
 router = APIRouter(prefix="/api/dp", tags=["Departamento Pessoal"])
 
@@ -355,11 +357,13 @@ def termination_calculation(
         conn.close()
         raise HTTPException(status_code=404, detail="Funcionário não encontrado.")
     emp = dict(emp)
+    fgts_aniv = bool(emp.get("fgts_aniversario", 0))
     result = calc_termination(
         float(emp["salary"]),
         emp["admission_date"],
         data.termination_date,
         data.termination_type,
+        fgts_aniversario=fgts_aniv,
     )
     return {"employee_name": emp["name"], "salary": emp["salary"], **result}
 
@@ -4774,3 +4778,937 @@ def cct_descontos_competencia(competencia: str, current_user: Dict[str, Any] = D
         result.append({"cct": cct, "linhas": linhas, "total": round(total_cct, 2)})
 
     return {"competencia": competencia, "contribuicoes": result, "grand_total": round(grand_total, 2)}
+
+
+# ─── PCMSO ────────────────────────────────────────────────────────────────────
+
+@router.get("/pcmso")
+def list_pcmso(current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    rows = rows_to_dicts(conn.execute(
+        "SELECT * FROM pcmso_programas WHERE company_id=? ORDER BY ano DESC",
+        (current_user.get("company_id", 1),)
+    ).fetchall())
+    conn.close()
+    return rows
+
+
+@router.post("/pcmso", status_code=201)
+def create_pcmso(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    cur = conn.execute("""
+        INSERT INTO pcmso_programas (company_id, ano, responsavel_nome, responsavel_crm,
+            data_elaboracao, vigencia_inicio, vigencia_fim, observacoes)
+        VALUES (?,?,?,?,?,?,?,?)
+    """, (company_id, data.get("ano", date.today().year), data.get("responsavel_nome", ""),
+          data.get("responsavel_crm", ""), data.get("data_elaboracao", ""),
+          data.get("vigencia_inicio", ""), data.get("vigencia_fim", ""),
+          data.get("observacoes", "")))
+    conn.commit()
+    new_id = cur.lastrowid
+    conn.close()
+    return {"id": new_id}
+
+
+@router.put("/pcmso/{prog_id}")
+def update_pcmso(prog_id: int, data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    fields = ["ano", "responsavel_nome", "responsavel_crm", "data_elaboracao",
+              "vigencia_inicio", "vigencia_fim", "observacoes"]
+    sets = [f"{f}=?" for f in fields if f in data]
+    vals = [data[f] for f in fields if f in data]
+    if sets:
+        vals.append(prog_id)
+        conn.execute(f"UPDATE pcmso_programas SET {','.join(sets)} WHERE id=?", vals)
+        conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@router.delete("/pcmso/{prog_id}")
+def delete_pcmso(prog_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    conn.execute("DELETE FROM pcmso_exames_cargo WHERE programa_id=?", (prog_id,))
+    conn.execute("DELETE FROM pcmso_programas WHERE id=? AND company_id=?",
+                 (prog_id, current_user.get("company_id", 1)))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@router.get("/pcmso/{prog_id}/exames")
+def list_pcmso_exames(prog_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    rows = rows_to_dicts(conn.execute(
+        "SELECT * FROM pcmso_exames_cargo WHERE programa_id=? ORDER BY cargo",
+        (prog_id,)
+    ).fetchall())
+    conn.close()
+    return rows
+
+
+@router.post("/pcmso/{prog_id}/exames", status_code=201)
+def create_pcmso_exame(prog_id: int, data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    cur = conn.execute("""
+        INSERT INTO pcmso_exames_cargo (company_id, programa_id, cargo, tipo_exame, periodicidade_meses, exames)
+        VALUES (?,?,?,?,?,?)
+    """, (company_id, prog_id, data.get("cargo", ""), data.get("tipo_exame", "periodico"),
+          data.get("periodicidade_meses", 12), data.get("exames", "")))
+    conn.commit()
+    new_id = cur.lastrowid
+    conn.close()
+    return {"id": new_id}
+
+
+@router.delete("/pcmso/{prog_id}/exames/{exam_id}")
+def delete_pcmso_exame(prog_id: int, exam_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    conn.execute("DELETE FROM pcmso_exames_cargo WHERE id=? AND programa_id=?", (exam_id, prog_id))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@router.get("/pcmso/{prog_id}/pendentes")
+def pcmso_pendentes(prog_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    exames = rows_to_dicts(conn.execute(
+        "SELECT * FROM pcmso_exames_cargo WHERE programa_id=? AND company_id=?",
+        (prog_id, company_id)
+    ).fetchall())
+    employees = rows_to_dicts(conn.execute(
+        "SELECT id, name, role FROM employees WHERE company_id=? AND active=1",
+        (company_id,)
+    ).fetchall())
+    today = date.today()
+    result = []
+    for emp in employees:
+        exame_cargo = next((e for e in exames if e["cargo"].lower() == (emp["role"] or "").lower()), None)
+        if not exame_cargo:
+            continue
+        periodicidade = int(exame_cargo.get("periodicidade_meses", 12))
+        ultimo_aso = conn.execute(
+            "SELECT exam_date FROM medical_exams WHERE company_id=? AND employee_id=? ORDER BY exam_date DESC LIMIT 1",
+            (company_id, emp["id"])
+        ).fetchone()
+        if ultimo_aso:
+            ultimo_dt = date.fromisoformat(str(ultimo_aso[0])[:10])
+            venc = ultimo_dt + timedelta(days=periodicidade * 30)
+            dias_atraso = (today - venc).days
+            if dias_atraso > -30:
+                result.append({
+                    "employee_id": emp["id"], "name": emp["name"], "role": emp["role"],
+                    "ultimo_aso": str(ultimo_aso[0])[:10], "vencimento": str(venc),
+                    "dias_atraso": dias_atraso
+                })
+        else:
+            result.append({
+                "employee_id": emp["id"], "name": emp["name"], "role": emp["role"],
+                "ultimo_aso": None, "vencimento": None, "dias_atraso": 9999
+            })
+    conn.close()
+    return sorted(result, key=lambda x: -(x["dias_atraso"] or 0))
+
+
+# ─── PGR ──────────────────────────────────────────────────────────────────────
+
+@router.get("/pgr")
+def list_pgr(current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    rows = rows_to_dicts(conn.execute(
+        "SELECT * FROM pgr_inventario WHERE company_id=? ORDER BY ghe, agente_risco",
+        (current_user.get("company_id", 1),)
+    ).fetchall())
+    conn.close()
+    return rows
+
+
+@router.post("/pgr", status_code=201)
+def create_pgr(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    cur = conn.execute("""
+        INSERT INTO pgr_inventario (company_id, ghe, cargo, agente_risco, grupo_risco,
+            fonte_geradora, trajetoria, medida_controle, severidade, probabilidade)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
+    """, (company_id, data.get("ghe",""), data.get("cargo",""), data.get("agente_risco",""),
+          data.get("grupo_risco","1"), data.get("fonte_geradora",""), data.get("trajetoria",""),
+          data.get("medida_controle",""), data.get("severidade",1), data.get("probabilidade",1)))
+    conn.commit()
+    new_id = cur.lastrowid
+    conn.close()
+    return {"id": new_id}
+
+
+@router.put("/pgr/{inv_id}")
+def update_pgr(inv_id: int, data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    fields = ["ghe","cargo","agente_risco","grupo_risco","fonte_geradora","trajetoria","medida_controle","severidade","probabilidade"]
+    sets = [f"{f}=?" for f in fields if f in data]
+    vals = [data[f] for f in fields if f in data]
+    if sets:
+        vals.append(inv_id)
+        conn.execute(f"UPDATE pgr_inventario SET {','.join(sets)} WHERE id=?", vals)
+        conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@router.delete("/pgr/{inv_id}")
+def delete_pgr(inv_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    conn.execute("DELETE FROM pgr_inventario WHERE id=? AND company_id=?",
+                 (inv_id, current_user.get("company_id", 1)))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@router.get("/pgr/por-ghe")
+def pgr_por_ghe(current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    rows = rows_to_dicts(conn.execute(
+        "SELECT ghe, COUNT(*) as total_riscos, MAX(severidade*probabilidade) as risco_max FROM pgr_inventario WHERE company_id=? GROUP BY ghe ORDER BY risco_max DESC",
+        (current_user.get("company_id", 1),)
+    ).fetchall())
+    conn.close()
+    return rows
+
+
+# ─── EPI ──────────────────────────────────────────────────────────────────────
+
+@router.get("/epi")
+def list_epi(employee_id: Optional[int] = None, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    if employee_id:
+        rows = rows_to_dicts(conn.execute(
+            "SELECT e.*, emp.name as employee_name FROM epi_entregas e JOIN employees emp ON e.employee_id=emp.id WHERE e.company_id=? AND e.employee_id=? ORDER BY e.data_entrega DESC",
+            (company_id, employee_id)
+        ).fetchall())
+    else:
+        rows = rows_to_dicts(conn.execute(
+            "SELECT e.*, emp.name as employee_name FROM epi_entregas e JOIN employees emp ON e.employee_id=emp.id WHERE e.company_id=? ORDER BY e.data_entrega DESC",
+            (company_id,)
+        ).fetchall())
+    conn.close()
+    return rows
+
+
+@router.get("/epi/{emp_id}/historico")
+def epi_historico(emp_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    rows = rows_to_dicts(conn.execute(
+        "SELECT * FROM epi_entregas WHERE company_id=? AND employee_id=? ORDER BY data_entrega DESC",
+        (current_user.get("company_id", 1), emp_id)
+    ).fetchall())
+    conn.close()
+    return rows
+
+
+@router.post("/epi", status_code=201)
+def create_epi(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    cur = conn.execute("""
+        INSERT INTO epi_entregas (company_id, employee_id, data_entrega, epi_nome, ca_numero, quantidade, motivo, observacoes)
+        VALUES (?,?,?,?,?,?,?,?)
+    """, (company_id, data.get("employee_id"), data.get("data_entrega", date.today().isoformat()),
+          data.get("epi_nome",""), data.get("ca_numero",""), data.get("quantidade",1),
+          data.get("motivo","inicial"), data.get("observacoes","")))
+    conn.commit()
+    new_id = cur.lastrowid
+    conn.close()
+    return {"id": new_id}
+
+
+@router.put("/epi/{entrega_id}")
+def update_epi(entrega_id: int, data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    fields = ["data_entrega","epi_nome","ca_numero","quantidade","motivo","assinado","observacoes"]
+    sets = [f"{f}=?" for f in fields if f in data]
+    vals = [data[f] for f in fields if f in data]
+    if sets:
+        vals.append(entrega_id)
+        conn.execute(f"UPDATE epi_entregas SET {','.join(sets)} WHERE id=?", vals)
+        conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@router.delete("/epi/{entrega_id}")
+def delete_epi(entrega_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    conn.execute("DELETE FROM epi_entregas WHERE id=? AND company_id=?",
+                 (entrega_id, current_user.get("company_id", 1)))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@router.get("/epi/{entrega_id}/recibo")
+def epi_recibo(entrega_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    entrega = conn.execute(
+        "SELECT e.*, emp.name as emp_name, emp.role as emp_role, emp.cpf as emp_cpf, emp.matricula as emp_matricula FROM epi_entregas e JOIN employees emp ON e.employee_id=emp.id WHERE e.id=? AND e.company_id=?",
+        (entrega_id, company_id)
+    ).fetchone()
+    if not entrega:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Entrega não encontrada.")
+    entrega = dict(entrega)
+    co = _get_company(conn, company_id)
+    conn.close()
+    today = date.today()
+
+    def _fmt(v):
+        return str(v or "").strip() or "___"
+
+    html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Recibo EPI</title>
+<style>{_DOC_CSS}</style></head><body>
+<h1>Recibo de Entrega de EPI — NR-6</h1>
+<p><b>EMPRESA:</b> {_fmt(co.get("razao_social"))} — CNPJ: {_fmt(co.get("cnpj"))}</p>
+<p><b>FUNCIONÁRIO:</b> {_fmt(entrega.get("emp_name"))} — CPF: {_fmt(entrega.get("emp_cpf"))} — Matrícula: {_fmt(entrega.get("emp_matricula"))} — Cargo: {_fmt(entrega.get("emp_role"))}</p>
+<p><b>Data de Entrega:</b> {_fmt(entrega.get("data_entrega"))} — <b>Motivo:</b> {_fmt(entrega.get("motivo"))}</p>
+<table>
+<tr><th>EPI</th><th>Nº CA (MTE)</th><th>Qtd</th><th>Observações</th></tr>
+<tr><td>{_fmt(entrega.get("epi_nome"))}</td><td>{_fmt(entrega.get("ca_numero"))}</td><td>{entrega.get("quantidade",1)}</td><td>{_fmt(entrega.get("observacoes"))}</td></tr>
+</table>
+<p style="margin-top:16px">Declaro ter recebido o(s) Equipamento(s) de Proteção Individual (EPI) listado(s) acima, comprometendo-me a utilizá-lo(s) adequadamente, conservá-lo(s), comunicar ao empregador qualquer alteração que torne o EPI impróprio para uso e substituí-lo em caso de extravio ou dano, conforme NR-6.</p>
+<div class="sig">
+  <div style="flex:1;min-width:200px;border-top:1px solid #000;padding-top:6px">
+    <b>{_fmt(entrega.get("emp_name"))}</b><br>Funcionário — CPF: {_fmt(entrega.get("emp_cpf"))}
+  </div>
+  <div style="flex:1;min-width:200px;border-top:1px solid #000;padding-top:6px">
+    <b>{_fmt(co.get("razao_social"))}</b><br>Responsável pela Empresa<br>Data: {today.strftime("%d/%m/%Y")}
+  </div>
+</div>
+</body></html>"""
+    return Response(content=html, media_type="text/html")
+
+
+# ─── CIPA ─────────────────────────────────────────────────────────────────────
+
+@router.get("/cipa/eleicoes")
+def list_cipa(current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    rows = rows_to_dicts(conn.execute(
+        "SELECT * FROM cipa_eleicoes WHERE company_id=? ORDER BY ano DESC",
+        (current_user.get("company_id", 1),)
+    ).fetchall())
+    conn.close()
+    return rows
+
+
+@router.post("/cipa/eleicoes", status_code=201)
+def create_cipa(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    cur = conn.execute("""
+        INSERT INTO cipa_eleicoes (company_id, ano, data_posse, data_fim_mandato,
+            num_efetivos_emp, num_suplentes_emp, num_efetivos_patr, num_suplentes_patr, observacoes)
+        VALUES (?,?,?,?,?,?,?,?,?)
+    """, (company_id, data.get("ano", date.today().year), data.get("data_posse",""),
+          data.get("data_fim_mandato",""), data.get("num_efetivos_emp",0),
+          data.get("num_suplentes_emp",0), data.get("num_efetivos_patr",0),
+          data.get("num_suplentes_patr",0), data.get("observacoes","")))
+    conn.commit()
+    new_id = cur.lastrowid
+    conn.close()
+    return {"id": new_id}
+
+
+@router.put("/cipa/eleicoes/{el_id}")
+def update_cipa(el_id: int, data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    fields = ["ano","data_posse","data_fim_mandato","num_efetivos_emp","num_suplentes_emp",
+              "num_efetivos_patr","num_suplentes_patr","status","observacoes"]
+    sets = [f"{f}=?" for f in fields if f in data]
+    vals = [data[f] for f in fields if f in data]
+    if sets:
+        vals.append(el_id)
+        conn.execute(f"UPDATE cipa_eleicoes SET {','.join(sets)} WHERE id=?", vals)
+        conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@router.delete("/cipa/eleicoes/{el_id}")
+def delete_cipa(el_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    conn.execute("DELETE FROM cipa_membros WHERE eleicao_id=?", (el_id,))
+    conn.execute("DELETE FROM cipa_eleicoes WHERE id=? AND company_id=?",
+                 (el_id, current_user.get("company_id", 1)))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@router.get("/cipa/eleicoes/{el_id}/membros")
+def list_cipa_membros(el_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    rows = rows_to_dicts(conn.execute(
+        "SELECT m.*, e.name as employee_name FROM cipa_membros m JOIN employees e ON m.employee_id=e.id WHERE m.eleicao_id=? ORDER BY m.tipo",
+        (el_id,)
+    ).fetchall())
+    conn.close()
+    return rows
+
+
+@router.post("/cipa/eleicoes/{el_id}/membros", status_code=201)
+def create_cipa_membro(el_id: int, data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    eleicao = conn.execute("SELECT * FROM cipa_eleicoes WHERE id=? AND company_id=?", (el_id, company_id)).fetchone()
+    if not eleicao:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Eleição não encontrada.")
+    eleicao = dict(eleicao)
+    cur = conn.execute("""
+        INSERT INTO cipa_membros (company_id, eleicao_id, employee_id, tipo, data_inicio, data_fim)
+        VALUES (?,?,?,?,?,?)
+    """, (company_id, el_id, data.get("employee_id"), data.get("tipo","efetivo_emp"),
+          data.get("data_inicio", eleicao.get("data_posse","")), eleicao.get("data_fim_mandato","")))
+    conn.commit()
+    new_id = cur.lastrowid
+    if eleicao.get("data_fim_mandato"):
+        try:
+            fim_cipa = date.fromisoformat(str(eleicao["data_fim_mandato"])[:10])
+            fim_estab = fim_cipa + timedelta(days=365)
+            conn.execute("""
+                INSERT INTO employee_stability (company_id, employee_id, tipo, data_inicio,
+                    data_fim_estabilidade, observacoes)
+                VALUES (?,?,?,?,?,?)
+            """, (company_id, data.get("employee_id"), "cipa",
+                  data.get("data_inicio", eleicao.get("data_posse","")),
+                  str(fim_estab), f"CIPA eleição {eleicao.get('ano','')}"))
+            conn.commit()
+        except Exception:
+            pass
+    conn.close()
+    return {"id": new_id}
+
+
+@router.delete("/cipa/eleicoes/{el_id}/membros/{mem_id}")
+def delete_cipa_membro(el_id: int, mem_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    conn.execute("DELETE FROM cipa_membros WHERE id=? AND eleicao_id=?", (mem_id, el_id))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+# ─── FERIADOS ─────────────────────────────────────────────────────────────────
+
+def _calc_pascoa(ano: int):
+    a = ano % 19
+    b = ano // 100
+    c = ano % 100
+    d = b // 4
+    e = b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i = c // 4
+    k = c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    mes = (h + l - 7 * m + 114) // 31
+    dia = ((h + l - 7 * m + 114) % 31) + 1
+    return date(ano, mes, dia)
+
+
+@router.get("/feriados")
+def list_feriados(ano: Optional[int] = None, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    if ano:
+        rows = rows_to_dicts(conn.execute(
+            "SELECT * FROM feriados WHERE company_id=? AND data LIKE ? ORDER BY data",
+            (company_id, f"{ano}%")
+        ).fetchall())
+    else:
+        rows = rows_to_dicts(conn.execute(
+            "SELECT * FROM feriados WHERE company_id=? ORDER BY data",
+            (company_id,)
+        ).fetchall())
+    conn.close()
+    return rows
+
+
+@router.post("/feriados", status_code=201)
+def create_feriado(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    cur = conn.execute("""
+        INSERT OR IGNORE INTO feriados (company_id, data, descricao, tipo, uf, municipio)
+        VALUES (?,?,?,?,?,?)
+    """, (company_id, data.get("data",""), data.get("descricao",""), data.get("tipo","nacional"),
+          data.get("uf",""), data.get("municipio","")))
+    conn.commit()
+    new_id = cur.lastrowid
+    conn.close()
+    return {"id": new_id}
+
+
+@router.delete("/feriados/{fer_id}")
+def delete_feriado(fer_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    conn.execute("DELETE FROM feriados WHERE id=? AND company_id=?",
+                 (fer_id, current_user.get("company_id", 1)))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@router.post("/feriados/seed-nacionais")
+def seed_feriados_nacionais(ano: Optional[int] = None, current_user: Dict[str, Any] = Depends(get_current_user)):
+    company_id = current_user.get("company_id", 1)
+    ano = ano or date.today().year
+    pascoa = _calc_pascoa(ano)
+    carnaval = pascoa - timedelta(days=47)
+    sextafeira_santa = pascoa - timedelta(days=2)
+    corpus_christi = pascoa + timedelta(days=60)
+    feriados = [
+        (f"{ano}-01-01", "Confraternização Universal"),
+        (str(carnaval), "Carnaval"),
+        (str(carnaval + timedelta(days=1)), "Carnaval (terça)"),
+        (str(sextafeira_santa), "Paixão de Cristo"),
+        (str(pascoa), "Páscoa"),
+        (f"{ano}-04-21", "Tiradentes"),
+        (f"{ano}-05-01", "Dia do Trabalho"),
+        (str(corpus_christi), "Corpus Christi"),
+        (f"{ano}-09-07", "Independência do Brasil"),
+        (f"{ano}-10-12", "Nossa Sra. Aparecida"),
+        (f"{ano}-11-02", "Finados"),
+        (f"{ano}-11-15", "Proclamação da República"),
+        (f"{ano}-11-20", "Consciência Negra"),
+        (f"{ano}-12-25", "Natal"),
+    ]
+    conn = get_conn()
+    inserted = 0
+    for data_fer, desc in feriados:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO feriados (company_id, data, descricao, tipo) VALUES (?,?,?,?)",
+            (company_id, data_fer, desc, "nacional")
+        )
+        inserted += cur.rowcount
+    conn.commit()
+    conn.close()
+    return {"inserted": inserted, "ano": ano}
+
+
+# ─── FGTS ANIVERSÁRIO ─────────────────────────────────────────────────────────
+
+@router.get("/fgts-aniversario/optantes")
+def list_fgts_aniv(current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    rows = rows_to_dicts(conn.execute("""
+        SELECT o.*, e.name as employee_name, e.birth_date
+        FROM fgts_aniversario_optantes o JOIN employees e ON o.employee_id=e.id
+        WHERE o.company_id=? ORDER BY e.name
+    """, (company_id,)).fetchall())
+    conn.close()
+    return rows
+
+
+@router.post("/fgts-aniversario/optantes", status_code=201)
+def create_fgts_aniv(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    emp_id = data.get("employee_id")
+    try:
+        cur = conn.execute("""
+            INSERT INTO fgts_aniversario_optantes (company_id, employee_id, data_opcao)
+            VALUES (?,?,?)
+        """, (company_id, emp_id, data.get("data_opcao", date.today().isoformat())))
+        conn.execute("UPDATE employees SET fgts_aniversario=1 WHERE id=? AND company_id=?",
+                     (emp_id, company_id))
+        conn.commit()
+        new_id = cur.lastrowid
+    except Exception:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Funcionário já é optante.")
+    conn.close()
+    return {"id": new_id}
+
+
+@router.delete("/fgts-aniversario/optantes/{emp_id}")
+def remove_fgts_aniv(emp_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    conn.execute("DELETE FROM fgts_aniversario_optantes WHERE employee_id=? AND company_id=?",
+                 (emp_id, company_id))
+    conn.execute("UPDATE employees SET fgts_aniversario=0 WHERE id=? AND company_id=?",
+                 (emp_id, company_id))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@router.get("/fgts-aniversario/calendario")
+def fgts_aniv_calendario(current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    rows = rows_to_dicts(conn.execute("""
+        SELECT o.employee_id, e.name, e.birth_date, o.data_opcao
+        FROM fgts_aniversario_optantes o JOIN employees e ON o.employee_id=e.id
+        WHERE o.company_id=?
+    """, (company_id,)).fetchall())
+    conn.close()
+    por_mes = {}
+    for r in rows:
+        bd = str(r.get("birth_date") or "")
+        mes = bd[5:7] if len(bd) >= 7 else "00"
+        por_mes.setdefault(mes, []).append(r)
+    return [{"mes": k, "funcionarios": v} for k, v in sorted(por_mes.items())]
+
+
+# ─── REINTEGRAÇÃO ─────────────────────────────────────────────────────────────
+
+@router.get("/reintegracoes")
+def list_reintegracoes(current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    rows = rows_to_dicts(conn.execute("""
+        SELECT r.*, e.name as employee_name FROM reintegracoes r
+        JOIN employees e ON r.employee_id=e.id
+        WHERE r.company_id=? ORDER BY r.data_reintegracao DESC
+    """, (company_id,)).fetchall())
+    conn.close()
+    return rows
+
+
+@router.post("/reintegracoes", status_code=201)
+def create_reintegracao(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    emp_id = data.get("employee_id")
+    cur = conn.execute("""
+        INSERT INTO reintegracoes (company_id, employee_id, data_demissao, data_reintegracao,
+            motivo, nr_processo, salario_reintegracao, observacoes)
+        VALUES (?,?,?,?,?,?,?,?)
+    """, (company_id, emp_id, data.get("data_demissao",""), data.get("data_reintegracao",""),
+          data.get("motivo",""), data.get("nr_processo",""),
+          data.get("salario_reintegracao",0), data.get("observacoes","")))
+    conn.execute("UPDATE employees SET active=1, termination_date=NULL WHERE id=? AND company_id=?",
+                 (emp_id, company_id))
+    if data.get("salario_reintegracao"):
+        conn.execute("UPDATE employees SET salary=? WHERE id=? AND company_id=?",
+                     (data["salario_reintegracao"], emp_id, company_id))
+    conn.commit()
+    new_id = cur.lastrowid
+    conn.close()
+    return {"id": new_id}
+
+
+@router.put("/reintegracoes/{rein_id}")
+def update_reintegracao(rein_id: int, data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    fields = ["data_demissao","data_reintegracao","motivo","nr_processo","salario_reintegracao","observacoes"]
+    sets = [f"{f}=?" for f in fields if f in data]
+    vals = [data[f] for f in fields if f in data]
+    if sets:
+        vals.append(rein_id)
+        conn.execute(f"UPDATE reintegracoes SET {','.join(sets)} WHERE id=?", vals)
+        conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@router.get("/reintegracoes/{rein_id}/s2298")
+def reintegracao_s2298(rein_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    rein = conn.execute(
+        "SELECT * FROM reintegracoes WHERE id=? AND company_id=?", (rein_id, company_id)
+    ).fetchone()
+    if not rein:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Reintegração não encontrada.")
+    rein = dict(rein)
+    emp = conn.execute("SELECT * FROM employees WHERE id=?", (rein["employee_id"],)).fetchone()
+    company = _get_company(conn, company_id)
+    conn.close()
+    xml = gerar_s2298(company, dict(emp) if emp else {}, rein)
+    return Response(content=xml, media_type="application/xml",
+                    headers={"Content-Disposition": f'attachment; filename="S-2298_{rein_id}.xml"'})
+
+
+# ─── CBO ──────────────────────────────────────────────────────────────────────
+
+@router.get("/cbo")
+def search_cbo(q: str = "", current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    if q:
+        rows = rows_to_dicts(conn.execute(
+            "SELECT codigo, descricao FROM cbo_ocupacoes WHERE descricao LIKE ? OR codigo LIKE ? ORDER BY descricao LIMIT 50",
+            (f"%{q}%", f"%{q}%")
+        ).fetchall())
+    else:
+        rows = rows_to_dicts(conn.execute(
+            "SELECT codigo, descricao FROM cbo_ocupacoes ORDER BY descricao LIMIT 100"
+        ).fetchall())
+    conn.close()
+    return rows
+
+
+# ─── REPASSE AO SINDICATO ──────────────────────────────────────────────────────
+
+@router.get("/relatorios/repasse-sindicato")
+def repasse_sindicato(competencia: str = Query(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    cctas = rows_to_dicts(conn.execute(
+        "SELECT * FROM cct_assistencial WHERE company_id=? AND ativo=1", (company_id,)
+    ).fetchall())
+    employees = rows_to_dicts(conn.execute(
+        "SELECT id, name, salary FROM employees WHERE company_id=? AND active=1", (company_id,)
+    ).fetchall())
+    oposicoes_raw = rows_to_dicts(conn.execute(
+        "SELECT cct_id, employee_id FROM cct_oposicoes WHERE company_id=?", (company_id,)
+    ).fetchall())
+    oposicoes = {(o["cct_id"], o["employee_id"]) for o in oposicoes_raw}
+    conn.close()
+
+    result = []
+    for cct in cctas:
+        total = 0.0
+        qtd = 0
+        for emp in employees:
+            if (cct["id"], emp["id"]) in oposicoes:
+                continue
+            total += round(float(emp["salary"]) * float(cct["percentual"]) / 100, 2)
+            qtd += 1
+        result.append({
+            "sindicato": cct.get("sindicato") or cct.get("descricao",""),
+            "cct_id": cct["id"],
+            "competencia": competencia,
+            "funcionarios": qtd,
+            "percentual": cct["percentual"],
+            "total": round(total, 2),
+        })
+    return {"competencia": competencia, "sindicatos": result,
+            "grand_total": round(sum(s["total"] for s in result), 2)}
+
+
+# ─── MÚLTIPLOS VÍNCULOS ────────────────────────────────────────────────────────
+
+@router.get("/employees/{emp_id}/contratos")
+def list_contratos(emp_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    rows = rows_to_dicts(conn.execute(
+        "SELECT * FROM employee_contracts WHERE employee_id=? AND company_id=? ORDER BY contrato_num",
+        (emp_id, current_user.get("company_id", 1))
+    ).fetchall())
+    conn.close()
+    return rows
+
+
+@router.post("/employees/{emp_id}/contratos", status_code=201)
+def create_contrato(emp_id: int, data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    existing = conn.execute(
+        "SELECT COUNT(*) as cnt FROM employee_contracts WHERE employee_id=? AND company_id=? AND ativo=1",
+        (emp_id, company_id)
+    ).fetchone()
+    num = str((existing["cnt"] if existing else 0) + 1)
+    cur = conn.execute("""
+        INSERT INTO employee_contracts (company_id, employee_id, contrato_num, cargo, salario,
+            admission_date, jornada_tipo, horas_semana, observacoes)
+        VALUES (?,?,?,?,?,?,?,?,?)
+    """, (company_id, emp_id, num, data.get("cargo",""), data.get("salario",0),
+          data.get("admission_date",""), data.get("jornada_tipo","integral"),
+          data.get("horas_semana",44), data.get("observacoes","")))
+    conn.commit()
+    new_id = cur.lastrowid
+    conn.close()
+    return {"id": new_id}
+
+
+@router.put("/employees/{emp_id}/contratos/{cont_id}")
+def update_contrato(emp_id: int, cont_id: int, data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    fields = ["cargo","salario","admission_date","termination_date","jornada_tipo","horas_semana","ativo","observacoes"]
+    sets = [f"{f}=?" for f in fields if f in data]
+    vals = [data[f] for f in fields if f in data]
+    if sets:
+        vals += [cont_id, emp_id]
+        conn.execute(f"UPDATE employee_contracts SET {','.join(sets)} WHERE id=? AND employee_id=?", vals)
+        conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@router.delete("/employees/{emp_id}/contratos/{cont_id}")
+def delete_contrato(emp_id: int, cont_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    conn.execute("DELETE FROM employee_contracts WHERE id=? AND employee_id=? AND company_id=?",
+                 (cont_id, emp_id, current_user.get("company_id", 1)))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+# ─── CENTRO DE CUSTO POR RUBRICA ──────────────────────────────────────────────
+
+@router.get("/centro-custo/alocacao")
+def list_cc_alocacao(competencia: Optional[str] = None, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    if competencia:
+        rows = rows_to_dicts(conn.execute("""
+            SELECT a.*, e.name as employee_name, cc.name as cc_name
+            FROM cc_alocacoes a
+            JOIN employees e ON a.employee_id=e.id
+            JOIN cost_centers cc ON a.cost_center_id=cc.id
+            WHERE a.company_id=? AND a.competencia=?
+        """, (company_id, competencia)).fetchall())
+    else:
+        rows = rows_to_dicts(conn.execute("""
+            SELECT a.*, e.name as employee_name, cc.name as cc_name
+            FROM cc_alocacoes a
+            JOIN employees e ON a.employee_id=e.id
+            JOIN cost_centers cc ON a.cost_center_id=cc.id
+            WHERE a.company_id=? ORDER BY a.competencia DESC
+        """, (company_id,)).fetchall())
+    conn.close()
+    return rows
+
+
+@router.post("/centro-custo/alocacao", status_code=201)
+def create_cc_alocacao(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    cur = conn.execute("""
+        INSERT INTO cc_alocacoes (company_id, employee_id, cost_center_id, percentual, competencia)
+        VALUES (?,?,?,?,?)
+    """, (company_id, data.get("employee_id"), data.get("cost_center_id"),
+          data.get("percentual", 100), data.get("competencia","")))
+    conn.commit()
+    new_id = cur.lastrowid
+    conn.close()
+    return {"id": new_id}
+
+
+@router.delete("/centro-custo/alocacao/{aloc_id}")
+def delete_cc_alocacao(aloc_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    conn.execute("DELETE FROM cc_alocacoes WHERE id=? AND company_id=?",
+                 (aloc_id, current_user.get("company_id", 1)))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@router.get("/relatorios/custo-por-cc")
+def relatorio_custo_cc(competencia: str = Query(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    run = conn.execute(
+        "SELECT * FROM payroll_runs WHERE company_id=? AND competence=? ORDER BY id DESC LIMIT 1",
+        (company_id, competencia)
+    ).fetchone()
+    if not run:
+        conn.close()
+        return {"competencia": competencia, "centros": [], "sem_alocacao": []}
+    run = dict(run)
+    items = rows_to_dicts(conn.execute(
+        "SELECT pi.*, e.name FROM payroll_items pi JOIN employees e ON pi.employee_id=e.id WHERE pi.run_id=?",
+        (run["id"],)
+    ).fetchall())
+    alocacoes = rows_to_dicts(conn.execute("""
+        SELECT a.*, cc.name as cc_name FROM cc_alocacoes a
+        JOIN cost_centers cc ON a.cost_center_id=cc.id
+        WHERE a.company_id=? AND a.competencia=?
+    """, (company_id, competencia)).fetchall())
+    alocacoes_map = {}
+    for a in alocacoes:
+        alocacoes_map.setdefault(a["employee_id"], []).append(a)
+    cc_totais = {}
+    sem_alocacao = []
+    for item in items:
+        gross = float(item.get("gross_salary", 0))
+        emp_aloc = alocacoes_map.get(item["employee_id"])
+        if emp_aloc:
+            for a in emp_aloc:
+                cc_id = a["cost_center_id"]
+                cc_name = a["cc_name"]
+                valor = round(gross * float(a["percentual"]) / 100, 2)
+                if cc_id not in cc_totais:
+                    cc_totais[cc_id] = {"cc_id": cc_id, "cc_name": cc_name, "total": 0.0, "funcionarios": 0}
+                cc_totais[cc_id]["total"] += valor
+                cc_totais[cc_id]["funcionarios"] += 1
+        else:
+            sem_alocacao.append({"employee_id": item["employee_id"], "name": item["name"], "gross_salary": gross})
+    conn.close()
+    return {
+        "competencia": competencia,
+        "centros": [{"cc_id": v["cc_id"], "cc_name": v["cc_name"],
+                     "total": round(v["total"], 2), "funcionarios": v["funcionarios"]}
+                    for v in cc_totais.values()],
+        "sem_alocacao": sem_alocacao
+    }
+
+
+# ─── RECÁLCULO RETROATIVO CCT ─────────────────────────────────────────────────
+
+@router.post("/cct-assistencial/recalculo-retroativo")
+def cct_recalculo_retroativo(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    comp_inicio = data.get("competencia_inicio","")
+    comp_fim = data.get("competencia_fim","")
+    cct_id = data.get("cct_id")
+    dry_run = data.get("dry_run", True)
+
+    cct = conn.execute("SELECT * FROM cct_assistencial WHERE id=? AND company_id=?", (cct_id, company_id)).fetchone()
+    if not cct:
+        conn.close()
+        raise HTTPException(status_code=404, detail="CCT não encontrada.")
+    cct = dict(cct)
+
+    runs = rows_to_dicts(conn.execute(
+        "SELECT * FROM payroll_runs WHERE company_id=? AND competence>=? AND competence<=? ORDER BY competence",
+        (company_id, comp_inicio, comp_fim)
+    ).fetchall())
+
+    oposicoes_raw = rows_to_dicts(conn.execute(
+        "SELECT employee_id FROM cct_oposicoes WHERE company_id=? AND cct_id=?", (company_id, cct_id)
+    ).fetchall())
+    opostos = {o["employee_id"] for o in oposicoes_raw}
+
+    ajustes = []
+    for run in runs:
+        items = rows_to_dicts(conn.execute(
+            "SELECT pi.*, e.name FROM payroll_items pi JOIN employees e ON pi.employee_id=e.id WHERE pi.run_id=?",
+            (run["id"],)
+        ).fetchall())
+        for item in items:
+            if item["employee_id"] in opostos:
+                continue
+            desconto = round(float(item.get("gross_salary",0)) * float(cct["percentual"]) / 100, 2)
+            ajustes.append({
+                "competencia": run["competence"],
+                "employee_id": item["employee_id"],
+                "employee_name": item["name"],
+                "desconto": desconto
+            })
+            if not dry_run:
+                current_disc = float(item.get("other_discounts", 0) or 0)
+                conn.execute(
+                    "UPDATE payroll_items SET other_discounts=? WHERE id=?",
+                    (round(current_disc + desconto, 2), item["id"])
+                )
+
+    if not dry_run:
+        conn.commit()
+    conn.close()
+    return {"dry_run": dry_run, "total_ajustes": len(ajustes), "ajustes": ajustes}

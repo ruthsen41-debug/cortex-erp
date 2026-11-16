@@ -172,6 +172,7 @@ def calc_termination(
     admission_date: str,
     termination_date: str,
     type: str = "sem_justa_causa",
+    fgts_aniversario: bool = False,
 ) -> dict:
     """
     Verbas rescisórias.
@@ -208,7 +209,8 @@ def calc_termination(
         dias_aviso = min(30 + int(years) * 3, 90)
         aviso = round(gross_salary / 30 * dias_aviso, 2)
         fgts_total = round(gross_salary * 0.08 * months, 2)
-        multa_fgts = round(fgts_total * 0.40, 2)
+        pct_multa = 0.20 if fgts_aniversario else 0.40
+        multa_fgts = round(fgts_total * pct_multa, 2)
 
     total_bruto = round(saldo + decimo + ferias_vencidas + ferias_prop + tercio + aviso, 2)
     inss = calc_inss(total_bruto)
@@ -225,6 +227,7 @@ def calc_termination(
         "terco_constitucional": tercio,
         "aviso_previo": aviso,
         "multa_fgts_40pct": multa_fgts,
+        "fgts_aniversario": fgts_aniversario,
         "total_bruto": total_bruto,
         "inss": inss,
         "irrf": irrf,

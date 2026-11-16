@@ -74,6 +74,13 @@ function dpTabs() {
     { id: 'rel_folha_analitica', icon: 'table-2',     label: 'Folha Analítica' },
     { id: 'rel_mapa_lotacao',  icon: 'map',           label: 'Mapa de Lotação' },
     { id: 'rel_turnover',      icon: 'trending-down', label: 'Turnover' },
+    { id: 'sst',               icon: 'hard-hat',      label: 'SST' },
+    { id: 'fgts_aniv',         icon: 'calendar-check',label: 'FGTS Aniv.' },
+    { id: 'feriados',          icon: 'calendar-off',  label: 'Feriados' },
+    { id: 'reintegracoes',     icon: 'user-check-2',  label: 'Reintegrações' },
+    { id: 'multivinculo',      icon: 'git-merge',     label: 'Multi-vínculo' },
+    { id: 'cc_rubrica',        icon: 'split',         label: 'CC por Rubrica' },
+    { id: 'rep_sindicato',     icon: 'landmark',      label: 'Rep. Sindicato' },
   ];
   return `<div class="flex gap-1 overflow-x-auto pb-1 flex-wrap">
     ${tabs.map(t => `
@@ -154,6 +161,13 @@ async function switchDpTab(tab, noRebuildTabs = false) {
     case 'rel_folha_analitica': await renderRelFolhaAnalitica(body); break;
     case 'rel_mapa_lotacao':   await renderRelMapaLotacao(body); break;
     case 'rel_turnover':       await renderRelTurnover(body); break;
+    case 'sst':                await renderSst(body); break;
+    case 'fgts_aniv':          await renderFgtsAniv(body); break;
+    case 'feriados':           await renderFeriados(body); break;
+    case 'reintegracoes':      await renderReintegracoes(body); break;
+    case 'multivinculo':       await renderMultivinculo(body); break;
+    case 'cc_rubrica':         await renderCcRubrica(body); break;
+    case 'rep_sindicato':      await renderRepSindicato(body); break;
   }
   if (window.lucide) lucide.createIcons();
 }
@@ -5752,5 +5766,774 @@ async function renderCompCct(el, defComp) {
   window._loadCct = loadCct;
   el.innerHTML = `<div class="flex items-center justify-center p-10 text-slate-400"><div class="animate-spin rounded-full h-7 w-7 border-b-2 border-violet-500 mr-3"></div>Carregando...</div>`;
   await loadCct(defComp);
+}
+
+
+// ─── SST ──────────────────────────────────────────────────────────────────────
+
+async function renderSst(el) {
+  const fBRL = v => parseFloat(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+  const fDate2 = s => s ? s.slice(0,10).split('-').reverse().join('/') : '-';
+  const empOpts = dpEmployees.map(e => `<option value="${e.id}">${e.name}</option>`).join('');
+  let sstTab = 'pcmso';
+
+  const riskColor = (s, p) => {
+    const r = s * p;
+    if (r >= 15) return 'bg-red-100 text-red-700';
+    if (r >= 8) return 'bg-orange-100 text-orange-700';
+    if (r >= 4) return 'bg-yellow-100 text-yellow-700';
+    return 'bg-green-100 text-green-700';
+  };
+
+  async function loadSst() {
+    const tabs = [
+      {id:'pcmso',label:'PCMSO (NR-7)'},{id:'pgr',label:'PGR (NR-1)'},
+      {id:'epi',label:'EPI (NR-6)'},{id:'cipa',label:'CIPA (NR-5)'}
+    ];
+    const tabBar = tabs.map(t => `<button onclick="window._sstTab('${t.id}')" id="sst-t-${t.id}"
+      class="px-4 py-1.5 rounded-xl text-xs font-semibold border transition ${sstTab===t.id?'bg-violet-600 text-white border-violet-600':'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}">${t.label}</button>`).join('');
+
+    el.innerHTML = `<div class="space-y-4">
+      <div class="flex gap-2 flex-wrap mb-2">${tabBar}</div>
+      <div id="sst-body"></div>
+    </div>`;
+    if (window.lucide) lucide.createIcons();
+    await renderSstBody();
+  }
+
+  window._sstTab = async (t) => { sstTab = t; await loadSst(); };
+
+  async function renderSstBody() {
+    const body = document.getElementById('sst-body');
+    if (!body) return;
+    if (sstTab === 'pcmso') await renderPcmso(body);
+    else if (sstTab === 'pgr') await renderPgr(body);
+    else if (sstTab === 'epi') await renderEpiTab(body);
+    else if (sstTab === 'cipa') await renderCipa(body);
+  }
+
+  async function renderPcmso(b) {
+    const progs = await fetch('/api/dp/pcmso', {headers:authHeaders()}).then(r=>r.json()).catch(()=>[]);
+    const hoje = new Date();
+    const anoAtual = hoje.getFullYear();
+    b.innerHTML = `<div class="space-y-4">
+      <div class="flex justify-between items-center">
+        <h3 class="font-semibold text-slate-700">Programas PCMSO</h3>
+        <button onclick="window._newPcmso()" class="btn-sm bg-violet-600 text-white px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-violet-700">+ Novo Programa</button>
+      </div>
+      <div class="grid gap-3">
+        ${progs.map(p => `<div class="bg-white rounded-xl border border-slate-200 p-4">
+          <div class="flex justify-between items-start">
+            <div>
+              <span class="font-semibold text-slate-800">PCMSO ${p.ano}</span>
+              <span class="ml-2 text-xs text-slate-500">Resp: ${p.responsavel_nome||'-'} ${p.responsavel_crm?'(CRM '+p.responsavel_crm+')':''}</span>
+            </div>
+            <div class="flex gap-2">
+              <button onclick="window._pcmsoPendentes(${p.id},${p.ano})" class="btn-sm text-xs px-2 py-1 rounded-lg border border-amber-400 text-amber-600 hover:bg-amber-50">Pendentes</button>
+              <button onclick="window._pcmsoExames(${p.id})" class="btn-sm text-xs px-2 py-1 rounded-lg border border-violet-300 text-violet-600 hover:bg-violet-50">Exames</button>
+              <button onclick="window._deletePcmso(${p.id})" class="btn-sm text-xs px-2 py-1 rounded-lg border border-red-200 text-red-500 hover:bg-red-50">Excluir</button>
+            </div>
+          </div>
+          <p class="text-xs text-slate-500 mt-1">Vigência: ${fDate2(p.vigencia_inicio)} a ${fDate2(p.vigencia_fim)}</p>
+        </div>`).join('') || '<p class="text-sm text-slate-400 text-center py-6">Nenhum programa cadastrado.</p>'}
+      </div>
+    </div>`;
+
+    window._newPcmso = async () => {
+      const ano = prompt('Ano do PCMSO:', anoAtual);
+      if (!ano) return;
+      const resp = prompt('Responsável (médico do trabalho):','');
+      const crm = prompt('CRM:','');
+      await fetch('/api/dp/pcmso',{method:'POST',headers:{...authHeaders(),'Content-Type':'application/json'},
+        body:JSON.stringify({ano:+ano,responsavel_nome:resp,responsavel_crm:crm,
+          vigencia_inicio:`${ano}-01-01`,vigencia_fim:`${ano}-12-31`})});
+      await renderPcmso(b);
+    };
+    window._deletePcmso = async (id) => {
+      if (!confirm('Excluir programa?')) return;
+      await fetch(`/api/dp/pcmso/${id}`,{method:'DELETE',headers:authHeaders()});
+      await renderPcmso(b);
+    };
+    window._pcmsoExames = async (progId) => {
+      const exames = await fetch(`/api/dp/pcmso/${progId}/exames`,{headers:authHeaders()}).then(r=>r.json()).catch(()=>[]);
+      const html = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" id="pcmso-modal">
+        <div class="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[80vh] overflow-y-auto p-6">
+          <div class="flex justify-between mb-4">
+            <h3 class="font-semibold text-slate-800">Exames por Cargo</h3>
+            <button onclick="document.getElementById('pcmso-modal').remove()" class="text-slate-400 hover:text-slate-600">✕</button>
+          </div>
+          <table class="w-full text-xs border-collapse mb-4">
+            <thead><tr class="bg-slate-50"><th class="p-2 border border-slate-200 text-left">Cargo</th><th class="p-2 border border-slate-200">Tipo</th><th class="p-2 border border-slate-200">Period. (meses)</th><th class="p-2 border border-slate-200">Exames</th><th class="p-2 border border-slate-200"></th></tr></thead>
+            <tbody>${exames.map(e=>`<tr><td class="p-2 border border-slate-100">${e.cargo}</td><td class="p-2 border border-slate-100 text-center">${e.tipo_exame}</td><td class="p-2 border border-slate-100 text-center">${e.periodicidade_meses}</td><td class="p-2 border border-slate-100">${e.exames||'-'}</td><td class="p-2 border border-slate-100 text-center"><button onclick="window._delPcmsoEx(${progId},${e.id})" class="text-red-500 text-xs hover:underline">del</button></td></tr>`).join('')||'<tr><td colspan="5" class="text-center text-slate-400 p-3">Nenhum exame.</td></tr>'}
+            </tbody>
+          </table>
+          <div class="flex gap-2">
+            <input id="ex-cargo" placeholder="Cargo" class="border rounded-lg p-2 text-sm flex-1">
+            <select id="ex-tipo" class="border rounded-lg p-2 text-sm">
+              <option value="admissional">Admissional</option><option value="periodico" selected>Periódico</option>
+              <option value="retorno">Retorno</option><option value="mudanca_funcao">Mud. Função</option><option value="demissional">Demissional</option>
+            </select>
+            <input id="ex-period" type="number" value="12" min="1" max="60" class="border rounded-lg p-2 text-sm w-20">
+            <button onclick="window._addPcmsoEx(${progId})" class="bg-violet-600 text-white px-3 py-2 rounded-lg text-sm font-semibold hover:bg-violet-700">+ Add</button>
+          </div>
+        </div>
+      </div>`;
+      document.body.insertAdjacentHTML('beforeend', html);
+      window._addPcmsoEx = async (pid) => {
+        const cargo = document.getElementById('ex-cargo').value;
+        if (!cargo) return;
+        await fetch(`/api/dp/pcmso/${pid}/exames`,{method:'POST',headers:{...authHeaders(),'Content-Type':'application/json'},
+          body:JSON.stringify({cargo,tipo_exame:document.getElementById('ex-tipo').value,periodicidade_meses:+document.getElementById('ex-period').value})});
+        document.getElementById('pcmso-modal').remove();
+        window._pcmsoExames(pid);
+      };
+      window._delPcmsoEx = async (pid, eid) => {
+        await fetch(`/api/dp/pcmso/${pid}/exames/${eid}`,{method:'DELETE',headers:authHeaders()});
+        document.getElementById('pcmso-modal').remove();
+        window._pcmsoExames(pid);
+      };
+    };
+    window._pcmsoPendentes = async (progId, ano) => {
+      const pend = await fetch(`/api/dp/pcmso/${progId}/pendentes`,{headers:authHeaders()}).then(r=>r.json()).catch(()=>[]);
+      const html = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" id="pend-modal">
+        <div class="bg-white rounded-2xl shadow-xl w-full max-w-xl max-h-[70vh] overflow-y-auto p-6">
+          <div class="flex justify-between mb-4">
+            <h3 class="font-semibold text-slate-800">Exames Pendentes — PCMSO ${ano}</h3>
+            <button onclick="document.getElementById('pend-modal').remove()" class="text-slate-400 hover:text-slate-600">✕</button>
+          </div>
+          ${pend.length ? `<table class="w-full text-xs border-collapse">
+            <thead><tr class="bg-slate-50"><th class="p-2 border border-slate-200 text-left">Funcionário</th><th class="p-2 border border-slate-200">Cargo</th><th class="p-2 border border-slate-200">Último ASO</th><th class="p-2 border border-slate-200">Situação</th></tr></thead>
+            <tbody>${pend.map(p=>`<tr><td class="p-2 border border-slate-100">${p.name}</td><td class="p-2 border border-slate-100">${p.role||'-'}</td><td class="p-2 border border-slate-100 text-center">${p.ultimo_aso?fDate2(p.ultimo_aso):'Nunca'}</td><td class="p-2 border border-slate-100 text-center"><span class="${p.dias_atraso>0?'text-red-600 font-semibold':'text-amber-600'}">${p.dias_atraso>0?p.dias_atraso+' dias atrasado':'Vence em breve'}</span></td></tr>`).join('')}
+            </tbody></table>` : '<p class="text-center text-green-600 py-4">✓ Nenhum exame pendente!</p>'}
+        </div>
+      </div>`;
+      document.body.insertAdjacentHTML('beforeend', html);
+    };
+  }
+
+  async function renderPgr(b) {
+    const items = await fetch('/api/dp/pgr', {headers:authHeaders()}).then(r=>r.json()).catch(()=>[]);
+    b.innerHTML = `<div class="space-y-4">
+      <div class="flex justify-between items-center">
+        <h3 class="font-semibold text-slate-700">Inventário de Riscos — PGR (NR-1)</h3>
+        <button onclick="window._newPgr()" class="bg-violet-600 text-white px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-violet-700">+ Novo Risco</button>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs border-collapse bg-white rounded-xl overflow-hidden border border-slate-200">
+          <thead class="bg-slate-50"><tr>
+            <th class="p-2 border border-slate-200 text-left">GHE</th><th class="p-2 border border-slate-200 text-left">Cargo</th>
+            <th class="p-2 border border-slate-200 text-left">Agente de Risco</th><th class="p-2 border border-slate-200 text-left">Medida de Controle</th>
+            <th class="p-2 border border-slate-200">S</th><th class="p-2 border border-slate-200">P</th><th class="p-2 border border-slate-200">Risco</th><th class="p-2 border border-slate-200"></th>
+          </tr></thead>
+          <tbody>
+            ${items.map(r=>`<tr class="hover:bg-slate-50">
+              <td class="p-2 border border-slate-100">${r.ghe||'-'}</td>
+              <td class="p-2 border border-slate-100">${r.cargo||'-'}</td>
+              <td class="p-2 border border-slate-100">${r.agente_risco}</td>
+              <td class="p-2 border border-slate-100">${r.medida_controle||'-'}</td>
+              <td class="p-2 border border-slate-100 text-center">${r.severidade}</td>
+              <td class="p-2 border border-slate-100 text-center">${r.probabilidade}</td>
+              <td class="p-2 border border-slate-100 text-center"><span class="px-2 py-0.5 rounded-full text-xs font-semibold ${riskColor(r.severidade,r.probabilidade)}">${r.severidade*r.probabilidade}</span></td>
+              <td class="p-2 border border-slate-100 text-center"><button onclick="window._delPgr(${r.id})" class="text-red-500 text-xs hover:underline">del</button></td>
+            </tr>`).join('') || '<tr><td colspan="8" class="text-center text-slate-400 p-4">Nenhum risco cadastrado.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+
+    window._newPgr = async () => {
+      const ghe = prompt('GHE (Grupo Homogêneo de Exposição):','');
+      const cargo = prompt('Cargo:','');
+      const agente = prompt('Agente de Risco (ex: Ruído, Calor, Químico):','');
+      if (!agente) return;
+      const medida = prompt('Medida de Controle:','');
+      const sev = +prompt('Severidade (1-5):','2');
+      const prob = +prompt('Probabilidade (1-5):','2');
+      await fetch('/api/dp/pgr',{method:'POST',headers:{...authHeaders(),'Content-Type':'application/json'},
+        body:JSON.stringify({ghe,cargo,agente_risco:agente,medida_controle:medida,severidade:sev,probabilidade:prob})});
+      await renderPgr(b);
+    };
+    window._delPgr = async (id) => {
+      if (!confirm('Excluir risco?')) return;
+      await fetch(`/api/dp/pgr/${id}`,{method:'DELETE',headers:authHeaders()});
+      await renderPgr(b);
+    };
+  }
+
+  async function renderEpiTab(b) {
+    const entregas = await fetch('/api/dp/epi', {headers:authHeaders()}).then(r=>r.json()).catch(()=>[]);
+    b.innerHTML = `<div class="space-y-4">
+      <div class="flex justify-between items-center">
+        <h3 class="font-semibold text-slate-700">Registro de Entrega de EPI — NR-6</h3>
+        <button onclick="window._newEpi()" class="bg-violet-600 text-white px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-violet-700">+ Nova Entrega</button>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs border-collapse bg-white rounded-xl overflow-hidden border border-slate-200">
+          <thead class="bg-slate-50"><tr>
+            <th class="p-2 border border-slate-200 text-left">Funcionário</th><th class="p-2 border border-slate-200">Data</th>
+            <th class="p-2 border border-slate-200 text-left">EPI</th><th class="p-2 border border-slate-200">CA Nº</th>
+            <th class="p-2 border border-slate-200">Qtd</th><th class="p-2 border border-slate-200">Motivo</th><th class="p-2 border border-slate-200"></th>
+          </tr></thead>
+          <tbody>
+            ${entregas.map(e=>`<tr class="hover:bg-slate-50">
+              <td class="p-2 border border-slate-100 font-medium">${e.employee_name}</td>
+              <td class="p-2 border border-slate-100 text-center">${fDate2(e.data_entrega)}</td>
+              <td class="p-2 border border-slate-100">${e.epi_nome}</td>
+              <td class="p-2 border border-slate-100 text-center">${e.ca_numero||'-'}</td>
+              <td class="p-2 border border-slate-100 text-center">${e.quantidade}</td>
+              <td class="p-2 border border-slate-100 text-center">${e.motivo}</td>
+              <td class="p-2 border border-slate-100 text-center flex gap-1 justify-center">
+                <button onclick="window.open('/api/dp/epi/${e.id}/recibo','_blank')" class="text-violet-600 text-xs hover:underline">recibo</button>
+                <button onclick="window._delEpi(${e.id})" class="text-red-500 text-xs hover:underline ml-1">del</button>
+              </td>
+            </tr>`).join('') || '<tr><td colspan="7" class="text-center text-slate-400 p-4">Nenhuma entrega registrada.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+
+    window._newEpi = async () => {
+      const html = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" id="epi-modal">
+        <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-3">
+          <div class="flex justify-between mb-2"><h3 class="font-semibold text-slate-800">Nova Entrega de EPI</h3>
+            <button onclick="document.getElementById('epi-modal').remove()" class="text-slate-400 hover:text-slate-600">✕</button></div>
+          <select id="ep-emp" class="w-full border rounded-lg p-2 text-sm"><option value="">Funcionário...</option>${empOpts}</select>
+          <input id="ep-data" type="date" value="${new Date().toISOString().slice(0,10)}" class="w-full border rounded-lg p-2 text-sm">
+          <input id="ep-nome" placeholder="Nome do EPI (ex: Capacete de Segurança)" class="w-full border rounded-lg p-2 text-sm">
+          <input id="ep-ca" placeholder="Nº CA (MTE)" class="w-full border rounded-lg p-2 text-sm">
+          <div class="flex gap-2">
+            <input id="ep-qtd" type="number" value="1" min="1" placeholder="Qtd" class="w-20 border rounded-lg p-2 text-sm">
+            <select id="ep-mot" class="flex-1 border rounded-lg p-2 text-sm">
+              <option value="inicial">Inicial</option><option value="reposicao">Reposição</option>
+              <option value="extravio">Extravio</option><option value="desgaste">Desgaste</option>
+            </select>
+          </div>
+          <button onclick="window._saveEpi()" class="w-full bg-violet-600 text-white py-2 rounded-lg font-semibold hover:bg-violet-700">Registrar Entrega</button>
+        </div></div>`;
+      document.body.insertAdjacentHTML('beforeend', html);
+      window._saveEpi = async () => {
+        const emp_id = +document.getElementById('ep-emp').value;
+        const epi_nome = document.getElementById('ep-nome').value;
+        if (!emp_id || !epi_nome) return alert('Preencha funcionário e nome do EPI.');
+        await fetch('/api/dp/epi',{method:'POST',headers:{...authHeaders(),'Content-Type':'application/json'},
+          body:JSON.stringify({employee_id:emp_id,data_entrega:document.getElementById('ep-data').value,
+            epi_nome,ca_numero:document.getElementById('ep-ca').value,
+            quantidade:+document.getElementById('ep-qtd').value,
+            motivo:document.getElementById('ep-mot').value})});
+        document.getElementById('epi-modal').remove();
+        await renderEpiTab(b);
+      };
+    };
+    window._delEpi = async (id) => {
+      if (!confirm('Excluir registro?')) return;
+      await fetch(`/api/dp/epi/${id}`,{method:'DELETE',headers:authHeaders()});
+      await renderEpiTab(b);
+    };
+  }
+
+  async function renderCipa(b) {
+    const eleicoes = await fetch('/api/dp/cipa/eleicoes', {headers:authHeaders()}).then(r=>r.json()).catch(()=>[]);
+    b.innerHTML = `<div class="space-y-4">
+      <div class="flex justify-between items-center">
+        <h3 class="font-semibold text-slate-700">CIPA — Comissão Interna de Prevenção de Acidentes (NR-5)</h3>
+        <button onclick="window._newCipa()" class="bg-violet-600 text-white px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-violet-700">+ Nova Eleição</button>
+      </div>
+      ${eleicoes.map(e=>`<div class="bg-white rounded-xl border border-slate-200 p-4">
+        <div class="flex justify-between items-start">
+          <div>
+            <span class="font-semibold text-slate-800">Gestão ${e.ano}</span>
+            <span class="ml-2 text-xs px-2 py-0.5 rounded-full ${e.status==='ativa'?'bg-green-100 text-green-700':'bg-slate-100 text-slate-500'}">${e.status}</span>
+          </div>
+          <button onclick="window._cipaMembros(${e.id},${e.ano})" class="text-xs px-3 py-1.5 rounded-lg border border-violet-300 text-violet-600 hover:bg-violet-50">Ver Membros</button>
+        </div>
+        <div class="grid grid-cols-2 gap-2 text-xs text-slate-500 mt-2">
+          <span>Posse: ${fDate2(e.data_posse)}</span><span>Fim mandato: ${fDate2(e.data_fim_mandato)}</span>
+          <span>Efetivos emp: ${e.num_efetivos_emp}</span><span>Suplentes emp: ${e.num_suplentes_emp}</span>
+        </div>
+      </div>`).join('') || '<p class="text-sm text-slate-400 text-center py-6">Nenhuma eleição cadastrada.</p>'}
+    </div>`;
+
+    window._newCipa = async () => {
+      const ano = +prompt('Ano:',new Date().getFullYear());
+      if (!ano) return;
+      const posse = prompt('Data de posse (AAAA-MM-DD):','');
+      const fim = prompt('Fim do mandato (AAAA-MM-DD):','');
+      await fetch('/api/dp/cipa/eleicoes',{method:'POST',headers:{...authHeaders(),'Content-Type':'application/json'},
+        body:JSON.stringify({ano,data_posse:posse,data_fim_mandato:fim,
+          num_efetivos_emp:+prompt('Nº efetivos empregados:','2'),
+          num_suplentes_emp:+prompt('Nº suplentes empregados:','2')})});
+      await renderCipa(b);
+    };
+    window._cipaMembros = async (elId, ano) => {
+      const membros = await fetch(`/api/dp/cipa/eleicoes/${elId}/membros`,{headers:authHeaders()}).then(r=>r.json()).catch(()=>[]);
+      const tipoLabel = {efetivo_emp:'Efetivo Emp',suplente_emp:'Suplente Emp',efetivo_patr:'Efetivo Patrão',suplente_patr:'Suplente Patrão',presidente:'Presidente',vice_presidente:'Vice-Pres',secretario:'Secretário'};
+      const html = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" id="cipa-modal">
+        <div class="bg-white rounded-2xl shadow-xl w-full max-w-xl max-h-[75vh] overflow-y-auto p-6">
+          <div class="flex justify-between mb-4"><h3 class="font-semibold text-slate-800">Membros CIPA — Gestão ${ano}</h3>
+            <button onclick="document.getElementById('cipa-modal').remove()" class="text-slate-400 hover:text-slate-600">✕</button></div>
+          <table class="w-full text-xs border-collapse mb-4">
+            <thead><tr class="bg-slate-50"><th class="p-2 border border-slate-200 text-left">Funcionário</th><th class="p-2 border border-slate-200">Tipo</th><th class="p-2 border border-slate-200">Desde</th><th class="p-2 border border-slate-200"></th></tr></thead>
+            <tbody>${membros.map(m=>`<tr><td class="p-2 border border-slate-100">${m.employee_name}</td><td class="p-2 border border-slate-100 text-center">${tipoLabel[m.tipo]||m.tipo}</td><td class="p-2 border border-slate-100 text-center">${fDate2(m.data_inicio)}</td><td class="p-2 border border-slate-100 text-center"><button onclick="window._delCipaMembro(${elId},${m.id})" class="text-red-500 text-xs hover:underline">del</button></td></tr>`).join('')||'<tr><td colspan="4" class="text-center text-slate-400 p-3">Nenhum membro.</td></tr>'}
+            </tbody>
+          </table>
+          <div class="flex gap-2">
+            <select id="cipa-emp" class="flex-1 border rounded-lg p-2 text-sm"><option value="">Funcionário...</option>${empOpts}</select>
+            <select id="cipa-tipo" class="border rounded-lg p-2 text-sm">
+              <option value="efetivo_emp">Efetivo Emp</option><option value="suplente_emp">Suplente Emp</option>
+              <option value="efetivo_patr">Efetivo Patrão</option><option value="suplente_patr">Suplente Patrão</option>
+              <option value="presidente">Presidente</option><option value="secretario">Secretário</option>
+            </select>
+            <button onclick="window._addCipaMembro(${elId})" class="bg-violet-600 text-white px-3 py-2 rounded-lg text-sm font-semibold hover:bg-violet-700">Add</button>
+          </div>
+          <p class="text-xs text-slate-400 mt-2">* Adicionar membro cria estabilidade automática até 1 ano após o mandato.</p>
+        </div></div>`;
+      document.body.insertAdjacentHTML('beforeend', html);
+      window._addCipaMembro = async (eid) => {
+        const emp_id = +document.getElementById('cipa-emp').value;
+        if (!emp_id) return;
+        await fetch(`/api/dp/cipa/eleicoes/${eid}/membros`,{method:'POST',headers:{...authHeaders(),'Content-Type':'application/json'},
+          body:JSON.stringify({employee_id:emp_id,tipo:document.getElementById('cipa-tipo').value})});
+        document.getElementById('cipa-modal').remove();
+        window._cipaMembros(eid, ano);
+      };
+      window._delCipaMembro = async (eid, mid) => {
+        await fetch(`/api/dp/cipa/eleicoes/${eid}/membros/${mid}`,{method:'DELETE',headers:authHeaders()});
+        document.getElementById('cipa-modal').remove();
+        window._cipaMembros(eid, ano);
+      };
+    };
+  }
+
+  await loadSst();
+}
+
+
+// ─── FGTS ANIVERSÁRIO ─────────────────────────────────────────────────────────
+
+async function renderFgtsAniv(el) {
+  const fDate2 = s => s ? s.slice(0,10).split('-').reverse().join('/') : '-';
+  const empOpts = dpEmployees.map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
+  const MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+
+  async function load() {
+    const [optantes, calendario] = await Promise.all([
+      fetch('/api/dp/fgts-aniversario/optantes',{headers:authHeaders()}).then(r=>r.json()).catch(()=>[]),
+      fetch('/api/dp/fgts-aniversario/calendario',{headers:authHeaders()}).then(r=>r.json()).catch(()=>[])
+    ]);
+
+    el.innerHTML = `<div class="space-y-4">
+      <div class="flex justify-between items-center">
+        <h2 class="font-bold text-slate-800">FGTS Modalidade Aniversário</h2>
+        <button onclick="window._newFgtsAniv()" class="bg-violet-600 text-white px-3 py-1.5 rounded-lg text-sm font-semibold hover:bg-violet-700">+ Adicionar Optante</button>
+      </div>
+      <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-700">
+        <strong>Modalidade Aniversário:</strong> Optantes recebem multa rescisória de <strong>20%</strong> (em vez de 40%) ao ser demitido sem justa causa. Em contrapartida, podem sacar parte do saldo anualmente no mês de aniversário.
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="bg-white rounded-xl border border-slate-200 p-4">
+          <h3 class="font-semibold text-slate-700 mb-3">Optantes (${optantes.length})</h3>
+          ${optantes.length ? `<table class="w-full text-xs border-collapse">
+            <thead><tr class="bg-slate-50"><th class="p-2 border border-slate-200 text-left">Funcionário</th><th class="p-2 border border-slate-200">Data opção</th><th class="p-2 border border-slate-200"></th></tr></thead>
+            <tbody>${optantes.map(o=>`<tr><td class="p-2 border border-slate-100">${o.employee_name}</td><td class="p-2 border border-slate-100 text-center">${fDate2(o.data_opcao)}</td><td class="p-2 border border-slate-100 text-center"><button onclick="window._removeFgtsAniv(${o.employee_id})" class="text-red-500 text-xs hover:underline">remover</button></td></tr>`).join('')}
+            </tbody></table>` : '<p class="text-sm text-slate-400 text-center py-4">Nenhum optante.</p>'}
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 p-4">
+          <h3 class="font-semibold text-slate-700 mb-3">Calendário de Saques</h3>
+          <div class="space-y-2">
+            ${calendario.map(c=>`<div class="flex items-center justify-between p-2 bg-slate-50 rounded-lg">
+              <span class="text-sm font-medium text-slate-700">${MESES[(+c.mes||1)-1]||c.mes}</span>
+              <span class="text-xs text-slate-500">${c.funcionarios.length} optante(s): ${c.funcionarios.map(f=>f.name.split(' ')[0]).join(', ')}</span>
+            </div>`).join('') || '<p class="text-sm text-slate-400 text-center py-4">Nenhum saque programado.</p>'}
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+    window._newFgtsAniv = async () => {
+      const html = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" id="faniv-modal">
+        <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-3">
+          <div class="flex justify-between"><h3 class="font-semibold text-slate-800">Novo Optante FGTS Aniversário</h3>
+            <button onclick="document.getElementById('faniv-modal').remove()" class="text-slate-400">✕</button></div>
+          <select id="faniv-emp" class="w-full border rounded-lg p-2 text-sm"><option value="">Funcionário...</option>${empOpts}</select>
+          <input id="faniv-data" type="date" value="${new Date().toISOString().slice(0,10)}" class="w-full border rounded-lg p-2 text-sm">
+          <button onclick="window._saveFgtsAniv()" class="w-full bg-violet-600 text-white py-2 rounded-lg font-semibold hover:bg-violet-700">Confirmar Opção</button>
+        </div></div>`;
+      document.body.insertAdjacentHTML('beforeend', html);
+      window._saveFgtsAniv = async () => {
+        const emp_id = +document.getElementById('faniv-emp').value;
+        if (!emp_id) return;
+        const res = await fetch('/api/dp/fgts-aniversario/optantes',{method:'POST',headers:{...authHeaders(),'Content-Type':'application/json'},
+          body:JSON.stringify({employee_id:emp_id,data_opcao:document.getElementById('faniv-data').value})});
+        if (!res.ok) { const d=await res.json(); return alert(d.detail||'Erro'); }
+        document.getElementById('faniv-modal').remove();
+        await load();
+      };
+    };
+    window._removeFgtsAniv = async (empId) => {
+      if (!confirm('Remover optante? A multa voltará a ser 40% na próxima rescisão.')) return;
+      await fetch(`/api/dp/fgts-aniversario/optantes/${empId}`,{method:'DELETE',headers:authHeaders()});
+      await load();
+    };
+  }
+  await load();
+}
+
+
+// ─── FERIADOS ─────────────────────────────────────────────────────────────────
+
+async function renderFeriados(el) {
+  const fDate2 = s => s ? s.slice(0,10).split('-').reverse().join('/') : '-';
+  const tipoBadge = t => ({nacional:'bg-blue-100 text-blue-700',estadual:'bg-green-100 text-green-700',municipal:'bg-yellow-100 text-yellow-700'})[t]||'bg-slate-100 text-slate-600';
+  let anoFil = new Date().getFullYear();
+
+  async function load() {
+    const feriados = await fetch(`/api/dp/feriados?ano=${anoFil}`,{headers:authHeaders()}).then(r=>r.json()).catch(()=>[]);
+    el.innerHTML = `<div class="space-y-4">
+      <div class="flex flex-wrap gap-2 justify-between items-center">
+        <h2 class="font-bold text-slate-800">Calendário de Feriados</h2>
+        <div class="flex gap-2">
+          <input type="number" value="${anoFil}" min="2020" max="2035" onchange="window._ferAno(this.value)" class="border rounded-lg p-2 text-sm w-24">
+          <button onclick="window._seedFeriados()" class="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-blue-700">Seed Nacionais ${anoFil}</button>
+          <button onclick="window._newFeriado()" class="bg-violet-600 text-white px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-violet-700">+ Adicionar</button>
+        </div>
+      </div>
+      <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <table class="w-full text-sm border-collapse">
+          <thead class="bg-slate-50"><tr>
+            <th class="p-3 border border-slate-200 text-left">Data</th>
+            <th class="p-3 border border-slate-200 text-left">Feriado</th>
+            <th class="p-3 border border-slate-200">Tipo</th>
+            <th class="p-3 border border-slate-200">UF/Município</th>
+            <th class="p-3 border border-slate-200"></th>
+          </tr></thead>
+          <tbody>
+            ${feriados.map(f=>`<tr class="hover:bg-slate-50">
+              <td class="p-3 border border-slate-100 font-medium">${fDate2(f.data)}</td>
+              <td class="p-3 border border-slate-100">${f.descricao}</td>
+              <td class="p-3 border border-slate-100 text-center"><span class="px-2 py-0.5 rounded-full text-xs font-semibold ${tipoBadge(f.tipo)}">${f.tipo}</span></td>
+              <td class="p-3 border border-slate-100 text-center text-xs">${f.uf||''} ${f.municipio||''}</td>
+              <td class="p-3 border border-slate-100 text-center"><button onclick="window._delFeriado(${f.id})" class="text-red-500 text-xs hover:underline">del</button></td>
+            </tr>`).join('') || '<tr><td colspan="5" class="text-center text-slate-400 p-6">Nenhum feriado cadastrado para '+anoFil+'.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+
+    window._ferAno = (v) => { anoFil = +v; load(); };
+    window._seedFeriados = async () => {
+      const res = await fetch(`/api/dp/feriados/seed-nacionais?ano=${anoFil}`,{method:'POST',headers:authHeaders()});
+      const d = await res.json();
+      alert(`${d.inserted} feriados adicionados para ${anoFil}.`);
+      await load();
+    };
+    window._newFeriado = async () => {
+      const html = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" id="fer-modal">
+        <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-3">
+          <div class="flex justify-between"><h3 class="font-semibold text-slate-800">Novo Feriado</h3>
+            <button onclick="document.getElementById('fer-modal').remove()" class="text-slate-400">✕</button></div>
+          <input id="fer-data" type="date" class="w-full border rounded-lg p-2 text-sm">
+          <input id="fer-desc" placeholder="Descrição" class="w-full border rounded-lg p-2 text-sm">
+          <select id="fer-tipo" class="w-full border rounded-lg p-2 text-sm">
+            <option value="nacional">Nacional</option><option value="estadual">Estadual</option><option value="municipal">Municipal</option>
+          </select>
+          <input id="fer-uf" placeholder="UF (ex: MT)" class="w-full border rounded-lg p-2 text-sm">
+          <input id="fer-mun" placeholder="Município" class="w-full border rounded-lg p-2 text-sm">
+          <button onclick="window._saveFeriado()" class="w-full bg-violet-600 text-white py-2 rounded-lg font-semibold hover:bg-violet-700">Salvar</button>
+        </div></div>`;
+      document.body.insertAdjacentHTML('beforeend', html);
+      window._saveFeriado = async () => {
+        const data = document.getElementById('fer-data').value;
+        const descricao = document.getElementById('fer-desc').value;
+        if (!data||!descricao) return alert('Preencha data e descrição.');
+        await fetch('/api/dp/feriados',{method:'POST',headers:{...authHeaders(),'Content-Type':'application/json'},
+          body:JSON.stringify({data,descricao,tipo:document.getElementById('fer-tipo').value,
+            uf:document.getElementById('fer-uf').value,municipio:document.getElementById('fer-mun').value})});
+        document.getElementById('fer-modal').remove();
+        await load();
+      };
+    };
+    window._delFeriado = async (id) => {
+      if (!confirm('Excluir feriado?')) return;
+      await fetch(`/api/dp/feriados/${id}`,{method:'DELETE',headers:authHeaders()});
+      await load();
+    };
+  }
+  await load();
+}
+
+
+// ─── REINTEGRAÇÕES ────────────────────────────────────────────────────────────
+
+async function renderReintegracoes(el) {
+  const fDate2 = s => s ? s.slice(0,10).split('-').reverse().join('/') : '-';
+  const empOpts = dpEmployees.filter(e=>!e.active).map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
+  const empOptsAll = dpEmployees.map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
+
+  async function load() {
+    const reints = await fetch('/api/dp/reintegracoes',{headers:authHeaders()}).then(r=>r.json()).catch(()=>[]);
+    el.innerHTML = `<div class="space-y-4">
+      <div class="flex justify-between items-center">
+        <h2 class="font-bold text-slate-800">Reintegrações</h2>
+        <button onclick="window._newReintegracao()" class="bg-violet-600 text-white px-3 py-1.5 rounded-lg text-sm font-semibold hover:bg-violet-700">+ Nova Reintegração</button>
+      </div>
+      <div class="bg-blue-50 border border-blue-200 rounded-xl p-3 text-xs text-blue-700">
+        <strong>Reintegração (S-2298):</strong> Funcionário reintegrado por decisão judicial ou acordo. Ao criar, o funcionário é reativado automaticamente no sistema.
+      </div>
+      <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <table class="w-full text-sm border-collapse">
+          <thead class="bg-slate-50"><tr>
+            <th class="p-3 border border-slate-200 text-left">Funcionário</th>
+            <th class="p-3 border border-slate-200">Data Demissão</th>
+            <th class="p-3 border border-slate-200">Data Reintegração</th>
+            <th class="p-3 border border-slate-200 text-left">Nº Processo</th>
+            <th class="p-3 border border-slate-200"></th>
+          </tr></thead>
+          <tbody>
+            ${reints.map(r=>`<tr class="hover:bg-slate-50">
+              <td class="p-3 border border-slate-100 font-medium">${r.employee_name}</td>
+              <td class="p-3 border border-slate-100 text-center">${fDate2(r.data_demissao)}</td>
+              <td class="p-3 border border-slate-100 text-center">${fDate2(r.data_reintegracao)}</td>
+              <td class="p-3 border border-slate-100">${r.nr_processo||'-'}</td>
+              <td class="p-3 border border-slate-100 text-center">
+                <button onclick="window.open('/api/dp/reintegracoes/${r.id}/s2298','_blank')" class="text-violet-600 text-xs hover:underline">S-2298</button>
+              </td>
+            </tr>`).join('') || '<tr><td colspan="5" class="text-center text-slate-400 p-6">Nenhuma reintegração registrada.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+
+    window._newReintegracao = async () => {
+      const html = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" id="rein-modal">
+        <div class="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 space-y-3">
+          <div class="flex justify-between"><h3 class="font-semibold text-slate-800">Nova Reintegração</h3>
+            <button onclick="document.getElementById('rein-modal').remove()" class="text-slate-400">✕</button></div>
+          <select id="rein-emp" class="w-full border rounded-lg p-2 text-sm"><option value="">Funcionário (ativo ou inativo)...</option>${empOptsAll}</select>
+          <div class="grid grid-cols-2 gap-2">
+            <div><label class="text-xs text-slate-500">Data Demissão</label><input id="rein-dem" type="date" class="w-full border rounded-lg p-2 text-sm"></div>
+            <div><label class="text-xs text-slate-500">Data Reintegração</label><input id="rein-rein" type="date" value="${new Date().toISOString().slice(0,10)}" class="w-full border rounded-lg p-2 text-sm"></div>
+          </div>
+          <input id="rein-proc" placeholder="Nº do Processo Judicial" class="w-full border rounded-lg p-2 text-sm">
+          <input id="rein-mot" placeholder="Motivo (ex: decisão judicial, acordo extrajudicial)" class="w-full border rounded-lg p-2 text-sm">
+          <input id="rein-sal" type="number" step="0.01" placeholder="Salário na reintegração (0 = mantém atual)" class="w-full border rounded-lg p-2 text-sm">
+          <button onclick="window._saveReintegracao()" class="w-full bg-violet-600 text-white py-2 rounded-lg font-semibold hover:bg-violet-700">Registrar Reintegração</button>
+        </div></div>`;
+      document.body.insertAdjacentHTML('beforeend', html);
+      window._saveReintegracao = async () => {
+        const emp_id = +document.getElementById('rein-emp').value;
+        if (!emp_id) return alert('Selecione o funcionário.');
+        const sal = +document.getElementById('rein-sal').value||0;
+        const res = await fetch('/api/dp/reintegracoes',{method:'POST',headers:{...authHeaders(),'Content-Type':'application/json'},
+          body:JSON.stringify({employee_id:emp_id,data_demissao:document.getElementById('rein-dem').value,
+            data_reintegracao:document.getElementById('rein-rein').value,
+            nr_processo:document.getElementById('rein-proc').value,
+            motivo:document.getElementById('rein-mot').value,
+            salario_reintegracao:sal})});
+        if (!res.ok) { const d=await res.json(); return alert(d.detail||'Erro'); }
+        document.getElementById('rein-modal').remove();
+        alert('Reintegração registrada. Funcionário reativado no sistema.');
+        await load();
+      };
+    };
+  }
+  await load();
+}
+
+
+// ─── MULTI-VÍNCULO ────────────────────────────────────────────────────────────
+
+async function renderMultivinculo(el) {
+  async function load() {
+    const emps = dpEmployees.filter(e=>e.active);
+    el.innerHTML = `<div class="space-y-4">
+      <h2 class="font-bold text-slate-800">Múltiplos Vínculos Empregatícios</h2>
+      <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-700">
+        <strong>Múltiplos vínculos:</strong> Dois contratos CLT simultâneos. Holerites separados por contrato. INSS limitado ao teto quando há duplo vínculo.
+      </div>
+      <div id="mv-lista" class="space-y-3">
+        <div class="text-center text-slate-400 p-4 text-sm">Carregando contratos...</div>
+      </div>
+    </div>`;
+    const lista = document.getElementById('mv-lista');
+    const rows = [];
+    for (const emp of emps.slice(0,30)) {
+      const contratos = await fetch(`/api/dp/employees/${emp.id}/contratos`,{headers:authHeaders()}).then(r=>r.json()).catch(()=>[]);
+      rows.push({emp, contratos});
+    }
+    lista.innerHTML = rows.filter(r=>r.contratos.length>0||true).map(({emp,contratos})=>`
+      <div class="bg-white rounded-xl border border-slate-200 p-4">
+        <div class="flex justify-between items-center mb-2">
+          <span class="font-semibold text-slate-800">${emp.name}</span>
+          <button onclick="window._addContrato(${emp.id},'${emp.name}')" class="text-xs px-3 py-1 rounded-lg border border-violet-300 text-violet-600 hover:bg-violet-50">+ Contrato</button>
+        </div>
+        ${contratos.length ? `<div class="grid gap-2">
+          ${contratos.map(c=>`<div class="bg-slate-50 rounded-lg p-3 flex justify-between items-center">
+            <div class="text-sm"><span class="font-medium">Contrato #${c.contrato_num}</span> — ${c.cargo||emp.role||'-'} — R$ ${parseFloat(c.salario||0).toLocaleString('pt-BR',{minimumFractionDigits:2})}</div>
+            <div class="flex gap-2">
+              <span class="text-xs px-2 py-0.5 rounded-full ${c.ativo?'bg-green-100 text-green-700':'bg-slate-100 text-slate-500'}">${c.ativo?'Ativo':'Encerrado'}</span>
+              <button onclick="window._delContrato(${emp.id},${c.id})" class="text-xs text-red-500 hover:underline">del</button>
+            </div>
+          </div>`).join('')}
+        </div>` : '<p class="text-xs text-slate-400">Sem contratos adicionais (vínculo principal no cadastro).</p>'}
+      </div>`).join('');
+
+    window._addContrato = async (empId, empName) => {
+      const cargo = prompt(`Cargo no 2º vínculo (${empName}):`,empName);
+      if (!cargo) return;
+      const sal = +prompt('Salário:','0');
+      const adm = prompt('Data admissão (AAAA-MM-DD):',new Date().toISOString().slice(0,10));
+      await fetch(`/api/dp/employees/${empId}/contratos`,{method:'POST',headers:{...authHeaders(),'Content-Type':'application/json'},
+        body:JSON.stringify({cargo,salario:sal,admission_date:adm})});
+      await load();
+    };
+    window._delContrato = async (empId, contId) => {
+      if (!confirm('Excluir contrato?')) return;
+      await fetch(`/api/dp/employees/${empId}/contratos/${contId}`,{method:'DELETE',headers:authHeaders()});
+      await load();
+    };
+  }
+  await load();
+}
+
+
+// ─── CC POR RUBRICA ───────────────────────────────────────────────────────────
+
+async function renderCcRubrica(el) {
+  const hoje = new Date();
+  const defComp = `${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}`;
+  const fBRL = v => parseFloat(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+  const empOpts = dpEmployees.map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
+
+  let ccs = [];
+  try { ccs = await fetch('/api/financeiro/cost-centers',{headers:authHeaders()}).then(r=>r.json()); } catch {}
+  if (!ccs.length) {
+    try { ccs = await fetch('/api/cost-centers',{headers:authHeaders()}).then(r=>r.json()); } catch {}
+  }
+  const ccOpts = ccs.map(c=>`<option value="${c.id}">${c.name}</option>`).join('');
+
+  async function load(comp) {
+    const [alocacoes, relatorio] = await Promise.all([
+      fetch(`/api/dp/centro-custo/alocacao?competencia=${comp}`,{headers:authHeaders()}).then(r=>r.json()).catch(()=>[]),
+      fetch(`/api/dp/relatorios/custo-por-cc?competencia=${comp}`,{headers:authHeaders()}).then(r=>r.json()).catch(()=>({centros:[],sem_alocacao:[]}))
+    ]);
+
+    el.innerHTML = `<div class="space-y-4">
+      <div class="flex flex-wrap gap-2 justify-between items-center">
+        <h2 class="font-bold text-slate-800">Centro de Custo por Rubrica</h2>
+        <input type="month" value="${comp}" onchange="window._ccComp(this.value)" class="border rounded-lg p-2 text-sm">
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="bg-white rounded-xl border border-slate-200 p-4">
+          <div class="flex justify-between items-center mb-3">
+            <h3 class="font-semibold text-slate-700">Alocações — ${comp}</h3>
+            <button onclick="window._newAlocacao('${comp}')" class="text-xs px-3 py-1 rounded-lg border border-violet-300 text-violet-600 hover:bg-violet-50">+ Alocação</button>
+          </div>
+          ${alocacoes.length ? `<table class="w-full text-xs border-collapse">
+            <thead><tr class="bg-slate-50"><th class="p-2 border border-slate-200 text-left">Funcionário</th><th class="p-2 border border-slate-200 text-left">CC</th><th class="p-2 border border-slate-200">%</th><th class="p-2 border border-slate-200"></th></tr></thead>
+            <tbody>${alocacoes.map(a=>`<tr><td class="p-2 border border-slate-100">${a.employee_name}</td><td class="p-2 border border-slate-100">${a.cc_name}</td><td class="p-2 border border-slate-100 text-center">${a.percentual}%</td><td class="p-2 border border-slate-100 text-center"><button onclick="window._delAlocacao(${a.id},'${comp}')" class="text-red-500 text-xs hover:underline">del</button></td></tr>`).join('')}
+            </tbody></table>` : '<p class="text-sm text-slate-400 text-center py-4">Nenhuma alocação para '+comp+'.</p>'}
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 p-4">
+          <h3 class="font-semibold text-slate-700 mb-3">Rateio por CC — ${comp}</h3>
+          ${relatorio.centros.length ? `<div class="space-y-2">
+            ${relatorio.centros.map(c=>`<div class="flex justify-between items-center p-2 bg-slate-50 rounded-lg">
+              <span class="text-sm font-medium text-slate-700">${c.cc_name}</span>
+              <div class="text-right"><span class="text-sm font-semibold text-violet-700">${fBRL(c.total)}</span><span class="text-xs text-slate-400 ml-1">(${c.funcionarios} func.)</span></div>
+            </div>`).join('')}
+          </div>` : '<p class="text-sm text-slate-400 text-center py-4">Processe a folha primeiro.</p>'}
+          ${relatorio.sem_alocacao.length ? `<p class="text-xs text-amber-600 mt-2">⚠ ${relatorio.sem_alocacao.length} funcionário(s) sem alocação de CC.</p>` : ''}
+        </div>
+      </div>
+    </div>`;
+
+    window._ccComp = (v) => load(v);
+    window._newAlocacao = async (comp) => {
+      const html = `<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" id="aloc-modal">
+        <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-3">
+          <div class="flex justify-between"><h3 class="font-semibold text-slate-800">Nova Alocação de CC</h3>
+            <button onclick="document.getElementById('aloc-modal').remove()" class="text-slate-400">✕</button></div>
+          <select id="aloc-emp" class="w-full border rounded-lg p-2 text-sm"><option value="">Funcionário...</option>${empOpts}</select>
+          <select id="aloc-cc" class="w-full border rounded-lg p-2 text-sm"><option value="">Centro de Custo...</option>${ccOpts}</select>
+          <input id="aloc-pct" type="number" value="100" min="1" max="100" placeholder="% do salário" class="w-full border rounded-lg p-2 text-sm">
+          <button onclick="window._saveAlocacao('${comp}')" class="w-full bg-violet-600 text-white py-2 rounded-lg font-semibold hover:bg-violet-700">Salvar</button>
+        </div></div>`;
+      document.body.insertAdjacentHTML('beforeend', html);
+      window._saveAlocacao = async (c) => {
+        const emp = +document.getElementById('aloc-emp').value;
+        const cc = +document.getElementById('aloc-cc').value;
+        if (!emp||!cc) return alert('Preencha todos os campos.');
+        await fetch('/api/dp/centro-custo/alocacao',{method:'POST',headers:{...authHeaders(),'Content-Type':'application/json'},
+          body:JSON.stringify({employee_id:emp,cost_center_id:cc,percentual:+document.getElementById('aloc-pct').value,competencia:c})});
+        document.getElementById('aloc-modal').remove();
+        await load(c);
+      };
+    };
+    window._delAlocacao = async (id, comp) => {
+      await fetch(`/api/dp/centro-custo/alocacao/${id}`,{method:'DELETE',headers:authHeaders()});
+      await load(comp);
+    };
+  }
+  await load(defComp);
+}
+
+
+// ─── REPASSE AO SINDICATO ─────────────────────────────────────────────────────
+
+async function renderRepSindicato(el) {
+  const fBRL = v => parseFloat(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+  const hoje = new Date();
+  let comp = `${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}`;
+
+  async function load() {
+    const data = await fetch(`/api/dp/relatorios/repasse-sindicato?competencia=${comp}`,{headers:authHeaders()}).then(r=>r.json()).catch(()=>({sindicatos:[],grand_total:0}));
+
+    el.innerHTML = `<div class="space-y-4">
+      <div class="flex flex-wrap gap-2 justify-between items-center">
+        <h2 class="font-bold text-slate-800">Repasse ao Sindicato</h2>
+        <div class="flex gap-2">
+          <input type="month" value="${comp}" onchange="window._repComp(this.value)" class="border rounded-lg p-2 text-sm">
+          <button onclick="window._exportRepasse()" class="bg-green-600 text-white px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-green-700">Exportar CSV</button>
+        </div>
+      </div>
+      <div class="bg-white rounded-xl border border-slate-200 p-4">
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="font-semibold text-slate-700">Contribuições — ${comp}</h3>
+          <span class="text-sm font-bold text-violet-700">Total: ${fBRL(data.grand_total)}</span>
+        </div>
+        ${data.sindicatos.length ? `<table class="w-full text-sm border-collapse">
+          <thead class="bg-slate-50"><tr>
+            <th class="p-3 border border-slate-200 text-left">Sindicato</th>
+            <th class="p-3 border border-slate-200 text-center">Funcionários</th>
+            <th class="p-3 border border-slate-200 text-center">%</th>
+            <th class="p-3 border border-slate-200 text-right">Total a Repassar</th>
+          </tr></thead>
+          <tbody>
+            ${data.sindicatos.map(s=>`<tr class="hover:bg-slate-50">
+              <td class="p-3 border border-slate-100 font-medium">${s.sindicato||'(sem nome)'}</td>
+              <td class="p-3 border border-slate-100 text-center">${s.funcionarios}</td>
+              <td class="p-3 border border-slate-100 text-center">${parseFloat(s.percentual||0).toFixed(1)}%</td>
+              <td class="p-3 border border-slate-100 text-right font-semibold text-green-700">${fBRL(s.total)}</td>
+            </tr>`).join('')}
+            <tr class="bg-slate-50 font-bold">
+              <td class="p-3 border border-slate-200" colspan="3">TOTAL GERAL</td>
+              <td class="p-3 border border-slate-200 text-right text-violet-700">${fBRL(data.grand_total)}</td>
+            </tr>
+          </tbody>
+        </table>` : '<p class="text-sm text-slate-400 text-center py-6">Nenhuma CCT/contribuição ativa. Configure em Compliance → CCT Assistencial.</p>'}
+      </div>
+    </div>`;
+
+    window._repComp = (v) => { comp = v; load(); };
+    window._exportRepasse = () => {
+      if (!data.sindicatos.length) return alert('Nenhum dado para exportar.');
+      const csv = ['Sindicato,Funcionários,%,Total a Repassar',
+        ...data.sindicatos.map(s=>`"${s.sindicato}",${s.funcionarios},${s.percentual},${s.total}`)
+      ].join('\n');
+      const url = URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
+      const a = document.createElement('a'); a.href = url;
+      a.download = `repasse_sindicato_${comp}.csv`; a.click();
+    };
+  }
+  await load();
 }
 

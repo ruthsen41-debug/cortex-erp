@@ -1956,6 +1956,204 @@ def migrate_db(conn: sqlite3.Connection) -> None:
         FOREIGN KEY (employee_id) REFERENCES employees(id)
     )""")
 
+    # ── SST — Saúde e Segurança do Trabalho ────────────────────
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS pcmso_programas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        ano INTEGER NOT NULL,
+        responsavel_nome TEXT DEFAULT '',
+        responsavel_crm TEXT DEFAULT '',
+        data_elaboracao TEXT DEFAULT '',
+        vigencia_inicio TEXT DEFAULT '',
+        vigencia_fim TEXT DEFAULT '',
+        observacoes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS pcmso_exames_cargo (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        programa_id INTEGER NOT NULL,
+        cargo TEXT NOT NULL,
+        tipo_exame TEXT DEFAULT 'periodico',
+        periodicidade_meses INTEGER DEFAULT 12,
+        exames TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (programa_id) REFERENCES pcmso_programas(id)
+    )""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS pgr_inventario (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        ghe TEXT DEFAULT '',
+        cargo TEXT DEFAULT '',
+        agente_risco TEXT DEFAULT '',
+        grupo_risco TEXT DEFAULT '1',
+        fonte_geradora TEXT DEFAULT '',
+        trajetoria TEXT DEFAULT '',
+        medida_controle TEXT DEFAULT '',
+        severidade INTEGER DEFAULT 1,
+        probabilidade INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS epi_entregas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        employee_id INTEGER NOT NULL,
+        data_entrega TEXT NOT NULL,
+        epi_nome TEXT NOT NULL,
+        ca_numero TEXT DEFAULT '',
+        quantidade INTEGER DEFAULT 1,
+        motivo TEXT DEFAULT 'inicial',
+        assinado INTEGER DEFAULT 0,
+        observacoes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (employee_id) REFERENCES employees(id)
+    )""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS cipa_eleicoes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        ano INTEGER NOT NULL,
+        data_posse TEXT DEFAULT '',
+        data_fim_mandato TEXT DEFAULT '',
+        num_efetivos_emp INTEGER DEFAULT 0,
+        num_suplentes_emp INTEGER DEFAULT 0,
+        num_efetivos_patr INTEGER DEFAULT 0,
+        num_suplentes_patr INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'ativa',
+        observacoes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS cipa_membros (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        eleicao_id INTEGER NOT NULL,
+        employee_id INTEGER NOT NULL,
+        tipo TEXT NOT NULL,
+        data_inicio TEXT DEFAULT '',
+        data_fim TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (eleicao_id) REFERENCES cipa_eleicoes(id),
+        FOREIGN KEY (employee_id) REFERENCES employees(id)
+    )""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS feriados (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        data TEXT NOT NULL,
+        descricao TEXT NOT NULL,
+        tipo TEXT DEFAULT 'nacional',
+        uf TEXT DEFAULT '',
+        municipio TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS fgts_aniversario_optantes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        employee_id INTEGER NOT NULL,
+        data_opcao TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(company_id, employee_id),
+        FOREIGN KEY (employee_id) REFERENCES employees(id)
+    )""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS reintegracoes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        employee_id INTEGER NOT NULL,
+        data_demissao TEXT DEFAULT '',
+        data_reintegracao TEXT DEFAULT '',
+        motivo TEXT DEFAULT '',
+        nr_processo TEXT DEFAULT '',
+        salario_reintegracao REAL DEFAULT 0,
+        observacoes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (employee_id) REFERENCES employees(id)
+    )""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS employee_contracts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        employee_id INTEGER NOT NULL,
+        contrato_num TEXT DEFAULT '1',
+        cargo TEXT DEFAULT '',
+        salario REAL DEFAULT 0,
+        admission_date TEXT DEFAULT '',
+        termination_date TEXT DEFAULT '',
+        jornada_tipo TEXT DEFAULT 'integral',
+        horas_semana REAL DEFAULT 44,
+        ativo INTEGER DEFAULT 1,
+        observacoes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (employee_id) REFERENCES employees(id)
+    )""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS cc_alocacoes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        employee_id INTEGER NOT NULL,
+        cost_center_id INTEGER NOT NULL,
+        percentual REAL DEFAULT 100,
+        competencia TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (employee_id) REFERENCES employees(id)
+    )""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS cbo_ocupacoes (
+        codigo TEXT PRIMARY KEY,
+        descricao TEXT NOT NULL
+    )""")
+    cbos = [
+        ("111105","Diretor Geral"),("111115","Diretor Administrativo"),("111120","Diretor Comercial"),
+        ("111205","Gerente Geral"),("111210","Gerente Administrativo"),("111215","Gerente Comercial"),
+        ("111220","Gerente Financeiro"),("111225","Gerente de RH"),("111230","Gerente de TI"),
+        ("131105","Gerente de Produção"),("141205","Gerente de Loja"),
+        ("211110","Advogado"),("211115","Advogado Trabalhista"),
+        ("212205","Analista de Sistemas"),("212210","Programador"),("212305","Administrador de Redes"),
+        ("213115","Engenheiro Civil"),("213120","Engenheiro Mecânico"),("213125","Engenheiro Elétrico"),
+        ("214205","Arquiteto"),("225110","Médico do Trabalho"),("225130","Médico Clinico Geral"),
+        ("226305","Enfermeiro"),("226310","Técnico de Enfermagem"),
+        ("241005","Contador"),("241010","Técnico de Contabilidade"),("241015","Auditor"),
+        ("252105","Administrador"),("252205","Analista Administrativo"),
+        ("252510","Analista de RH"),("252515","Assistente de RH"),
+        ("261115","Redator"),("261120","Designer"),
+        ("321205","Técnico de Segurança do Trabalho"),
+        ("351105","Assistente Administrativo"),("351110","Auxiliar Administrativo"),
+        ("354120","Vendedor Interno"),("354130","Representante Comercial"),
+        ("371105","Assistente de Marketing"),("374105","Operador de TI"),("374110","Suporte de TI"),
+        ("391110","Técnico de Manutenção"),("411005","Recepcionista"),("411010","Secretária"),
+        ("411015","Assistente de Escritório"),("412105","Operador de Caixa"),
+        ("421105","Atendente de Loja"),("422105","Atendente de Call Center"),
+        ("513205","Motorista"),("513210","Entregador"),("514320","Auxiliar de Limpeza"),
+        ("514325","Zelador"),("711105","Pedreiro"),("712105","Eletricista"),("712110","Encanador"),
+        ("721105","Mecânico"),("721110","Torneiro Mecânico"),("782110","Estoquista"),
+        ("782115","Auxiliar de Almoxarifado"),("782205","Operador de Empilhadeira"),
+        ("784105","Auxiliar de Produção"),("784110","Operador de Máquinas"),
+        ("862105","Operador de Produção"),("911205","Auxiliar de Serviços Gerais"),
+        ("521140","Repositor"),("521145","Promotor de Vendas"),("612105","Produtor Rural"),
+        ("422310","Cobrador"),("522110","Vendedor Externo"),
+        ("710205","Encarregado de Obras"),("410105","Almoxarife"),
+    ]
+    for codigo, desc in cbos:
+        cur.execute("INSERT OR IGNORE INTO cbo_ocupacoes (codigo, descricao) VALUES (?,?)", (codigo, desc))
+
+    emp_cols = [c["name"] for c in cur.execute("PRAGMA table_info(employees)").fetchall()]
+    if "jornada_tipo" not in emp_cols:
+        cur.execute("ALTER TABLE employees ADD COLUMN jornada_tipo TEXT DEFAULT 'integral'")
+    if "horas_semana" not in emp_cols:
+        cur.execute("ALTER TABLE employees ADD COLUMN horas_semana REAL DEFAULT 44")
+    if "fgts_aniversario" not in emp_cols:
+        cur.execute("ALTER TABLE employees ADD COLUMN fgts_aniversario INTEGER DEFAULT 0")
+
+    run_cols = [c["name"] for c in cur.execute("PRAGMA table_info(payroll_runs)").fetchall()]
+    if "tipo" not in run_cols:
+        cur.execute("ALTER TABLE payroll_runs ADD COLUMN tipo TEXT DEFAULT 'mensal'")
+
     # ── LALUR — Livro de Apuração do Lucro Real ───────────────
     cur.execute("""
     CREATE TABLE IF NOT EXISTS lalur_lancamentos (
