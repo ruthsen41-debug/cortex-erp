@@ -2522,16 +2522,43 @@ def calcular_darf(competencia: str, current_user: Dict[str, Any] = Depends(get_c
 
 # ─── TABELAS FISCAIS ──────────────────────────────────────────────────────────
 
+def _somente_superadmin(user: Dict[str, Any]) -> None:
+    """Tabelas legais (INSS, IRRF, FGTS, salário mínimo) são mantidas pelo dono do sistema."""
+    if not user.get("is_superadmin"):
+        raise HTTPException(status_code=403, detail="As tabelas legais são atualizadas pelo administrador do sistema. "
+                                                    "Abra uma solicitação de suporte se precisar de alteração.")
+
+
+def _pode_editar_rubricas(user: Dict[str, Any]) -> None:
+    if not user.get("is_superadmin") and (user.get("role") or "") not in ("admin", "dp"):
+        raise HTTPException(status_code=403, detail="Apenas administrador ou Depto. Pessoal podem alterar rubricas.")
+
+
+def _rubrica_global(conn, rubric_id: int, company_id: int, user: Dict[str, Any]) -> None:
+    """Rubricas publicadas pelo dono do sistema (origem 'global') só ele altera ou exclui."""
+    if user.get("is_superadmin"):
+        return
+    row = conn.execute("SELECT origem FROM payroll_rubrics WHERE id=? AND company_id=?",
+                       (rubric_id, company_id)).fetchone()
+    if row and (dict(row).get("origem") or "") == "global":
+        conn.close()
+        raise HTTPException(status_code=403, detail="Rubrica padrão do sistema: só o administrador do sistema pode alterá-la. "
+                                                    "Crie uma rubrica própria com outro código, se precisar.")
+
 @router.get("/tax-tables")
 def list_tax_tables(ano: Optional[int] = None, current_user: Dict[str, Any] = Depends(get_current_user)):
     conn = get_conn()
     company_id = current_user.get("company_id", 1)
-    where = "company_id = ?"
+    where = "company_id IN (0, ?)"
     params: List[Any] = [company_id]
     if ano:
         where += " AND ano = ?"
         params.append(ano)
-    tables = rows_to_dicts(conn.execute(f"SELECT * FROM tax_tables WHERE {where} ORDER BY ano DESC, tipo", params).fetchall())
+    tables = rows_to_dicts(conn.execute(
+        f"SELECT * FROM tax_tables WHERE {where} ORDER BY ano DESC, tipo, CASE WHEN company_id = 0 THEN 0 ELSE 1 END",
+        params).fetchall())
+    for t in tables:
+        t["global"] = int(t.get("company_id") or 0) == 0
     for t in tables:
         t["brackets"] = rows_to_dicts(conn.execute("SELECT * FROM tax_brackets WHERE tax_table_id = ? ORDER BY faixa_de", (t["id"],)).fetchall())
     conn.close()
@@ -2543,7 +2570,8 @@ def tax_tables_vigente(ano: int, current_user: Dict[str, Any] = Depends(get_curr
     conn = get_conn()
     company_id = current_user.get("company_id", 1)
     rows = rows_to_dicts(conn.execute(
-        "SELECT * FROM tax_tables WHERE company_id=? AND ano<=? ORDER BY ano DESC",
+        "SELECT * FROM tax_tables WHERE company_id IN (0, ?) AND ano<=? "
+        "ORDER BY ano DESC, CASE WHEN company_id = 0 THEN 0 ELSE 1 END",
         (company_id, ano)
     ).fetchall())
     seen: Dict[str, bool] = {}
@@ -2564,6 +2592,7 @@ def seed_default_tax_tables(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """Importa as tabelas legais do ano. force=true substitui as já cadastradas."""
+    _somente_superadmin(current_user)
     ano = ano or date.today().year
     conn = get_conn()
     company_id = current_user.get("company_id", 1)
@@ -2589,6 +2618,7 @@ def seed_default_tax_tables(
 
 @router.post("/tax-tables", status_code=201)
 def create_tax_table(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    _somente_superadmin(current_user)
     conn = get_conn()
     company_id = current_user.get("company_id", 1)
     cur = conn.cursor()
@@ -2605,6 +2635,7 @@ def create_tax_table(data: Dict[str, Any] = Body(...), current_user: Dict[str, A
 
 @router.put("/tax-tables/{table_id}")
 def update_tax_table(table_id: int, data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    _somente_superadmin(current_user)
     conn = get_conn()
     company_id = current_user.get("company_id", 1)
     if not conn.execute("SELECT 1 FROM tax_tables WHERE id=? AND company_id=?", (table_id, company_id)).fetchone():
@@ -2621,6 +2652,7 @@ def update_tax_table(table_id: int, data: Dict[str, Any] = Body(...), current_us
 
 @router.delete("/tax-tables/{table_id}")
 def delete_tax_table(table_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    _somente_superadmin(current_user)
     conn = get_conn()
     company_id = current_user.get("company_id", 1)
     conn.execute("DELETE FROM tax_tables WHERE id=? AND company_id=?", (table_id, company_id))
@@ -2685,6 +2717,7 @@ def seed_default_rubrics(current_user: Dict[str, Any] = Depends(get_current_user
 
 @router.post("/rubrics", status_code=201)
 def create_rubric(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    _pode_editar_rubricas(current_user)
     conn = get_conn()
     company_id = current_user.get("company_id", 1)
     cur = conn.cursor()
@@ -2711,8 +2744,10 @@ def create_rubric(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any]
 
 @router.put("/rubrics/{rubric_id}")
 def update_rubric(rubric_id: int, data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    _pode_editar_rubricas(current_user)
     conn = get_conn()
     company_id = current_user.get("company_id", 1)
+    _rubrica_global(conn, rubric_id, company_id, current_user)
     fields = []
     vals: List[Any] = []
     if "formula" in data:
@@ -2735,8 +2770,10 @@ def update_rubric(rubric_id: int, data: Dict[str, Any] = Body(...), current_user
 
 @router.delete("/rubrics/{rubric_id}")
 def delete_rubric(rubric_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    _pode_editar_rubricas(current_user)
     conn = get_conn()
     company_id = current_user.get("company_id", 1)
+    _rubrica_global(conn, rubric_id, company_id, current_user)
     em_uso = conn.execute("SELECT COUNT(*) FROM employee_rubrics WHERE rubric_id=? AND company_id=?",
                           (rubric_id, company_id)).fetchone()[0]
     if em_uso:

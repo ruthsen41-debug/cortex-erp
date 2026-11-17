@@ -10,11 +10,11 @@ let currentUserRole = 'admin';
 // Perfis de acesso — null = todos os módulos
 const ROLE_MODULES = {
   admin:      null,
-  dp:         ['dp', 'conventions', 'employee_portal', 'settings'],
-  fiscal:     ['invoices', 'fiscal_books', 'sped', 'nfe_manifest', 'dirbi', 'certificates', 'settings'],
-  contabil:   ['accounting', 'fiscal_books', 'lalur', 'honorarios', 'audit', 'patrimony', 'simples', 'obligations', 'certificates', 'reports', 'settings'],
-  comercial:  ['crm', 'sales', 'pdv', 'os', 'inventory', 'purchases', 'contracts', 'returns', 'quotes', 'settings'],
-  financeiro: ['receivables', 'payables', 'ofx', 'reports', 'settings'],
+  dp:         ['dp', 'conventions', 'employee_portal', 'settings', 'support'],
+  fiscal:     ['invoices', 'fiscal_books', 'sped', 'nfe_manifest', 'dirbi', 'certificates', 'settings', 'support'],
+  contabil:   ['accounting', 'fiscal_books', 'lalur', 'honorarios', 'audit', 'patrimony', 'simples', 'obligations', 'certificates', 'reports', 'settings', 'support'],
+  comercial:  ['crm', 'sales', 'pdv', 'os', 'inventory', 'purchases', 'contracts', 'returns', 'quotes', 'settings', 'support'],
+  financeiro: ['receivables', 'payables', 'ofx', 'reports', 'settings', 'support'],
 };
 const ROLE_FIRST_TAB = {
   admin: 'dashboard', dp: 'dp', fiscal: 'invoices',
@@ -324,6 +324,14 @@ async function switchTab(tab) {
     case 'dirbi':
       if (typeof renderDirbi === 'function') await renderDirbi(main);
       else main.innerHTML = '<div class="p-6 text-slate-400">Módulo DIRBI não carregado.</div>';
+      break;
+    case 'superadmin':
+      if (typeof renderSuperadmin === 'function') await renderSuperadmin(main);
+      else main.innerHTML = '<div class="p-6 text-slate-400">Painel do Sistema não carregado.</div>';
+      break;
+    case 'support':
+      if (typeof renderSupport === 'function') await renderSupport(main);
+      else main.innerHTML = '<div class="p-6 text-slate-400">Módulo Suporte não carregado.</div>';
       break;
     case 'users':
       if (typeof renderUsers === 'function') await renderUsers(main);

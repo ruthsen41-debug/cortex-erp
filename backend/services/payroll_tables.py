@@ -92,12 +92,14 @@ def builtin_tables(competencia: str) -> TaxTables:
 
 
 def load_tables(conn, company_id: int, competencia: str) -> TaxTables:
-    """Tabelas da competência: as da empresa (mesmo ano) têm prioridade sobre as embutidas."""
+    """Tabelas da competência. Prioridade: globais do dono do sistema (company_id 0, mesmo ano)
+    > as da empresa (legado) > as embutidas no código."""
     t = builtin_tables(competencia)
     ano = int(competencia[:4])
     try:
         rows = conn.execute(
-            "SELECT id, tipo FROM tax_tables WHERE company_id=? AND ano=? ORDER BY id DESC",
+            "SELECT id, tipo, company_id FROM tax_tables WHERE company_id IN (0, ?) AND ano=? "
+            "ORDER BY CASE WHEN company_id = 0 THEN 0 ELSE 1 END, id DESC",
             (company_id, ano),
         ).fetchall()
     except Exception:
@@ -116,7 +118,7 @@ def load_tables(conn, company_id: int, competencia: str) -> TaxTables:
         ).fetchall()]
         if not br:
             continue
-        marca = f"empresa {ano}"
+        marca = f"{'global' if int(row.get('company_id') or 0) == 0 else 'empresa'} {ano}"
         if tipo == "inss":
             faixas = [(float(b["faixa_ate"]), float(b["aliquota"]) / 100.0)
                       for b in br if b["faixa_ate"] is not None]

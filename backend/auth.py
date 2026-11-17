@@ -64,14 +64,44 @@ def get_current_user(token: Optional[str] = Depends(oauth2_scheme)) -> Dict[str,
     conn = get_conn()
     try:
         user = conn.execute(
-            "SELECT id, company_id, name, email, role, active FROM users WHERE email = ? AND active = 1",
+            """SELECT u.id, u.company_id, u.name, u.email, u.role, u.active,
+                      COALESCE(u.is_superadmin, 0) AS is_superadmin,
+                      COALESCE(u.home_company_id, u.company_id) AS home_company_id,
+                      COALESCE(c.status, 'ativa') AS company_status
+               FROM users u
+               LEFT JOIN companies c ON c.id = COALESCE(NULLIF(u.home_company_id, 0), u.company_id)
+               WHERE u.email = ? AND u.active = 1""",
             (payload["sub"],),
         ).fetchone()
     finally:
         conn.close()
     if not user:
         raise unauthorized
-    return dict(user)
+    user = dict(user)
+    if not user["is_superadmin"] and user["company_status"] != "ativa":
+        # Empresa pendente de aprovação ou bloqueada pelo dono do sistema: derruba a sessão.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=company_status_message(user["company_status"]),
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return user
+
+
+def company_status_message(company_status: str) -> str:
+    if company_status == "pendente":
+        return "Cadastro da empresa aguardando aprovação do administrador do sistema."
+    if company_status == "bloqueada":
+        return "Acesso da empresa bloqueado. Entre em contato com o suporte."
+    return "Acesso da empresa indisponível."
+
+
+def require_superadmin(user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+    """Dependency: apenas o dono do sistema (super administrador)."""
+    if not user.get("is_superadmin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Acesso restrito ao administrador do sistema.")
+    return user
 
 
 def require_role(*allowed_roles: str):

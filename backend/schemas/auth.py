@@ -18,7 +18,7 @@ class UserCreate(BaseModel):
     email: str
     password: str
     role: str = "operador"
-    company_id: Optional[int] = 1
+    company_id: Optional[int] = None
 
 
 class UserResponse(BaseModel):
@@ -29,6 +29,7 @@ class UserResponse(BaseModel):
     role: str
     active: int
     created_at: Optional[str] = None
+    is_superadmin: int = 0
 
 
 class CompanyRegisterRequest(BaseModel):
@@ -43,8 +44,8 @@ class CompanyRegisterRequest(BaseModel):
 
 
 class CompanyRegisterResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
+    status: str = "pendente"
+    message: str = ""
     user: dict
     company: dict
 

@@ -45,6 +45,7 @@ from .nfe_manifest import router as nfe_manifest_router
 from .conventions import router as conventions_router
 from .dirbi import router as dirbi_router
 from .fiscal_books import router as fiscal_books_router
+from .superadmin import router as superadmin_router, support_router
 
 all_routers = [
     auth_router,
@@ -94,4 +95,6 @@ all_routers = [
     conventions_router,
     dirbi_router,
     fiscal_books_router,
+    superadmin_router,
+    support_router,
 ]

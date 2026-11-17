@@ -2803,7 +2803,57 @@ def migrate_db(conn: sqlite3.Connection) -> None:
     except Exception:
         pass
 
+    _migrate_superadmin(cur)
     conn.commit()
+
+
+def _migrate_superadmin(cur) -> None:
+    """Painel do super administrador (dono do sistema): status das empresas clientes,
+    perfil super admin, catálogo global (company_id = 0) e solicitações de suporte."""
+    user_cols = [c["name"] for c in cur.execute("PRAGMA table_info(users)").fetchall()]
+    if "is_superadmin" not in user_cols:
+        cur.execute("ALTER TABLE users ADD COLUMN is_superadmin INTEGER DEFAULT 0")
+    if "home_company_id" not in user_cols:
+        cur.execute("ALTER TABLE users ADD COLUMN home_company_id INTEGER DEFAULT 0")
+    cur.execute("UPDATE users SET home_company_id = company_id WHERE home_company_id IS NULL OR home_company_id = 0")
+
+    comp_cols = [c["name"] for c in cur.execute("PRAGMA table_info(companies)").fetchall()]
+    for col, ddl in [
+        ("status", "TEXT DEFAULT 'ativa'"),          # ativa, pendente, bloqueada
+        ("plano", "TEXT DEFAULT ''"),
+        ("observacao_admin", "TEXT DEFAULT ''"),
+        ("bloqueio_motivo", "TEXT DEFAULT ''"),
+        ("aprovado_em", "TEXT DEFAULT ''"),
+    ]:
+        if col not in comp_cols:
+            cur.execute(f"ALTER TABLE companies ADD COLUMN {col} {ddl}")
+    cur.execute("UPDATE companies SET status = 'ativa' WHERE status IS NULL OR status = ''")
+
+    rub_cols = [c["name"] for c in cur.execute("PRAGMA table_info(payroll_rubrics)").fetchall()]
+    if "origem" not in rub_cols:
+        cur.execute("ALTER TABLE payroll_rubrics ADD COLUMN origem TEXT DEFAULT 'empresa'")
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS support_requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        categoria TEXT DEFAULT 'outro',
+        assunto TEXT NOT NULL,
+        mensagem TEXT DEFAULT '',
+        status TEXT DEFAULT 'aberto',
+        resposta TEXT DEFAULT '',
+        respondido_em TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
+
+    # Quem é o super admin: e-mails em SUPERADMIN_EMAILS (separados por vírgula) e,
+    # se ainda não houver nenhum, os administradores da empresa principal (id 1).
+    emails = [e.strip().lower() for e in os.getenv("SUPERADMIN_EMAILS", "").split(",") if e.strip()]
+    for email in emails:
+        cur.execute("UPDATE users SET is_superadmin = 1 WHERE LOWER(email) = ?", (email,))
+    if not cur.execute("SELECT 1 FROM users WHERE is_superadmin = 1 LIMIT 1").fetchone():
+        cur.execute("UPDATE users SET is_superadmin = 1 WHERE home_company_id = 1 AND role = 'admin'")
 
 
 def _seed_default_accumulators(cur, company_id: int) -> None:

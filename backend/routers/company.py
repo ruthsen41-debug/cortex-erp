@@ -241,17 +241,17 @@ def list_companies(current_user: Dict[str, Any] = Depends(get_current_user)):
     """Lista todas as empresas acessíveis pelo usuário logado (escritório contábil)."""
     conn = get_conn()
     active_id = current_user.get("company_id", 1)
-    role = (current_user.get("role") or "").lower()
-    if role in ("admin", "contador", "contabil"):
+    if current_user.get("is_superadmin"):
         rows = conn.execute("SELECT * FROM companies ORDER BY id").fetchall()
     else:
+        # Cliente vê só a própria empresa (cadastro original), a ativa e as que o escritório criou/vinculou.
         rows = conn.execute("""
             SELECT DISTINCT c.*
             FROM companies c
             LEFT JOIN user_companies uc ON uc.company_id = c.id AND uc.user_id = ?
-            WHERE c.id = ? OR uc.user_id IS NOT NULL
+            WHERE c.id = ? OR c.id = ? OR uc.user_id IS NOT NULL
             ORDER BY c.id
-        """, (current_user["id"], active_id)).fetchall()
+        """, (current_user["id"], active_id, current_user.get("home_company_id") or active_id)).fetchall()
     conn.close()
     return {
         "active_company_id": active_id,
@@ -325,8 +325,11 @@ def switch_company(
         conn.close()
         raise HTTPException(status_code=404, detail="Empresa não encontrada.")
 
-    role = (current_user.get("role") or "").lower()
-    if role not in ("admin", "contador", "contabil") and data.company_id != current_user.get("company_id"):
+    permitido = (
+        current_user.get("is_superadmin")
+        or data.company_id in (current_user.get("company_id"), current_user.get("home_company_id"))
+    )
+    if not permitido:
         link = conn.execute(
             "SELECT id FROM user_companies WHERE user_id = ? AND company_id = ?",
             (current_user["id"], data.company_id),

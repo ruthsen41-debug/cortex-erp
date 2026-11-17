@@ -10,6 +10,7 @@
     fis:  { label: 'fiscal',     color: '#d97706' },
     cont: { label: 'contábil',   color: '#7c4dcc' },
     gest: { label: 'gestão',     color: '#46566b' },
+    sys:  { label: 'sistema',    color: '#46566b' },
     home: { label: 'cortex',     color: '#2f8fe6' },
   };
 
@@ -73,6 +74,8 @@
       ['Auditoria', 'shield-check', 'audit'],
       ['Usuários', 'users', 'users'],
       ['Configurações', 'building-2', 'settings'],
+      ['Suporte', 'life-buoy', 'support'],
+      ['Painel do sistema', 'shield-half', 'superadmin'],
     ] },
   ];
 
@@ -81,6 +84,8 @@
   ROWS.forEach((r) => r.items.forEach(([, , tab]) => { if (!TAB_CAT[tab]) TAB_CAT[tab] = r.cat; }));
 
   let pendingCat = null;
+  // Telas do sistema (painel do dono e suporte) não mostram atalhos de nenhuma área.
+  const FORCE_CAT = { superadmin: 'sys', support: 'sys' };
 
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -123,7 +128,8 @@
     const allowed = allowedTabs();
 
     const rows = ROWS.map((r) => {
-      const items = r.items.filter(([, , tab]) => !allowed || allowed.includes(tab));
+      const items = r.items.filter(([, , tab]) => (!allowed || allowed.includes(tab))
+        && (tab !== 'superadmin' || window.cxIsSuperadmin));
       if (!items.length) return '';
       const c = CATS[r.cat];
       return `
@@ -183,7 +189,7 @@
   if (typeof orig === 'function') {
     window.switchTab = function (tab) {
       if (tab === 'home') { renderHome(); return Promise.resolve(); }
-      setModule(pendingCat || TAB_CAT[tab] || 'gest', tabTitle(tab));
+      setModule(FORCE_CAT[tab] || pendingCat || TAB_CAT[tab] || 'gest', tabTitle(tab));
       pendingCat = null;
       return orig.apply(this, arguments);
     };

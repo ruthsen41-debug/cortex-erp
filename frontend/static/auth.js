@@ -124,7 +124,7 @@
         <label for="cortex-reg-phone">Telefone / WhatsApp (opcional)</label>
         <input id="cortex-reg-phone" type="text" placeholder="(11) 99999-8888">
         <div id="cortex-register-error" class="cx-login-error"></div>
-        <button type="submit">Criar Conta e Começar</button>
+        <button type="submit">Solicitar Cadastro</button>
         <button type="button" id="cortex-to-login" class="cx-link-btn">Já possui conta? Fazer Login</button>
         <div class="cx-login-foot">ONBOARDING SEGURO · MULTI-TENANT</div>
       </form>
@@ -263,9 +263,16 @@
           submitBtn.textContent = origText;
           return;
         }
-        setToken(data.access_token);
-        try { localStorage.setItem('cortex_user', JSON.stringify(data.user)); } catch (e) {}
-        window.location.reload();
+        // Cadastro público fica pendente até o administrador do sistema aprovar.
+        const esc = (t) => String(t || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        registerForm.innerHTML = `
+          <div class="cx-logo">CX</div>
+          <h2>Cadastro recebido!</h2>
+          <p>${esc(data.message || 'Sua empresa aguarda aprovação do administrador do sistema.')}</p>
+          <p style="margin-top:10px"><strong>${esc(data.company && data.company.name)}</strong><br>${esc(data.user && data.user.email)}</p>
+          <p style="margin-top:10px">Assim que o acesso for liberado, entre com o e-mail e a senha que você acabou de cadastrar.</p>
+          <button type="button" class="cx-link-btn" onclick="window.location.reload()">Voltar para o login</button>
+          <div class="cx-login-foot">AGUARDANDO APROVAÇÃO</div>`;
       } catch (e) {
         errBox.textContent = 'Erro de conexão com o servidor.';
         submitBtn.disabled = false;

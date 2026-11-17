@@ -22,8 +22,9 @@ def test_register_new_company_success():
     assert res.status_code == 200, f"Falha no onboarding: {res.text}"
     data = res.json()
 
-    assert "access_token" in data
-    assert data["token_type"] == "bearer"
+    # Cadastro público fica pendente de aprovação do dono do sistema (sem token)
+    assert data["status"] == "pendente"
+    assert "access_token" not in data
     assert data["user"]["name"] == "Maria da Silva"
     assert data["user"]["email"] == payload["email"]
     assert data["user"]["role"] == "admin"
@@ -31,13 +32,25 @@ def test_register_new_company_success():
     new_company_id = data["company"]["id"]
     assert new_company_id > 1
 
-    # Valida que o token retornado ja permite autenticar no /api/auth/me
-    token = data["access_token"]
+    # Enquanto pendente, o login é recusado
+    pend = client.post("/api/auth/login", json={"email": payload["email"], "password": payload["password"]})
+    assert pend.status_code == 403
+    assert "aguardando aprovação" in pend.text
+
+    # O super admin aprova e o login passa a funcionar
+    adm = client.post("/api/auth/login", json={"email": "admin@cortex.com.br", "password": "admin123"})
+    h_adm = {"Authorization": f"Bearer {adm.json()['access_token']}"}
+    assert client.post(f"/api/superadmin/companies/{new_company_id}/approve", headers=h_adm).status_code == 200
+
+    login = client.post("/api/auth/login", json={"email": payload["email"], "password": payload["password"]})
+    assert login.status_code == 200, login.text
+    token = login.json()["access_token"]
     me_res = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert me_res.status_code == 200
     me_data = me_res.json()
     assert me_data["email"] == payload["email"]
     assert me_data["company_id"] == new_company_id
+    assert me_data["is_superadmin"] == 0
 
 
 def test_register_company_duplicate_email():
@@ -86,6 +99,17 @@ def test_register_company_validation_rules():
     assert "nome da empresa é obrigatório" in res_no_name.text
 
 
+def _approve_and_login(res, password):
+    """Cadastro público entra pendente: o super admin aprova e o cliente faz login."""
+    adm = client.post("/api/auth/login", json={"email": "admin@cortex.com.br", "password": "admin123"})
+    h_adm = {"Authorization": f"Bearer {adm.json()['access_token']}"}
+    data = res.json()
+    client.post(f"/api/superadmin/companies/{data['company']['id']}/approve", headers=h_adm)
+    login = client.post("/api/auth/login", json={"email": data["user"]["email"], "password": password})
+    assert login.status_code == 200, login.text
+    return login.json()["access_token"]
+
+
 def test_multi_tenant_data_isolation():
     """Garante que dados criados por uma empresa nao aparecem para outra empresa."""
     # 1. Cadastra Empresa A
@@ -96,7 +120,7 @@ def test_multi_tenant_data_isolation():
         "password": "senhaSeguraTenantA",
     })
     assert res_a.status_code == 200
-    token_a = res_a.json()["access_token"]
+    token_a = _approve_and_login(res_a, "senhaSeguraTenantA")
     headers_a = {"Authorization": f"Bearer {token_a}"}
 
     # 2. Cadastra Empresa B
@@ -107,7 +131,7 @@ def test_multi_tenant_data_isolation():
         "password": "senhaSeguraTenantB",
     })
     assert res_b.status_code == 200
-    token_b = res_b.json()["access_token"]
+    token_b = _approve_and_login(res_b, "senhaSeguraTenantB")
     headers_b = {"Authorization": f"Bearer {token_b}"}
 
     # 3. Empresa A cria um produto exclusivo

@@ -70,7 +70,7 @@ def _send_reset_email(to_email: str, name: str, reset_url: str) -> bool:
 
 try:
     from ..database import get_conn
-    from ..auth import hash_password, verify_password, create_access_token, get_current_user, log_audit
+    from ..auth import hash_password, verify_password, create_access_token, get_current_user, log_audit, company_status_message
     from ..schemas.auth import (
         LoginRequest, TokenResponse, UserCreate, UserResponse,
         CompanyRegisterRequest, CompanyRegisterResponse,
@@ -78,7 +78,7 @@ try:
     )
 except ImportError:
     from database import get_conn
-    from auth import hash_password, verify_password, create_access_token, get_current_user, log_audit
+    from auth import hash_password, verify_password, create_access_token, get_current_user, log_audit, company_status_message
     from schemas.auth import (
         LoginRequest, TokenResponse, UserCreate, UserResponse,
         CompanyRegisterRequest, CompanyRegisterResponse,
@@ -113,7 +113,11 @@ def login(req: LoginRequest, request: Request):
     conn = get_conn()
     cur = conn.cursor()
     user = cur.execute(
-        "SELECT id, company_id, name, email, password_hash, role, active FROM users WHERE email = ?",
+        """SELECT u.id, u.company_id, u.name, u.email, u.password_hash, u.role, u.active,
+                  COALESCE(u.is_superadmin, 0) AS is_superadmin, COALESCE(c.status, 'ativa') AS company_status
+           FROM users u
+           LEFT JOIN companies c ON c.id = COALESCE(NULLIF(u.home_company_id, 0), u.company_id)
+           WHERE u.email = ?""",
         (req.email,),
     ).fetchone()
 
@@ -128,6 +132,10 @@ def login(req: LoginRequest, request: Request):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="E-mail ou senha inválidos.")
 
     _failed_logins.pop(key, None)
+    if not user["is_superadmin"] and user["company_status"] != "ativa":
+        conn.close()
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail=company_status_message(user["company_status"]))
     token = create_access_token({"sub": user["email"], "uid": user["id"], "role": user["role"]})
     log_audit(conn, action="login", entity="users", entity_id=user["id"], user_id=user["id"])
     conn.close()
@@ -141,6 +149,7 @@ def login(req: LoginRequest, request: Request):
             "name": user["name"],
             "email": user["email"],
             "role": user["role"],
+            "is_superadmin": int(user["is_superadmin"] or 0),
         },
     }
 
@@ -166,10 +175,14 @@ def register_user(req: UserCreate, current_user: Dict[str, Any] = Depends(get_cu
         raise HTTPException(status_code=400, detail="E-mail já cadastrado no sistema.")
 
     pwd_hash = hash_password(req.password)
+    # Só o super admin escolhe a empresa; o admin do cliente cria sempre na empresa ativa dele.
+    target_company = current_user.get("company_id", 1)
+    if current_user.get("is_superadmin") and req.company_id:
+        target_company = req.company_id
     cur.execute("""
-        INSERT INTO users (company_id, name, email, password_hash, role)
-        VALUES (?, ?, ?, ?, ?)
-    """, (req.company_id or current_user.get("company_id", 1), req.name, req.email, pwd_hash, req.role))
+        INSERT INTO users (company_id, home_company_id, name, email, password_hash, role)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (target_company, target_company, req.name, req.email, pwd_hash, req.role))
     user_id = cur.lastrowid
     conn.commit()
 
@@ -219,8 +232,8 @@ def register_company(req: CompanyRegisterRequest):
             INSERT INTO companies (
                 razao_social, nome_fantasia, cnpj, regime_tributario,
                 telefone, email, cidade, uf, accountant_token,
-                ambiente_fiscal, motor_fiscal
-            ) VALUES (?, ?, ?, 'simples_nacional', ?, ?, ?, ?, ?, 'homologacao', 'sefaz_direto')
+                ambiente_fiscal, motor_fiscal, status
+            ) VALUES (?, ?, ?, 'simples_nacional', ?, ?, ?, ?, ?, 'homologacao', 'sefaz_direto', 'pendente')
         """, (company_name, company_name, cnpj, phone, email, city, state, accountant_token))
         company_id = cur.lastrowid
 
@@ -233,10 +246,12 @@ def register_company(req: CompanyRegisterRequest):
         # 3. Cria o usuário administrador
         pwd_hash = hash_password(req.password)
         cur.execute("""
-            INSERT INTO users (company_id, name, email, password_hash, role, active)
-            VALUES (?, ?, ?, ?, 'admin', 1)
-        """, (company_id, admin_name, email, pwd_hash))
+            INSERT INTO users (company_id, home_company_id, name, email, password_hash, role, active)
+            VALUES (?, ?, ?, ?, ?, 'admin', 1)
+        """, (company_id, company_id, admin_name, email, pwd_hash))
         user_id = cur.lastrowid
+        cur.execute("INSERT OR IGNORE INTO user_companies (user_id, company_id, role) VALUES (?, ?, 'admin')",
+                    (user_id, company_id))
 
         # 4. Cria a API Key padrão para integrações
         api_key_str = f"ctx_live_{secrets.token_hex(10)}"
@@ -251,16 +266,23 @@ def register_company(req: CompanyRegisterRequest):
             VALUES (?, 'Bem-vindo ao Cortex ERP!', 'Sua empresa foi cadastrada com sucesso. Comece configurando seus dados e produtos.', 'success', 0, '')
         """, (company_id,))
 
+        # 6. Avisa o dono do sistema que há um cadastro aguardando aprovação
+        for row in cur.execute(
+            "SELECT DISTINCT home_company_id FROM users WHERE is_superadmin = 1 AND active = 1"
+        ).fetchall():
+            cur.execute("""
+                INSERT INTO notifications (company_id, title, message, type, is_read, link)
+                VALUES (?, 'Novo cadastro aguardando aprovação', ?, 'warning', 0, 'superadmin')
+            """, (row[0], f"{company_name} ({email}) se cadastrou e aguarda aprovação no Painel do Sistema."))
+
         conn.commit()
 
         log_audit(conn, action="onboarding", entity="companies", entity_id=company_id, user_id=user_id)
         log_audit(conn, action="create", entity="users", entity_id=user_id, user_id=user_id)
 
-        token = create_access_token({"sub": email, "uid": user_id, "role": "admin"})
-
         return {
-            "access_token": token,
-            "token_type": "bearer",
+            "status": "pendente",
+            "message": "Cadastro recebido! Sua empresa ficará disponível assim que o administrador do sistema aprovar o acesso.",
             "user": {
                 "id": user_id,
                 "company_id": company_id,
@@ -289,8 +311,9 @@ def list_users(current_user: Dict[str, Any] = Depends(get_current_user)):
     conn = get_conn()
     cur = conn.cursor()
     rows = cur.execute(
-        "SELECT id, company_id, name, email, role, active, created_at FROM users WHERE company_id = ? ORDER BY name",
-        (current_user.get("company_id", 1),),
+        "SELECT id, company_id, name, email, role, active, created_at FROM users "
+        "WHERE company_id = ? AND (COALESCE(is_superadmin, 0) = 0 OR ? = 1) ORDER BY name",
+        (current_user.get("company_id", 1), int(current_user.get("is_superadmin") or 0)),
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -304,8 +327,8 @@ def update_user(user_id: int, req: Dict[str, Any] = Body(...), current_user: Dic
     conn = get_conn()
     cur = conn.cursor()
     user = cur.execute(
-        "SELECT id FROM users WHERE id = ? AND company_id = ?",
-        (user_id, current_user.get("company_id", 1)),
+        "SELECT id FROM users WHERE id = ? AND company_id = ? AND (COALESCE(is_superadmin, 0) = 0 OR ? = 1)",
+        (user_id, current_user.get("company_id", 1), int(current_user.get("is_superadmin") or 0)),
     ).fetchone()
     if not user:
         conn.close()
@@ -344,8 +367,8 @@ def delete_user(user_id: int, current_user: Dict[str, Any] = Depends(get_current
     conn = get_conn()
     cur = conn.cursor()
     user = cur.execute(
-        "SELECT id FROM users WHERE id = ? AND company_id = ?",
-        (user_id, current_user.get("company_id", 1)),
+        "SELECT id FROM users WHERE id = ? AND company_id = ? AND (COALESCE(is_superadmin, 0) = 0 OR ? = 1)",
+        (user_id, current_user.get("company_id", 1), int(current_user.get("is_superadmin") or 0)),
     ).fetchone()
     if not user:
         conn.close()
