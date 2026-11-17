@@ -247,16 +247,22 @@
       </div>
 
       <div class="flex items-center gap-2 overflow-x-auto">
-        <button onclick="openFinancialModal('receita')" class="bg-emerald-600 text-white text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 whitespace-nowrap shrink-0">
+        <button onclick="cxOpenTile('dp','funcionarios','rh').then(() => openNewEmpModal())" data-areas="dp rh" class="cx-hdr-act bg-orange-600 text-white text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 whitespace-nowrap shrink-0">
+          <i data-lucide="user-plus" class="w-3.5 h-3.5"></i> Funcionário
+        </button>
+        <button onclick="cxOpenTile('dp','folha','dp')" data-areas="dp rh" class="cx-hdr-act bg-orange-700 text-white text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 whitespace-nowrap shrink-0">
+          <i data-lucide="calculator" class="w-3.5 h-3.5"></i> Folha
+        </button>
+        <button onclick="openFinancialModal('receita')" data-areas="fin gest" class="cx-hdr-act "bg-emerald-600 text-white text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 whitespace-nowrap shrink-0">
           <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i> Receita
         </button>
-        <button onclick="openFinancialModal('despesa')" class="bg-rose-600 text-white text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 whitespace-nowrap shrink-0">
+        <button onclick="openFinancialModal('despesa')" data-areas="fin gest" class="cx-hdr-act "bg-rose-600 text-white text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 whitespace-nowrap shrink-0">
           <i data-lucide="minus-circle" class="w-3.5 h-3.5"></i> Despesa
         </button>
-        <button onclick="openSaleModal('venda')" class="bg-blue-600 text-white text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 whitespace-nowrap shrink-0">
+        <button onclick="openSaleModal('venda')" data-areas="com gest" class="cx-hdr-act "bg-blue-600 text-white text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 whitespace-nowrap shrink-0">
           <i data-lucide="shopping-cart" class="w-3.5 h-3.5"></i> Venda
         </button>
-        <button onclick="openEmitInvoiceModal()" class="bg-indigo-600 text-white text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 whitespace-nowrap">
+        <button onclick="openEmitInvoiceModal()" data-areas="fis com" class="cx-hdr-act "bg-indigo-600 text-white text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-1.5 whitespace-nowrap">
           <i data-lucide="file-check-2" class="w-3.5 h-3.5"></i> NF-e
         </button>
         <button onclick="openNotificationsModal()" title="Central de Notificações" class="cx-iconbtn relative p-2 rounded-xl">

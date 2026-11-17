@@ -97,6 +97,11 @@
     const t = document.getElementById('page-title');
     if (chip) chip.textContent = c.label;
     if (t) t.textContent = title;
+    // Atalhos do cabeçalho: cada área mostra só os seus (data-areas="dp rh" ...).
+    document.querySelectorAll('.cx-hdr-act').forEach((btn) => {
+      const areas = (btn.dataset.areas || '').split(/\s+/);
+      btn.style.display = areas.includes(cat) ? '' : 'none';
+    });
   }
 
   function tabTitle(tab) {
@@ -171,7 +176,7 @@
       try { dpSubTab = sub; } catch (e) { /* dp.js ausente */ }
     }
     pendingCat = cat;
-    window.switchTab(tab);
+    return window.switchTab(tab);
   };
 
   const orig = window.switchTab;
