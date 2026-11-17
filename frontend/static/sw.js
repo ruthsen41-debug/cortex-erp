@@ -1,8 +1,12 @@
-﻿const CACHE_NAME = 'cortex-erp-v7';
+﻿const CACHE_NAME = 'cortex-erp-v8';
 const STATIC_ASSETS = [
   '/',
   '/static/auth.js',
   '/static/theme.css',
+  '/static/mosaic.css',
+  '/static/launcher.js',
+  '/static/intro.css',
+  '/static/intro.js',
   '/static/theme.js',
   '/static/app.js',
   '/static/manifest.json'

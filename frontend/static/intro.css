@@ -1,0 +1,140 @@
+/* ==========================================================================
+   Cortex ERP — tela de apresentação (antes do login) + chave liga/desliga
+   ========================================================================== */
+.cx-intro {
+  position: fixed; inset: 0; z-index: 100000; overflow: hidden;
+  background:
+    radial-gradient(900px 600px at 50% 45%, rgba(47, 143, 230, .22), transparent 65%),
+    radial-gradient(700px 500px at 85% 100%, rgba(124, 77, 204, .22), transparent 60%),
+    radial-gradient(600px 420px at 10% 0%, rgba(34, 211, 238, .14), transparent 60%),
+    #040815;
+  color: #e6ecff; font-family: var(--font-ui);
+  transition: background-color .8s ease, opacity .8s ease;
+}
+.cx-intro-net { position: absolute; inset: 0; width: 100%; height: 100%; }
+.cx-intro-grid {
+  position: absolute; left: -50%; right: -50%; bottom: -10%; height: 55%;
+  background-image:
+    linear-gradient(rgba(47, 143, 230, .22) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(47, 143, 230, .22) 1px, transparent 1px);
+  background-size: 56px 56px;
+  transform: perspective(520px) rotateX(62deg);
+  transform-origin: 50% 0;
+  mask-image: linear-gradient(to top, #000 10%, transparent 90%);
+  -webkit-mask-image: linear-gradient(to top, #000 10%, transparent 90%);
+  animation: cx-grid-run 2.4s linear infinite;
+}
+@keyframes cx-grid-run { from { background-position: 0 0; } to { background-position: 0 56px; } }
+
+.cx-intro-center {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 18px; padding: 16px; text-align: center;
+}
+
+/* logo 2x2 que se monta */
+.cx-intro-logo { display: grid; grid-template-columns: 52px 52px; gap: 8px; margin-bottom: 6px; }
+.cx-intro-sq {
+  width: 52px; height: 52px; border-radius: 12px; background: var(--c);
+  box-shadow: 0 0 28px -4px var(--c), inset 0 1px 0 rgba(255, 255, 255, .25);
+  opacity: 0;
+  animation: cx-sq-in .75s cubic-bezier(.2, .9, .25, 1.2) forwards;
+}
+.cx-intro-sq span, .cx-intro-fly span { opacity: 0; }
+.cx-intro-sq[data-i="0"] { --fx: -46vw; --fy: -40vh; animation-delay: .25s; }
+.cx-intro-sq[data-i="1"] { --fx: 46vw;  --fy: -40vh; animation-delay: .38s; }
+.cx-intro-sq[data-i="2"] { --fx: -46vw; --fy: 40vh;  animation-delay: .51s; }
+.cx-intro-sq[data-i="3"] { --fx: 46vw;  --fy: 40vh;  animation-delay: .64s; }
+@keyframes cx-sq-in {
+  0%   { opacity: 0; transform: translate(var(--fx), var(--fy)) rotate(-180deg) scale(.4); }
+  100% { opacity: 1; transform: none; }
+}
+
+.cx-intro-word {
+  font-family: var(--font-display); font-size: clamp(34px, 6vw, 56px); font-weight: 400;
+  letter-spacing: .02em; color: #fff; opacity: 0;
+  animation: cx-word-in .9s ease forwards 1s;
+}
+.cx-intro-word b { font-weight: 700; }
+@keyframes cx-word-in {
+  from { opacity: 0; letter-spacing: .5em; filter: blur(8px); }
+  to   { opacity: 1; letter-spacing: .02em; filter: none; }
+}
+
+.cx-intro-tag { min-height: 24px; font-size: clamp(14px, 2vw, 18px); color: #9fb3e6; font-weight: 500; }
+.cx-intro-caret {
+  display: inline-block; width: 2px; height: 1.1em; margin-left: 3px; vertical-align: -3px;
+  background: #22d3ee; animation: cx-caret .8s steps(1) infinite;
+}
+@keyframes cx-caret { 50% { opacity: 0; } }
+
+.cx-intro-chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; max-width: 640px; }
+.cx-intro-chips span {
+  padding: 6px 14px; border-radius: 999px; font-size: 12.5px; font-weight: 600;
+  color: #fff; background: color-mix(in srgb, var(--c) 22%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c) 70%, transparent);
+  box-shadow: 0 0 18px -6px var(--c);
+  opacity: 0; transform: translateY(10px);
+  animation: cx-chip-in .5s ease forwards;
+  animation-delay: calc(2s + var(--d) * .1s);
+}
+@keyframes cx-chip-in { to { opacity: 1; transform: none; } }
+
+.cx-intro-load { width: min(340px, 80vw); margin-top: 8px; opacity: 0; animation: cx-chip-in .4s ease forwards 2.05s; }
+.cx-intro-bar { height: 3px; border-radius: 3px; background: rgba(255, 255, 255, .1); overflow: hidden; }
+.cx-intro-bar i {
+  display: block; height: 100%; width: 0; border-radius: 3px;
+  background: linear-gradient(90deg, #f04410, #d97706, #4f9a2a, #2f8fe6, #22d3ee);
+  box-shadow: 0 0 12px #22d3ee; transition: width .12s linear;
+}
+.cx-intro-status {
+  margin-top: 8px; font-family: var(--font-mono); font-size: 11px; letter-spacing: .12em;
+  text-transform: uppercase; color: #6f82b8;
+}
+.cx-intro-status b { color: #22d3ee; font-weight: 600; }
+
+.cx-intro-skip {
+  position: absolute; right: 20px; bottom: 18px; z-index: 2;
+  background: rgba(255, 255, 255, .06); border: 1px solid rgba(255, 255, 255, .16); color: #b8c6ee;
+  padding: 8px 14px; border-radius: 10px; font-size: 12px; cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.cx-intro-skip:hover { background: rgba(255, 255, 255, .14); color: #fff; }
+
+/* saída: o fundo escuro some e revela o login; o texto se dissolve */
+.cx-intro-out { background-color: transparent; pointer-events: none; animation: cx-intro-bg-out .9s ease forwards .1s; }
+.cx-intro-out .cx-intro-word, .cx-intro-out .cx-intro-tag, .cx-intro-out .cx-intro-chips,
+.cx-intro-out .cx-intro-load, .cx-intro-out .cx-intro-skip {
+  transition: opacity .35s ease, transform .35s ease, filter .35s ease;
+  opacity: 0 !important; transform: scale(.96); filter: blur(4px);
+}
+@keyframes cx-intro-bg-out { to { opacity: 0; } }
+.cx-intro-fade { animation: cx-intro-bg-out .35s ease forwards; pointer-events: none; }
+
+/* quadrados voando até os blocos do login (fora do .cx-intro para não sumirem com ele) */
+.cx-intro-fly {
+  position: fixed; z-index: 100001; margin: 0; opacity: 1; animation: none;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-family: var(--font-ui); font-size: 18px; font-weight: 500;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, .16);
+  background: var(--c); pointer-events: none;
+}
+
+@media (max-width: 520px) {
+  .cx-intro-logo { grid-template-columns: 42px 42px; }
+  .cx-intro-sq { width: 42px; height: 42px; }
+  .cx-intro-skip { right: 12px; bottom: 12px; }
+}
+
+/* ---------- chave liga/desliga (Configurações) ---------- */
+.cx-switch { position: relative; display: inline-block; width: 46px; height: 26px; flex-shrink: 0; cursor: pointer; }
+.cx-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.cx-switch span {
+  position: absolute; inset: 0; border-radius: 999px; background: #cbd5e1; transition: background .2s;
+}
+.cx-switch span::after {
+  content: ""; position: absolute; left: 3px; top: 3px; width: 20px; height: 20px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .25); transition: transform .2s;
+}
+.cx-switch input:checked + span { background: var(--mod); }
+.cx-switch input:checked + span::after { transform: translateX(20px); }
+.cx-switch input:focus-visible + span { outline: 2px solid var(--mod); outline-offset: 2px; }

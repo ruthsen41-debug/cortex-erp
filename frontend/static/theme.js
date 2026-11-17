@@ -1,19 +1,5 @@
 // Cortex ERP - comportamento do tema: título da página, padrões do Chart.js e ícone do tema.
 (function () {
-  const TITLES = {
-    dashboard: ['painel', 'Visão Geral'],
-    receivables: ['financeiro', 'Contas a Receber'],
-    payables: ['financeiro', 'Contas a Pagar'],
-    ofx: ['financeiro', 'Conciliação OFX'],
-    crm: ['comercial', 'CRM Funil Kanban'],
-    sales: ['comercial', 'Vendas & Orçamentos'],
-    pdv: ['comercial', 'PDV Frente de Caixa'],
-    os: ['operações', 'Ordens de Serviço & Contratos'],
-    inventory: ['estoque', 'Estoque, XML & Cadastros'],
-    invoices: ['fiscal', 'Emissor NF-e / NFS-e'],
-    reports: ['gestão', 'DRE & Certificado'],
-  };
-
   function applyChartDefaults() {
     if (!window.Chart) return;
     const dark = document.documentElement.classList.contains('dark');
@@ -30,15 +16,6 @@
     Chart.defaults.plugins.tooltip.cornerRadius = 10;
   }
 
-  function setTitle(tab) {
-    const t = TITLES[tab];
-    if (!t) return;
-    const crumb = document.getElementById('page-crumb');
-    const title = document.getElementById('page-title');
-    if (crumb) crumb.textContent = t[0];
-    if (title) title.textContent = t[1];
-  }
-
   function syncThemeIcon() {
     const dark = document.documentElement.classList.contains('dark');
     document.querySelectorAll('button[onclick="toggleDarkMode()"] [data-lucide], button[onclick="toggleDarkMode()"] svg').forEach((el) => {
@@ -50,14 +27,7 @@
     applyChartDefaults();
   }
 
-  // Envolve as funções globais do app sem alterar a lógica delas.
-  const origSwitch = window.switchTab;
-  if (typeof origSwitch === 'function') {
-    window.switchTab = function (tab) {
-      setTitle(tab);
-      return origSwitch.apply(this, arguments);
-    };
-  }
+  // Título e chip de área de cada módulo agora vêm do launcher.js.
   const origToggle = window.toggleDarkMode;
   if (typeof origToggle === 'function') {
     window.toggleDarkMode = function () {
@@ -70,6 +40,5 @@
   applyChartDefaults();
   document.addEventListener('DOMContentLoaded', () => {
     syncThemeIcon();
-    if (typeof currentTab !== 'undefined') setTitle(currentTab);
   });
 })();

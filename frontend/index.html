@@ -12,7 +12,26 @@
   <script>
     // Tema claro por padrão (Bizneo style); vai para escuro se o usuário escolheu antes.
     try { if (localStorage.getItem('cortex_theme') === 'dark') document.documentElement.classList.add('dark'); } catch (e) {}
+    // Apresentação: cobre a página com o fundo escuro desde o primeiro quadro, para a
+    // tela de login não "piscar" antes da animação. O intro.js remove a cobertura.
+    try {
+      var cxWillIntro = !localStorage.getItem('cortex_token')
+        && localStorage.getItem('cortex_intro') !== '0'
+        && sessionStorage.getItem('cortex_intro_seen') !== '1'
+        && !/[?&]reset_token=/.test(location.search)
+        && !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+      if (cxWillIntro) {
+        document.documentElement.classList.add('cx-intro-pending');
+        setTimeout(function () { document.documentElement.classList.remove('cx-intro-pending'); }, 6000);
+      }
+    } catch (e) {}
   </script>
+  <style>
+    /* :not(#cx-none) só aumenta a prioridade, para vencer o fundo do mosaic.css */
+    html.cx-intro-pending, html.cx-intro-pending body:not(#cx-none) { background: #040815 !important; }
+    html.cx-intro-pending body > * { visibility: hidden !important; }
+    html.cx-intro-pending body > .cx-intro { visibility: visible !important; }
+  </style>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
@@ -34,6 +53,8 @@
     }
   </script>
   <link rel="stylesheet" href="/static/theme.css" />
+  <link rel="stylesheet" href="/static/mosaic.css" />
+  <link rel="stylesheet" href="/static/intro.css" />
 </head>
 <body class="h-full flex overflow-hidden">
 
@@ -55,6 +76,10 @@
     </div>
 
     <nav class="flex-1 overflow-y-auto custom-scroll cx-nav">
+
+      <button onclick="switchTab('home')" id="nav-home" class="nav-item" data-label="Tela de Módulos">
+        <i data-lucide="layout-grid" class="nav-icon"></i><span class="nav-label">Tela de Módulos</span>
+      </button>
 
       <div class="cx-section">Visão &amp; IA</div>
       <button onclick="switchTab('dashboard')" id="nav-dashboard" class="nav-item active" data-label="Visão Geral &amp; CFO IA">
@@ -199,9 +224,12 @@
         <button onclick="toggleSidebar()" class="md:hidden p-2 rounded-xl cx-iconbtn shrink-0" aria-label="Menu">
           <i data-lucide="menu" class="w-5 h-5"></i>
         </button>
-        <div class="hidden xl:block shrink-0">
-          <div class="cx-crumb">Cortex / <span id="page-crumb">módulo</span></div>
-          <div id="page-title" class="cx-page-title">Visão Geral</div>
+        <button onclick="switchTab('home')" class="cx-home-btn shrink-0" title="Voltar à tela de módulos">
+          <i data-lucide="layout-grid" class="w-4 h-4"></i><span class="hidden sm:inline">Módulos</span>
+        </button>
+        <div class="hidden lg:flex items-center shrink-0 min-w-0">
+          <span id="cx-cat-chip" class="cx-cat-chip">cortex</span>
+          <div id="page-title" class="cx-page-title truncate">Módulos</div>
         </div>
         <div class="cx-command flex-1 max-w-2xl flex items-center gap-2 rounded-xl px-3 py-1.5">
           <i data-lucide="sparkles" class="w-4 h-4 text-cyan-300 shrink-0"></i>
@@ -250,6 +278,7 @@
   <!-- TOAST DE NOTIFICAÇÕES -->
   <div id="toast-container" class="fixed bottom-5 right-5 z-50 space-y-2"></div>
 
+  <script src="/static/intro.js"></script>
   <script src="/static/auth.js"></script>
   <script src="/static/app.js"></script>
   <script src="/static/accounting.js"></script>
@@ -270,6 +299,7 @@
   <script src="/static/conventions.js"></script>
   <script src="/static/dirbi.js"></script>
   <script src="/static/users.js"></script>
+  <script src="/static/launcher.js"></script>
   <script src="/static/theme.js"></script>
   <script>
     function toggleSidebar() {

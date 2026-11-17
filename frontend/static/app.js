@@ -36,7 +36,7 @@ function applyRoleFilter(role) {
   // Oculta botões de navegação fora do perfil
   document.querySelectorAll('[id^="nav-"]').forEach(el => {
     const tab = el.id.replace('nav-', '');
-    if (!allowed.includes(tab)) el.style.display = 'none';
+    if (tab !== 'home' && !allowed.includes(tab)) el.style.display = 'none';
   });
 
   // Oculta seções da sidebar sem nenhum item visível
@@ -3829,9 +3829,11 @@ async function renderSettings(container) {
           </div>
         `)}
 
+        <div id="cx-intro-setting"></div>
       </div>
     `;
     if (window.lucide) lucide.createIcons();
+    if (typeof cxRenderIntroSetting === 'function') cxRenderIntroSetting();
   } catch (e) {
     container.innerHTML = `<div class="p-6 text-rose-500">Erro ao carregar configurações: ${e.message}</div>`;
   }
@@ -4009,7 +4011,7 @@ document.addEventListener('DOMContentLoaded', () => {
   } catch (e) {}
 
   refreshSidebarCompany();
-  switchTab(getFirstTab(currentUserRole));
+  switchTab('home');
   if (currentUserRole === 'admin') {
     refreshNotificationBadge();
     setInterval(refreshNotificationBadge, 30000);

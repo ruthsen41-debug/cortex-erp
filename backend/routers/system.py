@@ -119,3 +119,53 @@ def get_audit_logs(limit: int = 100, entity: Optional[str] = None, current_user:
     rows = rows_to_dicts(conn.execute(sql, params).fetchall())
     conn.close()
     return rows
+
+
+# ── Tela de apresentação (antes do login) ────────────────────────────────
+# Configuração global da instalação: aparece antes de qualquer login, então
+# só o administrador da empresa principal (company_id 1) pode alterá-la.
+
+def _ensure_settings_table(conn) -> None:
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS system_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+    )
+
+
+def _get_setting(conn, key: str, default: str) -> str:
+    _ensure_settings_table(conn)
+    row = conn.execute("SELECT value FROM system_settings WHERE key = ?", (key,)).fetchone()
+    return row[0] if row else default
+
+
+@router.get("/intro")
+def get_intro_setting():
+    """Público: informa se a tela de apresentação deve aparecer antes do login."""
+    conn = get_conn()
+    try:
+        enabled = _get_setting(conn, "intro_enabled", "1") == "1"
+        conn.commit()
+    finally:
+        conn.close()
+    return {"enabled": enabled}
+
+
+@router.put("/intro")
+def set_intro_setting(payload: Dict[str, Any], current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Liga/desliga a tela de apresentação (apenas admin da empresa principal)."""
+    if current_user.get("role") != "admin" or int(current_user.get("company_id") or 0) != 1:
+        raise HTTPException(status_code=403, detail="Apenas o administrador principal pode alterar a apresentação.")
+    if not isinstance(payload.get("enabled"), bool):
+        raise HTTPException(status_code=422, detail="Informe 'enabled' como true ou false.")
+    value = "1" if payload["enabled"] else "0"
+    conn = get_conn()
+    try:
+        _ensure_settings_table(conn)
+        conn.execute(
+            "INSERT INTO system_settings (key, value) VALUES ('intro_enabled', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (value,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return {"enabled": payload["enabled"]}

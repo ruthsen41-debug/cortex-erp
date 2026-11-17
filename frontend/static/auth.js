@@ -11,16 +11,17 @@
     const url = typeof input === 'string' ? input : (input && input.url) || '';
     return url.startsWith('/api/') || url.startsWith(window.location.origin + '/api/');
   };
-  const isPublicAuthCall = (input) => {
+  const isPublicAuthCall = (input, init) => {
     const url = typeof input === 'string' ? input : (input && input.url) || '';
     return url.includes('/api/auth/login')
       || url.includes('/api/auth/register-company')
       || url.includes('/api/auth/forgot-password')
-      || url.includes('/api/auth/reset-password');
+      || url.includes('/api/auth/reset-password')
+      || (url.includes('/api/system/intro') && !(init && init.method && init.method !== 'GET'));
   };
 
   window.fetch = async function (input, init) {
-    if (!isApiCall(input) || isPublicAuthCall(input)) return nativeFetch(input, init);
+    if (!isApiCall(input) || isPublicAuthCall(input, init)) return nativeFetch(input, init);
     const opts = Object.assign({}, init);
     const headers = new Headers(opts.headers || (input instanceof Request ? input.headers : undefined));
     const token = getToken();
@@ -72,7 +73,25 @@
     const overlay = document.createElement('div');
     overlay.id = 'cortex-login-overlay';
     overlay.className = 'cx-login';
+    const mini = (cat, color, tiles) => `
+      <div class="cx-lrow cx-mini" style="--c:${color}">
+        <div class="cx-lcat"><span>${cat}</span></div>
+        <div class="cx-ltiles">${tiles.map(([n, i]) => `<div class="cx-tile"><i data-lucide="${i}"></i><span>${n}</span></div>`).join('')}</div>
+      </div>`;
     overlay.innerHTML = `
+      <header class="cx-login-top">
+        <div class="cx-login-brand"><span class="cx-logo"></span><b>cortex</b><span>erp</span></div>
+        <nav class="cx-login-nav"><span>DEPTO. PESSOAL</span><span>FISCAL</span><span>CONTÁBIL</span><span>FINANCEIRO</span></nav>
+        <button type="button" id="cortex-top-register" class="cx-login-cta">CADASTRE SUA EMPRESA</button>
+      </header>
+      <div class="cx-login-stage">
+      <div class="cx-login-mosaic" aria-hidden="true">
+        ${mini('dp', '#f04410', [['folha de pagamento', 'calculator'], ['ponto eletrônico', 'calendar-clock'], ['segurança e medicina', 'briefcase-medical']])}
+        ${mini('rh', '#2f8fe6', [['gestão de pessoas', 'users-round'], ['cargos e salários', 'briefcase'], ['benefícios', 'heart-handshake']])}
+        ${mini('fiscal', '#d97706', [['NF-e / NFS-e', 'receipt'], ['SPED / EFD', 'file-code-2'], ['escrita fiscal', 'book-text']])}
+        ${mini('financeiro', '#4f9a2a', [['contas a receber', 'hand-coins'], ['conciliação', 'file-check-2'], ['DRE', 'bar-chart-4']])}
+      </div>
+      <div class="cx-login-forms">
       <form id="cortex-login-form" class="cx-login-card">
         <div class="cx-logo">CX</div>
         <h2>Cortex ERP</h2>
@@ -135,8 +154,34 @@
         <div id="cortex-reset-error" class="cx-login-error"></div>
         <button type="submit">Redefinir Senha</button>
         <div class="cx-login-foot">TOKEN DE USO ÚNICO · ASSINADO</div>
-      </form>`;
+      </form>
+      </div>
+      </div>`;
     document.body.appendChild(overlay);
+
+    // Botão "olho" para mostrar/ocultar a senha em todos os campos de senha.
+    overlay.querySelectorAll('input[type="password"]').forEach((inp) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'cx-pass';
+      inp.parentNode.insertBefore(wrap, inp);
+      wrap.appendChild(inp);
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'cx-pass-eye';
+      btn.setAttribute('aria-label', 'Mostrar senha');
+      btn.innerHTML = '<i data-lucide="eye"></i>';
+      btn.addEventListener('click', () => {
+        const show = inp.type === 'password';
+        inp.type = show ? 'text' : 'password';
+        btn.setAttribute('aria-label', show ? 'Ocultar senha' : 'Mostrar senha');
+        btn.innerHTML = `<i data-lucide="${show ? 'eye-off' : 'eye'}"></i>`;
+        if (window.lucide) lucide.createIcons();
+        inp.focus();
+      });
+      wrap.appendChild(btn);
+    });
+    if (window.lucide) lucide.createIcons();
+    if (typeof window.cxIntro === 'function') window.cxIntro(overlay);
 
     const loginForm    = overlay.querySelector('#cortex-login-form');
     const registerForm = overlay.querySelector('#cortex-register-form');
@@ -149,6 +194,7 @@
     };
 
     overlay.querySelector('#cortex-to-register').addEventListener('click', () => showOnly(registerForm));
+    overlay.querySelector('#cortex-top-register').addEventListener('click', () => showOnly(registerForm));
     overlay.querySelector('#cortex-to-login').addEventListener('click', () => showOnly(loginForm));
     overlay.querySelector('#cortex-to-forgot').addEventListener('click', () => showOnly(forgotForm));
     overlay.querySelector('#cortex-forgot-to-login').addEventListener('click', () => showOnly(loginForm));

@@ -1,0 +1,283 @@
+/* ==========================================================================
+   Cortex ERP — "Mosaico": blocos chapados por área
+   Tela de módulos, login e molduras dos módulos. Carregado depois do theme.css.
+   --mod = cor da área do módulo aberto (definida pelo launcher.js)
+   ========================================================================== */
+:root { --mod: #2f8fe6; }
+
+/* Logo: mosaico 2x2 nas cores das áreas */
+.cx-logo {
+  border-radius: 7px !important;
+  color: transparent !important; font-size: 0 !important;
+  background:
+    linear-gradient(#f04410, #f04410) 0 0 / 46% 46% no-repeat,
+    linear-gradient(#2f8fe6, #2f8fe6) 100% 0 / 46% 46% no-repeat,
+    linear-gradient(#4f9a2a, #4f9a2a) 0 100% / 46% 46% no-repeat,
+    linear-gradient(#d97706, #d97706) 100% 100% / 46% 46% no-repeat !important;
+}
+
+/* Fundo prateado no tema claro */
+html:not(.dark) body {
+  background: radial-gradient(ellipse 1200px 700px at 50% 0%, #ffffff 0%, #eceff3 45%, #d9dee5 100%) fixed !important;
+}
+
+/* ---------- Faixas e blocos ---------- */
+.cx-lrow {
+  display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 12px;
+}
+.cx-lcat {
+  position: relative; background: var(--c); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  min-height: 130px; border-radius: 14px;
+  font-size: 22px; font-weight: 500; letter-spacing: -.01em; text-transform: lowercase;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, .16);
+}
+/* seta (entalhe) apontando para os blocos */
+.cx-lcat::after {
+  content: ""; position: absolute; right: -12px; top: 50%; transform: translateY(-50%);
+  border-left: 12px solid var(--c); border-top: 14px solid transparent; border-bottom: 14px solid transparent;
+}
+.cx-ltiles {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 12px;
+}
+.cx-tile {
+  appearance: none; border: 0; cursor: pointer; font: inherit;
+  background: var(--c); color: #fff; border-radius: 14px;
+  min-height: 130px; padding: 16px 10px 14px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+  text-align: center; font-size: 14px; font-weight: 500; line-height: 1.25;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, .18);
+  box-shadow: 0 2px 6px rgba(15, 23, 42, .16);
+  transition: transform .18s var(--ease), filter .18s var(--ease), box-shadow .18s var(--ease);
+}
+.cx-tile svg { width: 44px; height: 44px; stroke-width: 1.6; flex-shrink: 0; }
+.cx-launch .cx-tile { font-size: 13.5px; padding: 14px 8px 12px; }
+
+/* Tela de módulos: blocos se esticam e preenchem a faixa inteira (sem buracos) */
+.cx-launch .cx-ltiles { display: flex; flex-wrap: wrap; }
+.cx-launch .cx-tile { flex: 1 1 112px; min-width: 0; }
+/* faixas com poucos módulos: bloco largo, ícone ao lado do texto */
+@media (min-width: 900px) {
+  .cx-launch .cx-wide .cx-tile {
+    flex-direction: row; justify-content: flex-start; gap: 16px;
+    padding: 14px 22px; text-align: left; font-size: 15px;
+  }
+  .cx-launch .cx-wide .cx-tile svg { width: 48px; height: 48px; }
+}
+button.cx-tile:hover {
+  filter: brightness(1.09) saturate(1.05); transform: translateY(-3px);
+  box-shadow: 0 10px 22px -6px rgba(15, 23, 42, .35);
+}
+button.cx-tile:active { transform: translateY(0) scale(.98); }
+button.cx-tile:focus-visible { outline: 3px solid #fff; outline-offset: -6px; border-radius: 14px; }
+.cx-tile[hidden], .cx-lrow[hidden] { display: none !important; }
+
+/* ---------- Tela de módulos ---------- */
+.cx-launch { max-width: 1240px; margin: 0 auto; padding: 8px 0 32px; }
+.cx-launch-head {
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  margin-bottom: 22px;
+}
+.cx-launch-kicker { font-size: 13px; color: var(--muted); font-weight: 500; }
+.cx-launch-head h1 {
+  margin: 2px 0 0; font-family: var(--font-display); font-size: 26px; font-weight: 700;
+  letter-spacing: -.02em; color: var(--text);
+}
+.cx-launch-search {
+  display: flex; align-items: center; gap: 8px; width: min(320px, 100%);
+  background: var(--surface-solid); border: 1px solid var(--border-strong); border-radius: 10px;
+  padding: 8px 12px; color: var(--muted);
+}
+.cx-launch-search svg { width: 16px; height: 16px; flex-shrink: 0; }
+.cx-launch-search input {
+  border: 0; outline: 0; background: transparent !important; width: 100%;
+  font-size: 14px; color: var(--text); box-shadow: none !important;
+}
+.cx-launch-search:focus-within { border-color: var(--mod); box-shadow: 0 0 0 3px color-mix(in srgb, var(--mod) 20%, transparent); }
+.cx-launch-grid { display: flex; flex-direction: column; gap: 14px; }
+.cx-launch-grid .cx-tile { animation: cx-rise .45s var(--ease) both; }
+.cx-launch-empty { color: var(--muted); text-align: center; padding: 48px 0; }
+
+@media (max-width: 640px) {
+  .cx-lrow { grid-template-columns: 1fr; gap: 10px; }
+  .cx-lcat { min-height: 44px; font-size: 18px; }
+  .cx-lcat::after {
+    right: auto; left: 50%; top: auto; bottom: -10px; transform: translateX(-50%);
+    border-left: 12px solid transparent; border-right: 12px solid transparent;
+    border-top: 10px solid var(--c); border-bottom: 0;
+  }
+  .cx-ltiles { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
+  .cx-tile { min-height: 112px; font-size: 13px; }
+  .cx-tile svg { width: 38px; height: 38px; }
+  .cx-launch-head h1 { font-size: 22px; }
+}
+
+/* ---------- Cabeçalho: botão Módulos + chip da área ---------- */
+.cx-home-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 12px; border-radius: 10px; cursor: pointer;
+  background: var(--surface-solid); border: 1px solid var(--border-strong); color: var(--text-2);
+  font-size: 12px; font-weight: 600; transition: border-color .15s, color .15s;
+}
+.cx-home-btn:hover { border-color: var(--mod); color: var(--mod); }
+.cx-cat-chip {
+  position: relative; flex-shrink: 0;
+  background: var(--mod); color: #fff; border-radius: 8px;
+  font-size: 13px; font-weight: 600; text-transform: lowercase;
+  padding: 5px 14px 5px 12px; margin-right: 18px;
+  transition: background .25s;
+}
+.cx-cat-chip::after {
+  content: ""; position: absolute; right: -8px; top: 50%; transform: translateY(-50%);
+  border-left: 8px solid var(--mod); border-top: 9px solid transparent; border-bottom: 9px solid transparent;
+  transition: border-color .25s;
+}
+html:not(.dark) .cx-header { box-shadow: inset 0 -3px 0 var(--mod); transition: box-shadow .25s; }
+html.dark .cx-header { box-shadow: inset 0 -2px 0 var(--mod); }
+
+/* ---------- Molduras dos módulos ---------- */
+#main-content [class~="rounded-2xl"], #main-content [class~="rounded-3xl"],
+#modal-box [class~="rounded-2xl"], #modal-box [class~="rounded-3xl"] { border-radius: 14px !important; }
+#main-content [class~="rounded-xl"], #main-content [class~="rounded-lg"],
+#modal-box [class~="rounded-xl"], #modal-box [class~="rounded-lg"],
+.cx-header [class~="rounded-xl"], .cx-header [class~="rounded-lg"] { border-radius: 10px !important; }
+
+/* cartões externos ganham a faixa da área no topo */
+#main-content [class~="rounded-2xl"][class*="border"]:not([class~="rounded-2xl"] [class~="rounded-2xl"]),
+#main-content .card, #main-content .kpi-card {
+  border-top: 3px solid var(--mod) !important;
+}
+.card, .kpi-card, .table, .modal-box { border-radius: 14px !important; }
+#modal-box { border-radius: 16px !important; border-top: 4px solid var(--mod) !important; }
+
+/* botões principais: cor chapada da área */
+button[class~="bg-blue-600"], a[class~="bg-blue-600"],
+button[class~="bg-indigo-600"], a[class~="bg-indigo-600"],
+button[class~="bg-violet-600"], a[class~="bg-violet-600"],
+.btn-primary {
+  background-image: none !important; background-color: var(--mod) !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .2) !important; border-radius: 10px !important;
+}
+button[class~="bg-emerald-600"], a[class~="bg-emerald-600"] {
+  background-image: none !important; background-color: #4f9a2a !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .2) !important;
+}
+button[class~="bg-rose-600"], a[class~="bg-rose-600"] {
+  background-image: none !important; background-color: #dc2626 !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .2) !important;
+}
+.btn { border-radius: 10px; }
+/* atalhos fixos do cabeçalho não mudam de cor com a área */
+.cx-header button[class~="bg-blue-600"], .cx-header button[class~="bg-indigo-600"] { background-color: #1a8fd0 !important; }
+
+/* logo menor na barra lateral compacta (cabe ao lado do botão) */
+.cx-sb-compact .cx-sb-header .cx-logo { width: 22px; height: 22px; margin-right: 4px; }
+
+/* tabelas, abas e foco na cor da área */
+#main-content thead tr { box-shadow: inset 0 -2px 0 var(--mod); }
+.tab-btn.active, html:not(.dark) .tab-btn.active { color: var(--mod); border-bottom-color: var(--mod); }
+#main-content input:focus, #main-content select:focus, #main-content textarea:focus,
+#modal-box input:focus, #modal-box select:focus, #modal-box textarea:focus {
+  border-color: var(--mod) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mod) 18%, transparent) !important;
+}
+
+/* barra lateral: item ativo na cor da área */
+.nav-item.active::before, html:not(.dark) .nav-item.active::before { background: var(--mod); border-radius: 0; }
+html:not(.dark) .nav-item.active { background: color-mix(in srgb, var(--mod) 11%, #fff); color: #111827; }
+html.dark .nav-item.active { background: color-mix(in srgb, var(--mod) 22%, transparent); }
+
+/* ---------- Login ---------- */
+.cx-login {
+  position: fixed; inset: 0; z-index: 99999; overflow-y: auto;
+  display: flex; flex-direction: column;
+  background: radial-gradient(ellipse 1300px 800px at 50% 10%, #ffffff 0%, #e8ebef 45%, #c9d0d8 100%);
+  font-family: var(--font-ui); color: #1f2937;
+}
+.cx-login-top {
+  display: flex; align-items: center; gap: 32px; flex-shrink: 0;
+  padding: 14px clamp(16px, 4vw, 48px); background: #fff;
+  box-shadow: 0 1px 0 #e5e7eb, 0 4px 14px rgba(15, 23, 42, .06);
+}
+.cx-login-brand { display: flex; align-items: center; gap: 10px; font-size: 24px; color: #1e3a6e; letter-spacing: -.02em; }
+.cx-login-brand .cx-logo { width: 34px; height: 34px; }
+.cx-login-brand b { font-weight: 700; }
+.cx-login-brand span:last-child { font-weight: 400; color: #475569; }
+.cx-login-nav { display: flex; gap: 28px; flex: 1; font-size: 13px; font-weight: 500; letter-spacing: .04em; color: #1f2937; }
+.cx-login-cta {
+  border: 0; cursor: pointer; background: #1a8fd0; color: #fff; border-radius: 10px;
+  padding: 11px 18px; font-size: 12px; font-weight: 700; letter-spacing: .03em;
+  transition: filter .15s; margin-left: auto;
+}
+.cx-login-cta:hover { filter: brightness(1.1); }
+
+.cx-login-stage {
+  flex: 1; display: grid; grid-template-columns: minmax(0, 600px) minmax(0, 390px);
+  gap: 48px; align-items: center; justify-content: center;
+  padding: 40px clamp(16px, 4vw, 48px);
+}
+.cx-login-mosaic { display: flex; flex-direction: column; gap: 10px; }
+.cx-mini { grid-template-columns: 110px minmax(0, 1fr); gap: 10px; }
+.cx-mini .cx-lcat { min-height: 100px; font-size: 18px; }
+.cx-mini .cx-ltiles { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.cx-mini .cx-tile { min-height: 100px; font-size: 12.5px; gap: 9px; cursor: default; }
+.cx-mini .cx-tile svg { width: 34px; height: 34px; }
+.cx-login-mosaic .cx-lrow { animation: cx-rise .6s var(--ease) both; }
+.cx-login-mosaic .cx-lrow:nth-child(2) { animation-delay: .08s; }
+.cx-login-mosaic .cx-lrow:nth-child(3) { animation-delay: .16s; }
+.cx-login-mosaic .cx-lrow:nth-child(4) { animation-delay: .24s; }
+
+.cx-login-forms { width: 100%; }
+.cx-login-card {
+  position: relative; width: 100%; box-sizing: border-box;
+  padding: 30px 30px 24px; border-radius: 16px; overflow: hidden;
+  background: #fff; border-top: 5px solid #2f8fe6;
+  box-shadow: 0 18px 50px -18px rgba(15, 23, 42, .35), 0 2px 6px rgba(15, 23, 42, .08);
+  color: #1f2937; animation: cx-pop .5s var(--ease);
+}
+.cx-login-card .cx-logo { display: none; }
+.cx-login-card h2 { font-family: var(--font-display); font-size: 24px; font-weight: 700; letter-spacing: -.02em; margin: 0 0 4px; color: #1e3a6e; }
+.cx-login-card p { margin: 0 0 22px; font-size: 13px; color: #64748b; }
+.cx-login-card label { display: block; font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 6px; }
+.cx-login-card input {
+  width: 100%; box-sizing: border-box; margin-bottom: 16px; padding: 11px 12px;
+  border-radius: 10px; border: 1px solid #cbd5e1; background: #f8fafc; color: #0f172a; font-size: 14px; outline: none;
+  transition: border-color .2s, box-shadow .2s, background .2s;
+}
+/* campo de senha com botão "olho" */
+.cx-pass { position: relative; }
+.cx-pass input { padding-right: 44px; }
+.cx-pass input::-ms-reveal, .cx-pass input::-ms-clear { display: none; }
+.cx-pass-eye {
+  position: absolute; right: 6px; top: 6px; width: 32px; height: 32px;
+  display: grid; place-items: center; border: 0; border-radius: 8px; cursor: pointer;
+  background: transparent; color: #64748b; transition: background .15s, color .15s;
+}
+.cx-pass-eye:hover { background: #e2e8f0; color: #1e3a6e; }
+.cx-pass-eye svg { width: 18px; height: 18px; }
+.cx-login-card input:focus { border-color: #2f8fe6; background: #fff; box-shadow: 0 0 0 3px rgba(47, 143, 230, .18); }
+.cx-login-card button[type="submit"] {
+  width: 100%; padding: 13px; border: 0; border-radius: 10px; cursor: pointer;
+  background: #1a8fd0; color: #fff; font-weight: 700; font-size: 13px; letter-spacing: .06em; text-transform: uppercase;
+  transition: filter .15s;
+}
+.cx-login-card button[type="submit"]:hover { filter: brightness(1.1); }
+.cx-login-card button[type="submit"]:disabled { opacity: .6; cursor: wait; }
+.cx-login-error { color: #dc2626; font-size: 12px; min-height: 16px; margin: -4px 0 10px; }
+.cx-login-foot { margin-top: 18px; text-align: center; font-family: var(--font-mono); font-size: 10px; letter-spacing: .14em; color: #94a3b8; }
+.cx-login .cx-link-btn { color: #1a7fc1; }
+.cx-login .cx-link-btn:hover { color: #0b5d94; }
+#cortex-forgot-msg, #cortex-reset-msg { color: #15803d !important; }
+
+@media (max-width: 1000px) {
+  .cx-login-stage { grid-template-columns: minmax(0, 420px); }
+  .cx-login-mosaic { display: none; }
+  .cx-login-nav { display: none; }
+}
+@media (max-width: 520px) {
+  .cx-login-top { gap: 12px; }
+  .cx-login-cta { padding: 9px 10px; font-size: 10.5px; }
+  .cx-login-brand { font-size: 20px; }
+  .cx-login-stage { padding: 24px 16px; }
+  .cx-login-card { padding: 24px 20px 20px; }
+}
