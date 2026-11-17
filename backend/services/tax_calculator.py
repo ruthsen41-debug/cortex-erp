@@ -1,6 +1,29 @@
 from typing import Dict, Any
 
 
+ICMS_INTERNO_UF: Dict[str, float] = {
+    "AC": 19.0, "AL": 19.0, "AM": 20.0, "AP": 18.0, "BA": 20.5, "CE": 20.0,
+    "DF": 20.0, "ES": 17.0, "GO": 19.0, "MA": 22.0, "MG": 18.0, "MS": 17.0,
+    "MT": 17.0, "PA": 19.0, "PB": 20.0, "PE": 20.5, "PI": 21.0, "PR": 19.5,
+    "RJ": 20.0, "RN": 18.0, "RO": 19.5, "RR": 20.0, "RS": 17.0, "SC": 17.0,
+    "SE": 19.0, "SP": 18.0, "TO": 20.0,
+}
+_SUL_SUDESTE_EXCETO_ES = {"SP", "RJ", "MG", "PR", "RS", "SC"}
+
+
+def get_icms_rate(uf_origem: str, uf_destino: str, importado: bool = False) -> float:
+    """Retorna a alíquota de ICMS conforme regra interestadual do Senado / interna por UF."""
+    orig = (uf_origem or "MT").strip().upper()[:2]
+    dest = (uf_destino or orig).strip().upper()[:2]
+    if orig == dest:
+        return ICMS_INTERNO_UF.get(orig, 17.0)
+    if importado:
+        return 4.0
+    if orig in _SUL_SUDESTE_EXCETO_ES and dest not in _SUL_SUDESTE_EXCETO_ES:
+        return 7.0
+    return 12.0
+
+
 class TaxCalculator:
     """
     Motor Avançado de Tributação e Apuração Fiscal Brasileiro
@@ -22,7 +45,10 @@ class TaxCalculator:
         discount = float(item.get("discount") or 0.0)
         base_calc = max(0.0, subtotal - discount)
 
-        is_interestadual = uf_origem.upper() != uf_destino.upper()
+        orig = (uf_origem or "MT").strip().upper()[:2]
+        dest = (uf_destino or orig).strip().upper()[:2]
+        is_interestadual = orig != dest
+        importado = str(item.get("origin") or "0") in ("1", "2", "3", "8")
 
         result = {
             "subtotal": subtotal,
@@ -82,7 +108,7 @@ class TaxCalculator:
             cofins_val = round(base_calc * (cofins_rate / 100.0), 2)
 
             # ICMS
-            icms_rate = 12.0 if is_interestadual else 17.0
+            icms_rate = float(item.get("icms_rate") or 0.0) or get_icms_rate(orig, dest, importado)
             icms_val = round(base_calc * (icms_rate / 100.0), 2)
 
             result["pis_base"] = base_calc
@@ -109,7 +135,7 @@ class TaxCalculator:
             cofins_val = round(base_calc * (cofins_rate / 100.0), 2)
 
             # ICMS
-            icms_rate = 12.0 if is_interestadual else 17.0
+            icms_rate = float(item.get("icms_rate") or 0.0) or get_icms_rate(orig, dest, importado)
             icms_val = round(base_calc * (icms_rate / 100.0), 2)
 
             result["pis_base"] = base_calc
@@ -128,8 +154,8 @@ class TaxCalculator:
 
         # 3. DIFAL (Diferencial de Alíquota) em vendas interestaduais a consumidor final não contribuinte
         if is_interestadual and is_consumidor_final and not is_contribuinte:
-            aliq_inter = 12.0  # ou 7% dependendo da região
-            aliq_intra_dest = 18.0  # alíquota interna no estado de destino
+            aliq_inter = get_icms_rate(orig, dest, importado)
+            aliq_intra_dest = ICMS_INTERNO_UF.get(dest, 18.0)
             difal_rate = max(0.0, aliq_intra_dest - aliq_inter)
             difal_val = round(base_calc * (difal_rate / 100.0), 2)
             fcp_val = round(base_calc * (1.0 / 100.0), 2)  # 1% FCP

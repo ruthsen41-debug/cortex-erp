@@ -10,6 +10,7 @@ class AccountingAccountCreate(BaseModel):
     parent_code: Optional[str] = None
     accepts_entries: Optional[bool] = True
     description: Optional[str] = ""
+    referencial_code: Optional[str] = ""
     company_id: Optional[int] = 1
 
 
@@ -18,6 +19,7 @@ class AccountingAccountUpdate(BaseModel):
     description: Optional[str] = None
     accepts_entries: Optional[bool] = None
     active: Optional[bool] = None
+    referencial_code: Optional[str] = None
 
 
 class EntryLineCreate(BaseModel):
@@ -25,6 +27,7 @@ class EntryLineCreate(BaseModel):
     debit: Optional[float] = Field(default=0.0, ge=0)
     credit: Optional[float] = Field(default=0.0, ge=0)
     description: Optional[str] = ""
+    cost_center_id: Optional[int] = None
 
     @model_validator(mode="after")
     def check_debit_or_credit(self) -> "EntryLineCreate":

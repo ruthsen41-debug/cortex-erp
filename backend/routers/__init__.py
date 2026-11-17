@@ -44,6 +44,7 @@ from .certificates import router as certificates_router
 from .nfe_manifest import router as nfe_manifest_router
 from .conventions import router as conventions_router
 from .dirbi import router as dirbi_router
+from .fiscal_books import router as fiscal_books_router
 
 all_routers = [
     auth_router,
@@ -92,4 +93,5 @@ all_routers = [
     nfe_manifest_router,
     conventions_router,
     dirbi_router,
+    fiscal_books_router,
 ]

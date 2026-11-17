@@ -1603,6 +1603,13 @@ def migrate_db(conn: sqlite3.Connection) -> None:
             cur.execute("ALTER TABLE companies ADD COLUMN csc_id TEXT DEFAULT ''")
         if "csc_token" not in comp_cols:
             cur.execute("ALTER TABLE companies ADD COLUMN csc_token TEXT DEFAULT ''")
+        for col in (
+            "contador_nome", "contador_cpf", "contador_crc", "contador_cnpj",
+            "contador_cep", "contador_endereco", "contador_numero", "contador_bairro",
+            "contador_telefone", "contador_email", "contador_cod_mun",
+        ):
+            if col not in comp_cols:
+                cur.execute(f"ALTER TABLE companies ADD COLUMN {col} TEXT DEFAULT ''")
 
         # Seed accountant token if empty
         row = cur.execute("SELECT accountant_token FROM companies WHERE id = 1").fetchone()
@@ -2154,6 +2161,104 @@ def migrate_db(conn: sqlite3.Connection) -> None:
     if "tipo" not in run_cols:
         cur.execute("ALTER TABLE payroll_runs ADD COLUMN tipo TEXT DEFAULT 'mensal'")
 
+    # ── Motor de folha por rubricas ────────────────────────────
+    emp_cols = [c["name"] for c in cur.execute("PRAGMA table_info(employees)").fetchall()]
+    if "insalubridade_grau" not in emp_cols:
+        cur.execute("ALTER TABLE employees ADD COLUMN insalubridade_grau TEXT DEFAULT ''")
+    if "periculosidade" not in emp_cols:
+        cur.execute("ALTER TABLE employees ADD COLUMN periculosidade INTEGER DEFAULT 0")
+    if "filhos_sal_familia" not in emp_cols:
+        cur.execute("ALTER TABLE employees ADD COLUMN filhos_sal_familia INTEGER DEFAULT 0")
+
+    rub_cols = [c["name"] for c in cur.execute("PRAGMA table_info(payroll_rubrics)").fetchall()]
+    if "formula" not in rub_cols:
+        cur.execute("ALTER TABLE payroll_rubrics ADD COLUMN formula TEXT DEFAULT ''")
+    if "aplica_todos" not in rub_cols:
+        cur.execute("ALTER TABLE payroll_rubrics ADD COLUMN aplica_todos INTEGER DEFAULT 0")
+
+    item_cols = [c["name"] for c in cur.execute("PRAGMA table_info(payroll_items)").fetchall()]
+    for col in ("base_inss", "base_irrf", "base_fgts"):
+        if col not in item_cols:
+            cur.execute(f"ALTER TABLE payroll_items ADD COLUMN {col} REAL DEFAULT 0")
+    if "avisos" not in item_cols:
+        cur.execute("ALTER TABLE payroll_items ADD COLUMN avisos TEXT DEFAULT ''")
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS payroll_item_lines (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id INTEGER NOT NULL,
+        item_id INTEGER NOT NULL,
+        employee_id INTEGER NOT NULL,
+        codigo TEXT NOT NULL,
+        nome TEXT NOT NULL,
+        tipo TEXT DEFAULT 'provento',
+        referencia TEXT DEFAULT '',
+        valor REAL DEFAULT 0,
+        origem TEXT DEFAULT 'automatico',
+        FOREIGN KEY (run_id) REFERENCES payroll_runs(id) ON DELETE CASCADE
+    )""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS employee_rubrics (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        employee_id INTEGER NOT NULL,
+        rubric_id INTEGER NOT NULL,
+        competencia TEXT DEFAULT '',
+        quantidade REAL DEFAULT 0,
+        valor REAL DEFAULT 0,
+        observacao TEXT DEFAULT '',
+        ativo INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (employee_id) REFERENCES employees(id),
+        FOREIGN KEY (rubric_id) REFERENCES payroll_rubrics(id)
+    )""")
+
+    # 13º, férias e rescisão (cálculos fora da folha mensal)
+    primeira_vez = not cur.execute("PRAGMA table_info(payroll_special)").fetchall()
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS payroll_special (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        employee_id INTEGER NOT NULL,
+        tipo TEXT NOT NULL,
+        referencia TEXT DEFAULT '',
+        competencia TEXT DEFAULT '',
+        data_pagamento TEXT DEFAULT '',
+        data_inicio TEXT DEFAULT '',
+        data_fim TEXT DEFAULT '',
+        dias_gozo REAL DEFAULT 0,
+        dias_abono REAL DEFAULT 0,
+        total_proventos REAL DEFAULT 0,
+        total_descontos REAL DEFAULT 0,
+        liquido REAL DEFAULT 0,
+        inss REAL DEFAULT 0,
+        irrf REAL DEFAULT 0,
+        fgts REAL DEFAULT 0,
+        multa_fgts REAL DEFAULT 0,
+        params TEXT DEFAULT '',
+        avisos TEXT DEFAULT '',
+        status TEXT DEFAULT 'processado',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (employee_id) REFERENCES employees(id)
+    )""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS payroll_special_lines (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        special_id INTEGER NOT NULL,
+        codigo TEXT NOT NULL,
+        nome TEXT NOT NULL,
+        tipo TEXT DEFAULT 'provento',
+        referencia TEXT DEFAULT '',
+        valor REAL DEFAULT 0,
+        grupo TEXT DEFAULT 'mensal',
+        FOREIGN KEY (special_id) REFERENCES payroll_special(id) ON DELETE CASCADE
+    )""")
+    if primeira_vez:
+        # Correção única: o cadastro padrão antigo marcava férias gozadas sem INSS e FGTS.
+        cur.execute("""UPDATE payroll_rubrics SET incide_inss=1, incide_fgts=1, incide_irrf=1
+                       WHERE codigo IN ('0008','0009') AND incide_inss=0 AND incide_fgts=0
+                         AND nome IN ('Férias Gozadas','1/3 Constitucional Férias')""")
+
     # ── LALUR — Livro de Apuração do Lucro Real ───────────────
     cur.execute("""
     CREATE TABLE IF NOT EXISTS lalur_lancamentos (
@@ -2466,7 +2571,262 @@ def migrate_db(conn: sqlite3.Connection) -> None:
         FOREIGN KEY (employee_id) REFERENCES employees(id)
     )""")
 
+    # ── ESCRITA FISCAL (ACUMULADORES, LIVROS E APURAÇÕES) ──────────
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS fiscal_accumulators (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        codigo TEXT NOT NULL,
+        descricao TEXT NOT NULL,
+        tipo TEXT NOT NULL,
+        cfop_padrao TEXT DEFAULT '5102',
+        cst_icms TEXT DEFAULT '00',
+        aliquota_icms REAL DEFAULT 0.0,
+        reduz_base_icms_pct REAL DEFAULT 0.0,
+        tem_icms_st INTEGER DEFAULT 0,
+        mva_pct REAL DEFAULT 0.0,
+        aliquota_ipi REAL DEFAULT 0.0,
+        cst_pis_cofins TEXT DEFAULT '01',
+        aliquota_pis REAL DEFAULT 0.0,
+        aliquota_cofins REAL DEFAULT 0.0,
+        gera_credito_icms INTEGER DEFAULT 0,
+        gera_credito_pis_cofins INTEGER DEFAULT 0,
+        aliquota_iss REAL DEFAULT 0.0,
+        retencao_irrf_pct REAL DEFAULT 0.0,
+        retencao_csrf_pct REAL DEFAULT 0.0,
+        retencao_inss_pct REAL DEFAULT 0.0,
+        retencao_iss INTEGER DEFAULT 0,
+        aliquota_ibs_teste REAL DEFAULT 0.1,
+        aliquota_cbs_teste REAL DEFAULT 0.9,
+        conta_contabil_debito TEXT DEFAULT '1.1.04',
+        conta_contabil_credito TEXT DEFAULT '3.1.01',
+        gera_financeiro INTEGER DEFAULT 1,
+        ativo INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(company_id, codigo)
+    )""")
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS fiscal_entries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        tipo TEXT NOT NULL,
+        accumulator_id INTEGER,
+        accumulator_code TEXT DEFAULT '',
+        modelo TEXT DEFAULT '55',
+        serie TEXT DEFAULT '1',
+        numero TEXT NOT NULL,
+        chave_acesso TEXT DEFAULT '',
+        data_emissao TEXT NOT NULL,
+        data_escrituracao TEXT NOT NULL,
+        competencia TEXT NOT NULL,
+        contact_id INTEGER,
+        participante_nome TEXT DEFAULT '',
+        participante_doc TEXT DEFAULT '',
+        uf_origem TEXT DEFAULT 'MT',
+        uf_destino TEXT DEFAULT 'MT',
+        cfop TEXT DEFAULT '5102',
+        ncm TEXT DEFAULT '',
+        valor_contabil REAL DEFAULT 0.0,
+        valor_produtos REAL DEFAULT 0.0,
+        valor_desconto REAL DEFAULT 0.0,
+        valor_frete REAL DEFAULT 0.0,
+        cst_icms TEXT DEFAULT '00',
+        base_icms REAL DEFAULT 0.0,
+        aliquota_icms REAL DEFAULT 0.0,
+        valor_icms REAL DEFAULT 0.0,
+        base_icms_st REAL DEFAULT 0.0,
+        valor_icms_st REAL DEFAULT 0.0,
+        difal_valor REAL DEFAULT 0.0,
+        fcp_valor REAL DEFAULT 0.0,
+        base_ipi REAL DEFAULT 0.0,
+        aliquota_ipi REAL DEFAULT 0.0,
+        valor_ipi REAL DEFAULT 0.0,
+        cst_pis_cofins TEXT DEFAULT '01',
+        base_pis_cofins REAL DEFAULT 0.0,
+        aliquota_pis REAL DEFAULT 0.0,
+        valor_pis REAL DEFAULT 0.0,
+        aliquota_cofins REAL DEFAULT 0.0,
+        valor_cofins REAL DEFAULT 0.0,
+        base_iss REAL DEFAULT 0.0,
+        aliquota_iss REAL DEFAULT 0.0,
+        valor_iss REAL DEFAULT 0.0,
+        iss_retido REAL DEFAULT 0.0,
+        irrf_retido REAL DEFAULT 0.0,
+        csrf_retido REAL DEFAULT 0.0,
+        inss_retido REAL DEFAULT 0.0,
+        ibs_valor REAL DEFAULT 0.0,
+        cbs_valor REAL DEFAULT 0.0,
+        origem_tipo TEXT DEFAULT 'manual',
+        origem_id INTEGER,
+        accounting_entry_id INTEGER,
+        financial_entry_id INTEGER,
+        status TEXT DEFAULT 'escriturado',
+        observacoes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS fiscal_apurations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        competencia TEXT NOT NULL,
+        imposto TEXT NOT NULL,
+        regime TEXT DEFAULT '',
+        debitos REAL DEFAULT 0.0,
+        creditos REAL DEFAULT 0.0,
+        deducoes REAL DEFAULT 0.0,
+        saldo_credor_anterior REAL DEFAULT 0.0,
+        valor_a_recolher REAL DEFAULT 0.0,
+        saldo_credor_transportar REAL DEFAULT 0.0,
+        codigo_receita TEXT DEFAULT '',
+        vencimento TEXT DEFAULT '',
+        status TEXT DEFAULT 'fechada',
+        financial_entry_id INTEGER,
+        memoria_calculo TEXT DEFAULT '{}',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(company_id, competencia, imposto)
+    )""")
+
+    acc_count = cur.execute("SELECT COUNT(*) FROM fiscal_accumulators WHERE company_id=1").fetchone()[0]
+    if acc_count == 0:
+        _seed_default_accumulators(cur, 1)
+
+    # ── CONTABILIDADE AVANÇADA (ENCERRAMENTO ARE, REFERENCIAL, NOTAS) ─
+    try:
+        aa_cols = [c["name"] for c in cur.execute("PRAGMA table_info(accounting_accounts)").fetchall()]
+        if "referencial_code" not in aa_cols:
+            cur.execute("ALTER TABLE accounting_accounts ADD COLUMN referencial_code TEXT DEFAULT ''")
+    except Exception:
+        pass
+    try:
+        ael_cols = [c["name"] for c in cur.execute("PRAGMA table_info(accounting_entry_lines)").fetchall()]
+        if "cost_center_id" not in ael_cols:
+            cur.execute("ALTER TABLE accounting_entry_lines ADD COLUMN cost_center_id INTEGER")
+    except Exception:
+        pass
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS accounting_periods (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        start_date TEXT NOT NULL,
+        end_date TEXT NOT NULL,
+        status TEXT DEFAULT 'fechado',
+        are_entry_id INTEGER,
+        lucro_prejuizo REAL DEFAULT 0.0,
+        closed_by TEXT DEFAULT '',
+        closed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(company_id, end_date)
+    )""")
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS accounting_standard_histories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        code TEXT NOT NULL,
+        description TEXT NOT NULL,
+        debit_account_code TEXT NOT NULL,
+        credit_account_code TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(company_id, code)
+    )""")
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS accounting_notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        year INTEGER NOT NULL,
+        number INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(company_id, year, number)
+    )""")
+
+    # ── MULTIEMPRESA ESCRITÓRIO, PROCESSOS, CNDs E PATRIMÔNIO AVANÇADO ─
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS user_companies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        company_id INTEGER NOT NULL,
+        role TEXT DEFAULT 'contador',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, company_id)
+    )""")
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS office_processes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        competencia TEXT NOT NULL,
+        obrigacao TEXT NOT NULL,
+        regime TEXT DEFAULT '',
+        vencimento TEXT NOT NULL,
+        responsavel TEXT DEFAULT 'Contador Responsável',
+        status TEXT DEFAULT 'pendente',
+        protocolo_hash TEXT DEFAULT '',
+        entregue_em TEXT DEFAULT '',
+        confirmado_cliente_em TEXT DEFAULT '',
+        observacoes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(company_id, competencia, obrigacao)
+    )""")
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS company_cnds (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER DEFAULT 1,
+        tipo TEXT NOT NULL,
+        orgao_emissor TEXT DEFAULT '',
+        numero_certidao TEXT DEFAULT '',
+        codigo_controle TEXT DEFAULT '',
+        data_emissao TEXT NOT NULL,
+        data_validade TEXT NOT NULL,
+        situacao TEXT DEFAULT 'negativa',
+        observacoes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
+
+    try:
+        fa_cols = [c["name"] for c in cur.execute("PRAGMA table_info(fixed_assets)").fetchall()]
+        for col, ddl in [
+            ("tax_useful_life_months", "INTEGER DEFAULT 60"),
+            ("icms_credit_total", "REAL DEFAULT 0.0"),
+            ("disposal_date", "TEXT DEFAULT ''"),
+            ("disposal_value", "REAL DEFAULT 0.0"),
+            ("disposal_reason", "TEXT DEFAULT ''"),
+            ("capital_gain_loss", "REAL DEFAULT 0.0"),
+        ]:
+            if col not in fa_cols:
+                cur.execute(f"ALTER TABLE fixed_assets ADD COLUMN {col} {ddl}")
+    except Exception:
+        pass
+
     conn.commit()
+
+
+def _seed_default_accumulators(cur, company_id: int) -> None:
+    defaults = [
+        # (codigo, descricao, tipo, cfop, cst_icms, aliq_icms, tem_st, mva, aliq_ipi, cst_pc, aliq_pis, aliq_cof, cred_icms, cred_pc, aliq_iss, ret_irrf, ret_csrf, ret_inss, ret_iss, deb_cta, cred_cta)
+        ("101", "Compra para Comercialização", "entrada", "1102", "00", 17.0, 0, 0.0, 0.0, "50", 1.65, 7.60, 1, 1, 0.0, 0.0, 0.0, 0.0, 0, "1.1.06", "2.1.01"),
+        ("102", "Compra para Uso e Consumo", "entrada", "1556", "90", 0.0, 0, 0.0, 0.0, "70", 0.0, 0.0, 0, 0, 0.0, 0.0, 0.0, 0.0, 0, "5.2.06", "2.1.01"),
+        ("103", "Compra de Ativo Imobilizado", "entrada", "1551", "00", 17.0, 0, 0.0, 0.0, "50", 1.65, 7.60, 1, 1, 0.0, 0.0, 0.0, 0.0, 0, "1.2.03.01", "2.1.01"),
+        ("201", "Venda de Mercadoria", "saida", "5102", "00", 17.0, 0, 0.0, 0.0, "01", 0.65, 3.00, 0, 0, 0.0, 0.0, 0.0, 0.0, 0, "1.1.04", "3.1.01"),
+        ("202", "Venda de Mercadoria com ST", "saida", "5405", "60", 17.0, 1, 40.0, 0.0, "01", 0.65, 3.00, 0, 0, 0.0, 0.0, 0.0, 0.0, 0, "1.1.04", "3.1.01"),
+        ("301", "Prestação de Serviços", "servico_prestado", "5933", "90", 0.0, 0, 0.0, 0.0, "01", 0.65, 3.00, 0, 0, 3.0, 1.5, 4.65, 0.0, 0, "1.1.04", "3.1.02"),
+        ("401", "Serviços Tomados de PJ com Retenção", "servico_tomado", "1933", "90", 0.0, 0, 0.0, 0.0, "50", 1.65, 7.60, 0, 1, 3.0, 1.5, 4.65, 11.0, 1, "5.2.07", "2.1.01"),
+    ]
+    for d in defaults:
+        cur.execute("""
+            INSERT OR IGNORE INTO fiscal_accumulators (
+                company_id, codigo, descricao, tipo, cfop_padrao, cst_icms, aliquota_icms,
+                tem_icms_st, mva_pct, aliquota_ipi, cst_pis_cofins, aliquota_pis, aliquota_cofins,
+                gera_credito_icms, gera_credito_pis_cofins, aliquota_iss,
+                retencao_irrf_pct, retencao_csrf_pct, retencao_inss_pct, retencao_iss,
+                conta_contabil_debito, conta_contabil_credito
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (company_id, *d))
 
 
 def _seed_tax_tables_2025(cur) -> None:
@@ -2493,8 +2853,8 @@ def _seed_default_rubrics(cur, company_id: int) -> None:
         ("0005","Adicional de Insalubridade","provento",1,1,1,1,1,"1070"),
         ("0006","Adicional de Periculosidade","provento",1,1,1,1,1,"1080"),
         ("0007","Comissão","provento",1,1,1,1,1,"1030"),
-        ("0008","Férias Gozadas","provento",0,1,0,0,0,"2000"),
-        ("0009","1/3 Constitucional Férias","provento",0,1,0,0,0,"2010"),
+        ("0008","Férias Gozadas","provento",1,1,1,0,0,"2000"),
+        ("0009","1/3 Constitucional Férias","provento",1,1,1,0,0,"2010"),
         ("0010","13º Salário","provento",1,1,1,0,0,"3000"),
         ("0100","INSS Empregado","desconto",0,0,0,0,0,"9220"),
         ("0101","IRRF","desconto",0,0,0,0,0,"9230"),
@@ -2538,9 +2898,9 @@ def recalculate_bank_balances(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def _seed_accounting_accounts(cur) -> None:
+def _seed_accounting_accounts(cur, company_id: int = 1) -> None:
     """Plano de Contas Contábil padrão seguindo estrutura NBCs/CFC brasileiro."""
-    count = cur.execute("SELECT COUNT(*) FROM accounting_accounts WHERE company_id = 1").fetchone()[0]
+    count = cur.execute("SELECT COUNT(*) FROM accounting_accounts WHERE company_id = ?", (company_id,)).fetchone()[0]
     if count > 0:
         return
 
@@ -2638,8 +2998,8 @@ def _seed_accounting_accounts(cur) -> None:
         cur.execute("""
             INSERT INTO accounting_accounts
                 (company_id, code, name, account_type, nature, parent_code, accepts_entries, active)
-            VALUES (1, ?, ?, ?, ?, ?, ?, 1)
-        """, (a[0], a[1], a[2], a[3], a[4], a[5]))
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+        """, (company_id, a[0], a[1], a[2], a[3], a[4], a[5]))
 
 
 def seed_initial_data(conn: sqlite3.Connection) -> None:

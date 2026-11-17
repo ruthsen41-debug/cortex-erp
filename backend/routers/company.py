@@ -1,19 +1,53 @@
 import base64
+import secrets
 from datetime import date
-from fastapi import APIRouter, Request, Depends
-from typing import Dict, Any
+from fastapi import APIRouter, Request, Depends, HTTPException
+from pydantic import BaseModel
+from typing import Dict, Any, Optional
 
 try:
-    from ..database import get_conn
-    from ..auth import get_current_user, log_audit
+    from ..database import get_conn, _seed_accounting_accounts, _seed_default_rubrics, _seed_default_accumulators
+    from ..auth import get_current_user, log_audit, create_access_token
+    from ..utils import rows_to_dicts
     from ..schemas.company import CompanyUpdate
     from ..services.crypto_vault import CryptoVault
 except ImportError:
-    from database import get_conn
-    from auth import get_current_user, log_audit
+    from database import get_conn, _seed_accounting_accounts, _seed_default_rubrics, _seed_default_accumulators
+    from auth import get_current_user, log_audit, create_access_token
+    from utils import rows_to_dicts
     from services.crypto_vault import CryptoVault
 
 router = APIRouter(prefix="/api/company", tags=["Empresa & Certificado A1"])
+
+
+class CompanyCreatePayload(BaseModel):
+    razao_social: str
+    nome_fantasia: str = ""
+    cnpj: str = ""
+    regime_tributario: str = "simples_nacional"
+    uf: str = "MT"
+    cidade: str = "Cuiabá"
+    inscricao_estadual: str = ""
+    inscricao_municipal: str = ""
+    email: str = ""
+    telefone: str = ""
+    contador_nome: str = ""
+    contador_cpf: str = ""
+    contador_crc: str = ""
+
+
+class CompanySwitchPayload(BaseModel):
+    company_id: int
+
+
+def _sanitize_company(row: Any) -> Dict[str, Any]:
+    comp = dict(row)
+    if comp.get("certificado_senha"):
+        comp["certificado_senha"] = "******"
+        comp["has_certificate"] = True
+    else:
+        comp["has_certificate"] = False
+    return comp
 
 
 @router.get("")
@@ -195,4 +229,126 @@ def get_certificate_status(current_user: Dict[str, Any] = Depends(get_current_us
         "valid_until": val_str,
         "days_remaining": days_left,
         "is_expired": days_left is not None and days_left < 0,
+    }
+
+
+# =====================================================
+# MULTIEMPRESA DE ESCRITÓRIO CONTÁBIL
+# =====================================================
+
+@router.get("/list")
+def list_companies(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Lista todas as empresas acessíveis pelo usuário logado (escritório contábil)."""
+    conn = get_conn()
+    active_id = current_user.get("company_id", 1)
+    role = (current_user.get("role") or "").lower()
+    if role in ("admin", "contador", "contabil"):
+        rows = conn.execute("SELECT * FROM companies ORDER BY id").fetchall()
+    else:
+        rows = conn.execute("""
+            SELECT DISTINCT c.*
+            FROM companies c
+            LEFT JOIN user_companies uc ON uc.company_id = c.id AND uc.user_id = ?
+            WHERE c.id = ? OR uc.user_id IS NOT NULL
+            ORDER BY c.id
+        """, (current_user["id"], active_id)).fetchall()
+    conn.close()
+    return {
+        "active_company_id": active_id,
+        "companies": [_sanitize_company(r) for r in rows],
+    }
+
+
+@router.post("/create", status_code=201)
+def create_client_company(
+    data: CompanyCreatePayload,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """Cria uma nova empresa-cliente no escritório contábil com plano de contas, rubricas e acumuladores."""
+    if not data.razao_social.strip():
+        raise HTTPException(status_code=400, detail="Razão social é obrigatória.")
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO companies (
+            razao_social, nome_fantasia, cnpj, inscricao_estadual, inscricao_municipal,
+            regime_tributario, uf, cidade, email, telefone,
+            contador_nome, contador_cpf, contador_crc,
+            accountant_token, ambiente_fiscal, motor_fiscal
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'homologacao', 'sefaz_direto')
+    """, (
+        data.razao_social.strip(),
+        (data.nome_fantasia or data.razao_social).strip(),
+        data.cnpj.strip(),
+        data.inscricao_estadual.strip(),
+        data.inscricao_municipal.strip(),
+        data.regime_tributario or "simples_nacional",
+        (data.uf or "MT").upper()[:2],
+        data.cidade or "Cuiabá",
+        data.email.strip(),
+        data.telefone.strip(),
+        data.contador_nome.strip(),
+        data.contador_cpf.strip(),
+        data.contador_crc.strip(),
+        secrets.token_urlsafe(16),
+    ))
+    new_company_id = cur.lastrowid
+
+    # Conta bancária inicial, Plano de Contas, Rubricas DP e Acumuladores Fiscais
+    cur.execute("""
+        INSERT INTO bank_accounts (company_id, name, bank_code, bank_name, account_type, initial_balance, current_balance)
+        VALUES (?, 'Caixa Geral', '000', 'Caixa Interno', 'caixa', 0.0, 0.0)
+    """, (new_company_id,))
+    _seed_accounting_accounts(cur, new_company_id)
+    _seed_default_rubrics(cur, new_company_id)
+    _seed_default_accumulators(cur, new_company_id)
+    cur.execute(
+        "INSERT OR IGNORE INTO user_companies (user_id, company_id, role) VALUES (?, ?, ?)",
+        (current_user["id"], new_company_id, current_user.get("role", "contador")),
+    )
+    conn.commit()
+    comp_row = conn.execute("SELECT * FROM companies WHERE id = ?", (new_company_id,)).fetchone()
+    log_audit(conn, action="create", entity="companies", entity_id=new_company_id, user_id=current_user.get("id"), company_id=new_company_id)
+    conn.close()
+    return {"id": new_company_id, "company": _sanitize_company(comp_row)}
+
+
+@router.post("/switch")
+def switch_company(
+    data: CompanySwitchPayload,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """Troca a empresa ativa do usuário logado sem precisar refazer login."""
+    conn = get_conn()
+    target = conn.execute("SELECT * FROM companies WHERE id = ?", (data.company_id,)).fetchone()
+    if not target:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Empresa não encontrada.")
+
+    role = (current_user.get("role") or "").lower()
+    if role not in ("admin", "contador", "contabil") and data.company_id != current_user.get("company_id"):
+        link = conn.execute(
+            "SELECT id FROM user_companies WHERE user_id = ? AND company_id = ?",
+            (current_user["id"], data.company_id),
+        ).fetchone()
+        if not link:
+            conn.close()
+            raise HTTPException(status_code=403, detail="Usuário sem acesso a esta empresa.")
+
+    conn.execute("UPDATE users SET company_id = ? WHERE id = ?", (data.company_id, current_user["id"]))
+    conn.commit()
+    new_token = create_access_token({
+        "sub": current_user["email"],
+        "uid": current_user["id"],
+        "role": current_user["role"],
+        "company_id": data.company_id,
+    })
+    log_audit(conn, action="switch_company", entity="companies", entity_id=data.company_id,
+              user_id=current_user["id"], company_id=data.company_id)
+    conn.close()
+    return {
+        "status": "ok",
+        "company_id": data.company_id,
+        "company": _sanitize_company(target),
+        "access_token": new_token,
     }

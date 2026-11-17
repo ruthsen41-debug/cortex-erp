@@ -22,6 +22,8 @@ class AssetCreate(BaseModel):
     acquisition_date: str
     acquisition_value: float
     useful_life_months: int = 60
+    tax_useful_life_months: Optional[int] = 60
+    icms_credit_total: Optional[float] = 0.0
     residual_value: float = 0.0
     depreciation_method: str = "linear"  # linear, acelerado
     notes: str = ""
@@ -34,10 +36,19 @@ class AssetUpdate(BaseModel):
     acquisition_date: Optional[str] = None
     acquisition_value: Optional[float] = None
     useful_life_months: Optional[int] = None
+    tax_useful_life_months: Optional[int] = None
+    icms_credit_total: Optional[float] = None
     residual_value: Optional[float] = None
     depreciation_method: Optional[str] = None
     status: Optional[str] = None
     notes: Optional[str] = None
+
+
+class AssetDisposalPayload(BaseModel):
+    disposal_date: str
+    disposal_value: float = 0.0
+    disposal_reason: str = "venda"
+    gerar_contabil: bool = True
 
 
 def _calc_monthly_depreciation(acquisition_value: float, residual_value: float,
@@ -80,13 +91,16 @@ def create_asset(body: AssetCreate, current_user: Dict[str, Any] = Depends(get_c
     cur.execute("""
         INSERT INTO fixed_assets
         (company_id, name, description, category, acquisition_date, acquisition_value,
-         useful_life_months, residual_value, depreciation_method, accumulated_depreciation,
+         useful_life_months, tax_useful_life_months, icms_credit_total,
+         residual_value, depreciation_method, accumulated_depreciation,
          net_value, status, notes)
-        VALUES (?,?,?,?,?,?,?,?,?,0,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)
     """, (
         company_id, body.name, body.description, body.category,
         body.acquisition_date, body.acquisition_value,
-        body.useful_life_months, body.residual_value, body.depreciation_method,
+        body.useful_life_months, body.tax_useful_life_months or body.useful_life_months,
+        body.icms_credit_total or 0.0,
+        body.residual_value, body.depreciation_method,
         body.acquisition_value,
         "ativo", body.notes
     ))
@@ -249,3 +263,160 @@ def export_ciap(
         })
     conn.close()
     return {"year": yr, "items": ciap_items, "total_items": len(ciap_items)}
+
+
+@router.post("/api/patrimony/{asset_id}/baixa")
+def dispose_asset(
+    asset_id: int,
+    body: AssetDisposalPayload,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """Baixa total do bem patrimonial com apuração de Ganho/Perda de Capital e lançamento contábil automático."""
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    asset = conn.execute(
+        "SELECT * FROM fixed_assets WHERE id = ? AND company_id = ?", (asset_id, company_id)
+    ).fetchone()
+    if not asset:
+        conn.close()
+        raise HTTPException(404, "Bem patrimonial não encontrado.")
+    a = dict(asset)
+    acq_val = round(float(a.get("acquisition_value") or 0.0), 2)
+    acc_dep = round(float(a.get("accumulated_depreciation") or 0.0), 2)
+    net_val = round(acq_val - acc_dep, 2)
+    disp_val = round(float(body.disposal_value or 0.0), 2)
+    cap_gain_loss = round(disp_val - net_val, 2)
+
+    conn.execute("""
+        UPDATE fixed_assets
+        SET status = 'baixado', net_value = 0.0,
+            disposal_date = ?, disposal_value = ?, disposal_reason = ?, capital_gain_loss = ?
+        WHERE id = ? AND company_id = ?
+    """, (body.disposal_date, disp_val, body.disposal_reason, cap_gain_loss, asset_id, company_id))
+
+    entry_id = None
+    if body.gerar_contabil:
+        def _acc_id(code: str) -> Optional[int]:
+            row = conn.execute(
+                "SELECT id FROM accounting_accounts WHERE company_id = ? AND code = ? AND active = 1 LIMIT 1",
+                (company_id, code),
+            ).fetchone()
+            return row["id"] if row else None
+
+        cta_banco = _acc_id("1.1.02")
+        cta_imob = _acc_id("1.2.03.01")
+        cta_dep = _acc_id("1.2.03.04")
+        cta_ganho = _acc_id("3.3.01")
+        cta_perda = _acc_id("5.5.02")
+        lines = []
+        if disp_val > 0 and cta_banco:
+            lines.append((cta_banco, disp_val, 0.0, f"Valor recebido na baixa de {a['name']}"))
+        if acc_dep > 0 and cta_dep:
+            lines.append((cta_dep, acc_dep, 0.0, f"Baixa depreciação acumulada de {a['name']}"))
+        if acq_val > 0 and cta_imob:
+            lines.append((cta_imob, 0.0, acq_val, f"Baixa custo aquisição de {a['name']}"))
+        if cap_gain_loss > 0 and cta_ganho:
+            lines.append((cta_ganho, 0.0, cap_gain_loss, f"Ganho de capital na baixa de {a['name']}"))
+        elif cap_gain_loss < 0 and cta_perda:
+            lines.append((cta_perda, abs(cap_gain_loss), 0.0, f"Perda de capital na baixa de {a['name']}"))
+
+        tot_d = round(sum(ln[1] for ln in lines), 2)
+        tot_c = round(sum(ln[2] for ln in lines), 2)
+        if len(lines) >= 2 and tot_d > 0 and abs(tot_d - tot_c) < 0.02:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO accounting_entries
+                    (company_id, entry_date, description, document_number, entry_type, origin_id, total_debit, total_credit)
+                VALUES (?, ?, ?, ?, 'automatico', ?, ?, ?)
+            """, (company_id, body.disposal_date, f"Baixa Patrimonial ({body.disposal_reason}): {a['name']}",
+                  f"BAIXA-{asset_id}", asset_id, tot_d, tot_c))
+            entry_id = cur.lastrowid
+            for acc_id, d_val, c_val, desc in lines:
+                cur.execute("""
+                    INSERT INTO accounting_entry_lines (entry_id, account_id, debit, credit, description)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (entry_id, acc_id, d_val, c_val, desc))
+
+    conn.commit()
+    conn.close()
+    return {
+        "id": asset_id,
+        "status": "baixado",
+        "net_value_at_disposal": net_val,
+        "disposal_value": disp_val,
+        "capital_gain_loss": cap_gain_loss,
+        "tipo_resultado": "ganho_capital" if cap_gain_loss >= 0 else "perda_capital",
+        "accounting_entry_id": entry_id,
+    }
+
+
+@router.get("/api/patrimony/depreciacao-paralela")
+def depreciacao_paralela(
+    competencia: Optional[str] = None,
+    gerar_lalur: bool = False,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """Compara Depreciação Societária (CPC 27) vs. Fiscal (IN RFB 1.700) e gera ajuste opcional no LALUR."""
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    comp = competencia or date.today().strftime("%Y-%m")
+    yr = int(comp[:4])
+    assets = rows_to_dicts(conn.execute(
+        "SELECT * FROM fixed_assets WHERE company_id = ? AND status = 'ativo' ORDER BY id",
+        (company_id,),
+    ).fetchall())
+
+    items = []
+    tot_soc = 0.0
+    tot_fis = 0.0
+    for a in assets:
+        acq = float(a.get("acquisition_value") or 0.0)
+        res = float(a.get("residual_value") or 0.0)
+        vida_soc = int(a.get("useful_life_months") or 60)
+        vida_fis = int(a.get("tax_useful_life_months") or vida_soc or 60)
+        dep_soc = round(_calc_monthly_depreciation(acq, res, vida_soc, a.get("depreciation_method", "linear")), 2)
+        dep_fis = round(_calc_monthly_depreciation(acq, 0.0, vida_fis, "linear"), 2)
+        diff = round(dep_soc - dep_fis, 2)
+        tot_soc = round(tot_soc + dep_soc, 2)
+        tot_fis = round(tot_fis + dep_fis, 2)
+        items.append({
+            "asset_id": a["id"],
+            "name": a["name"],
+            "vida_societaria_meses": vida_soc,
+            "vida_fiscal_meses": vida_fis,
+            "depreciacao_societaria": dep_soc,
+            "depreciacao_fiscal": dep_fis,
+            "diferenca_mensal": diff,
+            "efeito_lalur": "adicao" if diff > 0 else ("exclusao" if diff < 0 else "neutro"),
+        })
+
+    diff_liq = round(tot_soc - tot_fis, 2)
+    efeito = "adicao" if diff_liq > 0 else ("exclusao" if diff_liq < 0 else "neutro")
+    lalur_id = None
+    if gerar_lalur and abs(diff_liq) > 0:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO lalur_lancamentos
+                (company_id, tipo, descricao, valor, ano, parte_b, parte_b_descricao)
+            VALUES (?, ?, ?, ?, ?, 1, ?)
+        """, (
+            company_id,
+            efeito,
+            f"Diferença Depreciação Societária (CPC 27) vs Fiscal (IN 1.700) — {comp}",
+            abs(diff_liq),
+            yr,
+            "Controle Depreciação Societária vs Fiscal",
+        ))
+        lalur_id = cur.lastrowid
+        conn.commit()
+    conn.close()
+
+    return {
+        "competencia": comp,
+        "items": items,
+        "total_societaria": tot_soc,
+        "total_fiscal": tot_fis,
+        "diferenca_liquida": diff_liq,
+        "efeito_lalur": efeito,
+        "lalur_lancamento_id": lalur_id,
+    }

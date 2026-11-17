@@ -5,6 +5,7 @@ async function renderHonorarios(container) {
     <div class="page-header">
       <h2>Honorários</h2>
       <div class="btn-group">
+        <button class="btn btn-secondary" onclick="honorariosReajustarAnual()">Reajuste Anual em Lote</button>
         <button class="btn btn-secondary" onclick="honorariosFaturarMes()">Faturar Mês</button>
         <button class="btn btn-primary" onclick="honorariosOpenModal()">+ Contrato</button>
       </div>
@@ -257,4 +258,22 @@ async function honorariosPagar(id) {
   await apiFetch(`/api/honorarios/faturas/${id}/pagar`, { method: 'POST' });
   honorariosLoadFaturas();
   honorariosLoadSummary();
+}
+
+async function honorariosReajustarAnual() {
+  const indice = prompt('Índice de reajuste (IPCA, IGPM ou SALARIO_MINIMO):', 'IPCA');
+  if (!indice) return;
+  const pctStr = prompt(`Percentual de reajuste (${indice}) em %:`, '4.5');
+  if (!pctStr) return;
+  const percentual = parseFloat(pctStr.replace(',', '.'));
+  if (isNaN(percentual)) { alert('Percentual inválido.'); return; }
+  try {
+    const d = await apiFetch('/api/honorarios/reajustar-anual', {
+      method: 'POST',
+      body: JSON.stringify({ indice, percentual }),
+    });
+    alert(`${d.contratos_reajustados} contrato(s) reajustado(s) pelo ${d.indice} (+${d.percentual}%). Impacto no MRR: R$ ${d.impacto_mensal.toFixed(2)}`);
+    honorariosLoadContratos();
+    honorariosLoadSummary();
+  } catch (e) { alert('Erro: ' + e.message); }
 }

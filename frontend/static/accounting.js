@@ -45,14 +45,17 @@ function kpiCard(label, value, sub, icon, color) {
 // ── sub-tabs bar ─────────────────────────────────────────────
 function acctTabs() {
   const tabs = [
-    { id: 'plano',     icon: 'list-tree',       label: 'Plano de Contas' },
-    { id: 'lanctos',   icon: 'book-open',        label: 'Lançamentos' },
-    { id: 'razao',     icon: 'book-marked',      label: 'Razão' },
-    { id: 'balancete', icon: 'table-2',          label: 'Balancete' },
-    { id: 'dre',       icon: 'trending-up',      label: 'DRE' },
-    { id: 'balanco',   icon: 'scale',            label: 'Balanço' },
-    { id: 'diario',    icon: 'scroll-text',      label: 'Livro Diário' },
-    { id: 'ecd',       icon: 'file-down',        label: 'SPED ECD' },
+    { id: 'plano',        icon: 'list-tree',       label: 'Plano de Contas' },
+    { id: 'lanctos',      icon: 'book-open',       label: 'Lançamentos' },
+    { id: 'razao',        icon: 'book-marked',     label: 'Razão' },
+    { id: 'balancete',    icon: 'table-2',         label: 'Balancete' },
+    { id: 'dre',          icon: 'trending-up',     label: 'DRE' },
+    { id: 'balanco',      icon: 'scale',           label: 'Balanço' },
+    { id: 'dfc_dmpl',     icon: 'git-compare',     label: 'DFC & DMPL' },
+    { id: 'encerramento', icon: 'lock',            label: 'Encerramento (ARE)' },
+    { id: 'notas',        icon: 'file-text',       label: 'Notas & Caderno Oficial' },
+    { id: 'diario',       icon: 'scroll-text',     label: 'Livro Diário' },
+    { id: 'ecd',          icon: 'file-down',       label: 'SPED ECD' },
   ];
   return `<div class="flex gap-1 overflow-x-auto pb-1 flex-wrap">
     ${tabs.map(t => `
@@ -108,14 +111,17 @@ async function switchAcctTab(tab, noRebuildTabs = false) {
     <div class="animate-spin rounded-full h-7 w-7 border-b-2 border-indigo-500 mr-3"></div>Carregando...</div>`;
 
   switch (tab) {
-    case 'plano':     await renderPlanoConta(body); break;
-    case 'lanctos':   await renderLancamentos(body); break;
-    case 'razao':     await renderRazao(body); break;
-    case 'balancete': await renderBalancete(body); break;
-    case 'dre':       await renderDre(body); break;
-    case 'balanco':   await renderBalanco(body); break;
-    case 'diario':    await renderLivroDiario(body); break;
-    case 'ecd':       renderEcd(body); break;
+    case 'plano':        await renderPlanoConta(body); break;
+    case 'lanctos':      await renderLancamentos(body); break;
+    case 'razao':        await renderRazao(body); break;
+    case 'balancete':    await renderBalancete(body); break;
+    case 'dre':          await renderDre(body); break;
+    case 'balanco':      await renderBalanco(body); break;
+    case 'dfc_dmpl':     await renderDfcDmpl(body); break;
+    case 'encerramento': await renderEncerramento(body); break;
+    case 'notas':        await renderNotasExplicativas(body); break;
+    case 'diario':       await renderLivroDiario(body); break;
+    case 'ecd':          renderEcd(body); break;
   }
   if (window.lucide) lucide.createIcons();
 }
@@ -134,6 +140,7 @@ async function renderPlanoConta(el) {
       <tr class="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
         <td class="px-4 py-2.5 font-mono text-xs text-slate-400">${a.code}</td>
         <td class="px-4 py-2.5 text-sm font-medium text-slate-800 dark:text-slate-200 pl-${(a.code.split('.').length - 1) * 4}">${a.name}</td>
+        <td class="px-4 py-2.5 font-mono text-xs text-slate-500">${a.referencial_code || '<span class="text-slate-300">—</span>'}</td>
         <td class="px-4 py-2.5">
           ${a.accepts_entries
             ? '<span class="text-[10px] font-bold text-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 px-2 py-0.5 rounded-full">ANALÍTICA</span>'
@@ -165,6 +172,7 @@ async function renderPlanoConta(el) {
             <thead><tr class="text-xs text-slate-400 uppercase border-b border-slate-100 dark:border-slate-800">
               <th class="px-4 py-2 text-left font-semibold">Código</th>
               <th class="px-4 py-2 text-left font-semibold">Nome</th>
+              <th class="px-4 py-2 text-left font-semibold">Plano Referencial RFB</th>
               <th class="px-4 py-2 text-left font-semibold">Tipo</th>
               <th class="px-4 py-2 text-left font-semibold">Natureza</th>
               <th class="px-4 py-2 text-left font-semibold">Status</th>
@@ -176,15 +184,21 @@ async function renderPlanoConta(el) {
   }).join('');
 
   el.innerHTML = `
-    <div class="flex items-center justify-between mb-4">
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
       <div>
         <h2 class="font-bold text-slate-800 dark:text-slate-100 text-lg">Plano de Contas</h2>
-        <p class="text-xs text-slate-400 mt-0.5">${acctAccounts.length} contas cadastradas · Padrão NBC/CFC</p>
+        <p class="text-xs text-slate-400 mt-0.5">${acctAccounts.length} contas cadastradas · Padrão NBC/CFC &amp; Plano Referencial RFB</p>
       </div>
-      <button onclick="openNewAccountModal()"
-        class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-2">
-        <i data-lucide="plus" class="w-3.5 h-3.5"></i> Nova Conta
-      </button>
+      <div class="flex items-center gap-2">
+        <button onclick="autoMapReferencialRfb()"
+          class="border border-indigo-300 dark:border-indigo-700 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 text-xs font-semibold px-3 py-2 rounded-xl flex items-center gap-2">
+          <i data-lucide="wand-2" class="w-3.5 h-3.5"></i> Mapear Plano Referencial RFB
+        </button>
+        <button onclick="openNewAccountModal()"
+          class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-2">
+          <i data-lucide="plus" class="w-3.5 h-3.5"></i> Nova Conta
+        </button>
+      </div>
     </div>
     ${groupHtml}`;
 }
@@ -339,10 +353,10 @@ async function renderLancamentos(el) {
                 <span class="text-emerald-500">${fBRL(e.total_credit)}</span>
               </div>
             </div>
-            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${e.entry_type === 'automatico' ? 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-600' : 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600'}">
-              ${e.entry_type === 'automatico' ? 'AUTO' : 'MANUAL'}
+            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${e.entry_type === 'automatico' ? 'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-600' : e.entry_type === 'encerramento' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600' : 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600'}">
+              ${e.entry_type === 'automatico' ? 'AUTO' : e.entry_type === 'encerramento' ? 'ARE' : 'MANUAL'}
             </span>
-            ${e.entry_type !== 'automatico' ? `<button onclick="event.stopPropagation();deleteEntry(${e.id})"
+            ${e.entry_type === 'manual' ? `<button onclick="event.stopPropagation();deleteEntry(${e.id})"
               class="text-rose-500 hover:text-rose-700 p-1 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-900/20">
               <i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>` : ''}
           </div>
@@ -370,6 +384,10 @@ async function renderLancamentos(el) {
         <button onclick="switchAcctTab('lanctos')"
           class="text-xs font-semibold text-indigo-500 border border-indigo-300 dark:border-indigo-700 px-3 py-1.5 rounded-xl hover:bg-indigo-50 dark:hover:bg-indigo-900/20">
           <i data-lucide="refresh-cw" class="w-3 h-3 inline mr-1"></i>Atualizar
+        </button>
+        <button onclick="openStandardHistoryModal()"
+          class="border border-indigo-300 dark:border-indigo-700 text-indigo-600 dark:text-indigo-400 text-xs font-semibold px-3 py-2 rounded-xl hover:bg-indigo-50 dark:hover:bg-indigo-900/20 flex items-center gap-1.5">
+          <i data-lucide="zap" class="w-3.5 h-3.5"></i>Histórico Padrão
         </button>
         <button onclick="openNewEntryModal()"
           class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-2">
@@ -926,4 +944,272 @@ function downloadEcd() {
     URL.revokeObjectURL(url2);
     showToast('ECD gerado com sucesso!', 'success');
   });
+}
+
+// ── 9. PLANO REFERENCIAL RFB & HISTÓRICOS PADRÃO ────────────
+async function autoMapReferencialRfb() {
+  const r = await fetch('/api/accounting/mapeamento-referencial/auto', { method: 'POST', headers: authHeaders() });
+  const d = await r.json();
+  if (!r.ok) { showToast(d.detail || 'Erro ao mapear.', 'error'); return; }
+  showToast(`${d.mapped_count || 0} contas mapeadas para o Plano Referencial RFB!`, 'success');
+  const r2 = await fetch('/api/accounting/accounts?active_only=false', { headers: authHeaders() });
+  acctAccounts = await r2.json();
+  await switchAcctTab('plano');
+}
+
+async function openStandardHistoryModal() {
+  const hists = await fetch('/api/accounting/historicos-padrao', { headers: authHeaders() }).then(r => r.json()).catch(() => []);
+  const opts = (hists || []).map(h =>
+    `<option value="${h.code}">[${h.code}] ${h.description} (D: ${h.debit_account_code} / C: ${h.credit_account_code})</option>`).join('');
+  openModal(`
+    <div class="bg-white dark:bg-slate-900 rounded-2xl p-6">
+      <h3 class="font-bold text-slate-800 dark:text-slate-100 mb-4 text-lg flex items-center gap-2">
+        <i data-lucide="zap" class="w-5 h-5 text-indigo-500"></i> Lançamento por Histórico Padrão
+      </h3>
+      <div class="space-y-3">
+        <div><label class="label">Histórico Padrão *</label>
+          <select id="sh-code" class="input w-full">${opts}</select></div>
+        <div class="grid grid-cols-2 gap-3">
+          <div><label class="label">Data *</label>
+            <input id="sh-date" type="date" class="input w-full" value="${acctPeriod.end}"/></div>
+          <div><label class="label">Valor (R$) *</label>
+            <input id="sh-amount" type="number" step="0.01" class="input w-full" placeholder="0,00"/></div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div><label class="label">Complemento</label>
+            <input id="sh-comp" class="input w-full" placeholder="Ex: NF 123"/></div>
+          <div><label class="label">Nº Documento</label>
+            <input id="sh-doc" class="input w-full" placeholder="DOC-01"/></div>
+        </div>
+      </div>
+      <div class="flex gap-3 mt-5 justify-end">
+        <button onclick="closeModal()" class="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-sm">Cancelar</button>
+        <button onclick="saveEntryFromStandard()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-5 py-2 rounded-xl">Lançar</button>
+      </div>
+    </div>`);
+}
+
+async function saveEntryFromStandard() {
+  const payload = {
+    history_code: document.getElementById('sh-code').value,
+    entry_date: document.getElementById('sh-date').value,
+    amount: parseFloat(document.getElementById('sh-amount').value) || 0,
+    complement: document.getElementById('sh-comp').value.trim(),
+    document_number: document.getElementById('sh-doc').value.trim(),
+  };
+  const r = await fetch('/api/accounting/entries/from-standard', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(payload),
+  });
+  const d = await r.json();
+  if (!r.ok) { showToast(d.detail || 'Erro ao lançar.', 'error'); return; }
+  showToast('Lançamento por histórico padrão criado!', 'success');
+  closeModal();
+  await switchAcctTab('lanctos');
+}
+
+// ── 10. DFC & DMPL ───────────────────────────────────────────
+async function renderDfcDmpl(el) {
+  const start = acctPeriod.start, end = acctPeriod.end;
+  const year = parseInt((end || '').slice(0, 4)) || new Date().getFullYear();
+  let dfc, dmpl;
+  try {
+    [dfc, dmpl] = await Promise.all([
+      fetch(`/api/accounting/dfc?start_date=${start}&end_date=${end}`, { headers: authHeaders() }).then(r => r.json()),
+      fetch(`/api/accounting/dmpl?year=${year}`, { headers: authHeaders() }).then(r => r.json()),
+    ]);
+  } catch { el.innerHTML = '<div class="text-rose-500 p-4">Erro ao carregar DFC / DMPL.</div>'; return; }
+
+  const md = dfc.metodo_direto || {};
+  const mi = dfc.metodo_indireto || {};
+  const dmplRows = (dmpl.rows || []).map((r, idx) => `
+    <tr class="border-b border-slate-100 dark:border-slate-800 ${idx === 0 || idx === dmpl.rows.length - 1 ? 'font-bold bg-slate-50/70 dark:bg-slate-800/40' : ''}">
+      <td class="px-4 py-2 text-sm text-slate-700 dark:text-slate-200">${r.descricao}</td>
+      <td class="px-4 py-2 text-right font-mono text-sm">${fBRL(r.capital_social)}</td>
+      <td class="px-4 py-2 text-right font-mono text-sm">${fBRL(r.reservas_lucros)}</td>
+      <td class="px-4 py-2 text-right font-mono text-sm">${fBRL(r.lucros_prejuizos_acumulados)}</td>
+      <td class="px-4 py-2 text-right font-mono text-sm text-indigo-500">${fBRL(r.total_pl)}</td>
+    </tr>`).join('');
+
+  el.innerHTML = `
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+      <div>
+        <h2 class="font-bold text-slate-800 dark:text-slate-100 text-lg">DFC (Direto / Indireto) &amp; DMPL / DLPA</h2>
+        <p class="text-xs text-slate-400 mt-0.5">CPC 03 (NBC TG 03) · Exercício ${year}</p>
+      </div>
+      <div class="flex items-center gap-3">${periodBar()}
+        <button onclick="switchAcctTab('dfc_dmpl')" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-2 rounded-xl">Atualizar</button>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
+      ${card(`<div class="p-5">
+        <div class="font-bold text-sm text-slate-800 dark:text-slate-100 mb-3">DFC — Método Direto</div>
+        <div class="space-y-1.5 text-sm">
+          <div class="flex justify-between"><span>Recebimentos de Clientes</span><span class="font-mono text-emerald-500">${fBRL(md.recebimentos_clientes)}</span></div>
+          <div class="flex justify-between"><span>(-) Pagamentos a Fornecedores</span><span class="font-mono text-rose-500">${fBRL(-md.pagamentos_fornecedores)}</span></div>
+          <div class="flex justify-between"><span>(-) Pessoal e Tributos</span><span class="font-mono text-rose-500">${fBRL(-md.pagamentos_pessoal_impostos)}</span></div>
+          <div class="flex justify-between"><span>(-) Despesas Operacionais</span><span class="font-mono text-rose-500">${fBRL(-md.pagamentos_despesas_operacionais)}</span></div>
+          <div class="flex justify-between font-bold border-t border-slate-200 dark:border-slate-700 pt-1.5"><span>Caixa Líquido Operacional</span><span class="font-mono">${fBRL(md.caixa_liquido_operacional)}</span></div>
+          <div class="flex justify-between"><span>Atividades de Investimento</span><span class="font-mono">${fBRL(md.atividades_investimento)}</span></div>
+          <div class="flex justify-between"><span>Atividades de Financiamento</span><span class="font-mono">${fBRL(md.atividades_financiamento)}</span></div>
+          <div class="flex justify-between font-bold border-t-2 border-slate-300 dark:border-slate-600 pt-2"><span>Saldo Final de Caixa</span><span class="font-mono text-indigo-500">${fBRL(dfc.saldo_final_caixa)}</span></div>
+        </div>
+      </div>`)}
+
+      ${card(`<div class="p-5">
+        <div class="font-bold text-sm text-slate-800 dark:text-slate-100 mb-3">DFC — Método Indireto</div>
+        <div class="space-y-1.5 text-sm">
+          <div class="flex justify-between"><span>Lucro Líquido do Exercício</span><span class="font-mono">${fBRL(mi.lucro_liquido_exercicio)}</span></div>
+          <div class="flex justify-between"><span>(+) Depreciação e Amortização</span><span class="font-mono">${fBRL(mi.depreciacao_amortizacao)}</span></div>
+          <div class="flex justify-between"><span>(+/-) Variação em Clientes</span><span class="font-mono">${fBRL(mi.variacao_clientes)}</span></div>
+          <div class="flex justify-between"><span>(+/-) Variação em Estoques</span><span class="font-mono">${fBRL(mi.variacao_estoques)}</span></div>
+          <div class="flex justify-between"><span>(+/-) Variação em Fornecedores/Obrigações</span><span class="font-mono">${fBRL(mi.variacao_fornecedores_obrigacoes)}</span></div>
+          <div class="flex justify-between font-bold border-t border-slate-200 dark:border-slate-700 pt-1.5"><span>Caixa Líquido Operacional</span><span class="font-mono">${fBRL(mi.caixa_liquido_operacional)}</span></div>
+          <div class="flex justify-between"><span>Atividades de Investimento</span><span class="font-mono">${fBRL(mi.atividades_investimento)}</span></div>
+          <div class="flex justify-between"><span>Atividades de Financiamento</span><span class="font-mono">${fBRL(mi.atividades_financiamento)}</span></div>
+          <div class="flex justify-between font-bold border-t-2 border-slate-300 dark:border-slate-600 pt-2"><span>Variação Líquida de Caixa</span><span class="font-mono text-indigo-500">${fBRL(mi.variacao_liquida_caixa)}</span></div>
+        </div>
+      </div>`)}
+    </div>
+
+    ${card(`
+      <div class="px-4 py-3 border-b border-slate-100 dark:border-slate-800 font-bold text-sm text-slate-800 dark:text-slate-100">
+        DMPL — Demonstração das Mutações do Patrimônio Líquido (${year}) &amp; DLPA
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead><tr class="text-xs text-slate-400 uppercase border-b border-slate-100 dark:border-slate-800">
+            <th class="px-4 py-2 text-left">Movimentação</th>
+            <th class="px-4 py-2 text-right">Capital Social</th>
+            <th class="px-4 py-2 text-right">Reservas</th>
+            <th class="px-4 py-2 text-right">Lucros/Prej. Acum.</th>
+            <th class="px-4 py-2 text-right">Total PL</th>
+          </tr></thead>
+          <tbody>${dmplRows}</tbody>
+        </table>
+      </div>`)}`;
+}
+
+// ── 11. ENCERRAMENTO (ARE) & BLOQUEIO DE PERÍODO ─────────────
+async function renderEncerramento(el) {
+  const periods = await fetch('/api/accounting/periods', { headers: authHeaders() }).then(r => r.json()).catch(() => []);
+  const rows = (periods || []).map(p => `
+    <tr class="border-b border-slate-100 dark:border-slate-800 text-sm">
+      <td class="px-4 py-2.5 font-mono text-xs">${fDate(p.start_date)} a ${fDate(p.end_date)}</td>
+      <td class="px-4 py-2.5 font-mono font-bold ${p.lucro_prejuizo >= 0 ? 'text-emerald-500' : 'text-rose-500'}">${fBRL(p.lucro_prejuizo)}</td>
+      <td class="px-4 py-2.5"><span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${p.status === 'fechado' ? 'bg-rose-100 text-rose-600 dark:bg-rose-900/30' : 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30'}">${p.status}</span></td>
+      <td class="px-4 py-2.5 text-xs text-slate-400">${p.closed_by || '—'}</td>
+      <td class="px-4 py-2.5 text-right">
+        ${p.status === 'fechado' ? `<button onclick="execReopenPeriod(${p.id})" class="text-xs text-amber-500 hover:underline font-semibold">Reabrir Período</button>` : '<span class="text-xs text-slate-400">Aberto</span>'}
+      </td>
+    </tr>`).join('') || '<tr><td colspan="5" class="text-center text-slate-400 py-6 text-sm">Nenhum encerramento registrado.</td></tr>';
+
+  el.innerHTML = `
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <div>${card(`<div class="p-5 space-y-3">
+        <h3 class="font-bold text-slate-800 dark:text-slate-100 text-base flex items-center gap-2">
+          <i data-lucide="lock" class="w-4 h-4 text-rose-500"></i> Encerramento de Exercício (ARE)
+        </h3>
+        <p class="text-xs text-slate-400">Transfere receitas, custos e despesas para <strong>2.3.03 (Lucros ou Prejuízos Acumulados)</strong> e bloqueia lançamentos retroativos.</p>
+        <div><label class="label">Início</label><input id="are-start" type="date" class="input w-full" value="${acctPeriod.start}"/></div>
+        <div><label class="label">Fim (Data-base)</label><input id="are-end" type="date" class="input w-full" value="${acctPeriod.end}"/></div>
+        <div class="flex items-center gap-2">
+          <input id="are-lock" type="checkbox" checked class="w-4 h-4 accent-indigo-600"/>
+          <label for="are-lock" class="text-xs text-slate-600 dark:text-slate-300">Bloquear período contra alterações</label>
+        </div>
+        <button onclick="execClosePeriod()" class="w-full bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold py-2.5 rounded-xl">
+          Executar Encerramento (ARE)
+        </button>
+      </div>`)}</div>
+
+      <div class="lg:col-span-2">${card(`
+        <div class="px-4 py-3 border-b border-slate-100 dark:border-slate-800 font-bold text-sm text-slate-800 dark:text-slate-100">
+          Períodos Encerrados e Bloqueios
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead><tr class="text-xs text-slate-400 uppercase border-b border-slate-100 dark:border-slate-800">
+              <th class="px-4 py-2 text-left">Período</th>
+              <th class="px-4 py-2 text-left">Resultado (ARE)</th>
+              <th class="px-4 py-2 text-left">Status</th>
+              <th class="px-4 py-2 text-left">Responsável</th>
+              <th class="px-4 py-2 text-right">Ações</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`)}</div>
+    </div>`;
+}
+
+async function execClosePeriod() {
+  const payload = {
+    start_date: document.getElementById('are-start').value,
+    end_date: document.getElementById('are-end').value,
+    lock_period: document.getElementById('are-lock').checked,
+  };
+  const r = await fetch('/api/accounting/close-period', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(payload),
+  });
+  const d = await r.json();
+  if (!r.ok) { showToast(d.detail || 'Erro no encerramento.', 'error'); return; }
+  showToast(`Exercício encerrado! Resultado ARE: ${fBRL(d.lucro_prejuizo)}`, 'success');
+  await switchAcctTab('encerramento');
+}
+
+async function execReopenPeriod(id) {
+  if (!confirm('Reabrir este período e estornar o lançamento ARE?')) return;
+  const r = await fetch(`/api/accounting/reopen-period/${id}`, { method: 'POST', headers: authHeaders() });
+  const d = await r.json();
+  if (!r.ok) { showToast(d.detail || 'Erro ao reabrir.', 'error'); return; }
+  showToast('Período reaberto com sucesso.', 'success');
+  await switchAcctTab('encerramento');
+}
+
+// ── 12. NOTAS EXPLICATIVAS & CADERNO OFICIAL ──────────────────
+async function renderNotasExplicativas(el) {
+  const year = parseInt((acctPeriod.end || '').slice(0, 4)) || new Date().getFullYear();
+  const notas = await fetch(`/api/accounting/notas-explicativas?year=${year}`, { headers: authHeaders() }).then(r => r.json()).catch(() => []);
+  const listHtml = (notas || []).map(n => `
+    <div class="mb-3">${card(`<div class="p-4 space-y-2">
+      <div class="flex items-center justify-between gap-2">
+        <span class="font-bold text-sm text-indigo-500">Nota ${n.number}</span>
+        <button onclick="saveNotaExplicativa(${year}, ${n.number})" class="text-xs bg-indigo-600 text-white px-3 py-1 rounded-lg font-semibold">Salvar Nota</button>
+      </div>
+      <input id="nota-title-${n.number}" class="input w-full text-sm font-semibold" value="${(n.title || '').replace(/"/g, '&quot;')}"/>
+      <textarea id="nota-content-${n.number}" class="input w-full text-xs" rows="3">${n.content || ''}</textarea>
+    </div>`)}</div>`).join('');
+
+  el.innerHTML = `
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+      <div>
+        <h2 class="font-bold text-slate-800 dark:text-slate-100 text-lg">Notas Explicativas &amp; Caderno Contábil (${year})</h2>
+        <p class="text-xs text-slate-400 mt-0.5">NBC TG 26 / CPC PME · BP, DRE, DFC, DMPL, Notas e Carta de Responsabilidade</p>
+      </div>
+      <button onclick="openRelatorioOficial(${year})"
+        class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-2">
+        <i data-lucide="printer" class="w-3.5 h-3.5"></i> Abrir Caderno Completo (HTML / PDF)
+      </button>
+    </div>
+    ${listHtml}`;
+}
+
+async function saveNotaExplicativa(year, number) {
+  const title = document.getElementById(`nota-title-${number}`).value.trim();
+  const content = document.getElementById(`nota-content-${number}`).value.trim();
+  const r = await fetch('/api/accounting/notas-explicativas', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ year, number, title, content }),
+  });
+  if (!r.ok) { showToast('Erro ao salvar nota.', 'error'); return; }
+  showToast(`Nota ${number} salva!`, 'success');
+}
+
+async function openRelatorioOficial(year) {
+  const r = await fetch(`/api/accounting/relatorio-demonstracoes-html?year=${year}`, { headers: authHeaders() });
+  if (!r.ok) { showToast('Erro ao gerar caderno.', 'error'); return; }
+  const html = await r.text();
+  const win = window.open('', '_blank');
+  if (win) { win.document.write(html); win.document.close(); }
 }

@@ -1,7 +1,7 @@
 import secrets
 from datetime import date
 import calendar
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 
@@ -52,6 +52,12 @@ class HonorarioFatura(BaseModel):
     competencia: str
     valor: float
     descricao: str = ""
+
+
+class ReajusteAnualPayload(BaseModel):
+    indice: str = "IPCA"
+    percentual: float
+    contrato_ids: Optional[List[int]] = None
 
 
 @router.get("/api/honorarios/contratos")
@@ -143,9 +149,11 @@ def list_faturas(
 @router.post("/api/honorarios/faturar-mes")
 def faturar_mes(
     competencia: Optional[str] = None,
+    valor_por_funcionario: float = 0.0,
+    valor_por_rescisao: float = 0.0,
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    """Gera faturas para todos os contratos ativos no mês."""
+    """Gera faturas para todos os contratos ativos no mês, somando eventos extras (folha/rescisão) quando configurados."""
     conn = get_conn()
     company_id = current_user.get("company_id", 1)
     comp = competencia or date.today().strftime("%Y-%m")
@@ -153,6 +161,20 @@ def faturar_mes(
     contratos = rows_to_dicts(conn.execute(
         "SELECT * FROM honorarios_contratos WHERE company_id=? AND ativo=1", (company_id,)
     ).fetchall())
+
+    qtd_funcs = 0
+    qtd_resc = 0
+    if valor_por_funcionario > 0:
+        qtd_funcs = conn.execute(
+            "SELECT COUNT(*) FROM employees WHERE company_id=? AND active=1", (company_id,)
+        ).fetchone()[0] or 0
+    if valor_por_rescisao > 0:
+        qtd_resc = conn.execute(
+            "SELECT COUNT(*) FROM payroll_special WHERE company_id=? AND tipo='rescisao' AND competencia=? AND COALESCE(status,'')!='cancelado'",
+            (company_id, comp),
+        ).fetchone()[0] or 0
+    extra_eventos = round(qtd_funcs * float(valor_por_funcionario or 0) + qtd_resc * float(valor_por_rescisao or 0), 2)
+
     created = 0
     for c in contratos:
         # Check if already has fatura for this competencia
@@ -164,16 +186,60 @@ def faturar_mes(
             continue
         last_day = calendar.monthrange(year, month)[1]
         due_date = f"{year}-{month:02d}-{min(c['dia_vencimento'], last_day):02d}"
+        valor_fatura = round(float(c["valor_mensal"] or 0) + extra_eventos, 2)
+        desc_extra = f" (+ {qtd_funcs} func. / {qtd_resc} resc.)" if extra_eventos > 0 else ""
         conn.execute("""
             INSERT INTO honorarios_faturas
             (company_id, contrato_id, competencia, valor, due_date, status, descricao)
             VALUES (?,?,?,?,?,?,?)
-        """, (company_id, c["id"], comp, c["valor_mensal"], due_date,
-              "pendente", f"Honorários {comp} — {c['client_name']}"))
+        """, (company_id, c["id"], comp, valor_fatura, due_date,
+              "pendente", f"Honorários {comp} — {c['client_name']}{desc_extra}"))
         created += 1
     conn.commit()
     conn.close()
-    return {"competencia": comp, "faturas_geradas": created, "message": f"{created} fatura(s) gerada(s) para {comp}."}
+    return {
+        "competencia": comp,
+        "faturas_geradas": created,
+        "extra_por_eventos": extra_eventos,
+        "funcionarios_ativos": qtd_funcs,
+        "rescisoes_competencia": qtd_resc,
+        "message": f"{created} fatura(s) gerada(s) para {comp}.",
+    }
+
+
+@router.post("/api/honorarios/reajustar-anual")
+def reajustar_anual(
+    body: ReajusteAnualPayload,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """Reajusta em lote o valor mensal dos contratos ativos de honorários por índice (IPCA, IGPM, Salário Mínimo)."""
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    q = "SELECT id, valor_mensal FROM honorarios_contratos WHERE company_id = ? AND ativo = 1"
+    params: List[Any] = [company_id]
+    if body.contrato_ids:
+        placeholders = ",".join("?" for _ in body.contrato_ids)
+        q += f" AND id IN ({placeholders})"
+        params.extend(body.contrato_ids)
+
+    contratos = rows_to_dicts(conn.execute(q, params).fetchall())
+    mrr_anterior = round(sum(float(c["valor_mensal"] or 0) for c in contratos), 2)
+    fator = 1.0 + (float(body.percentual or 0.0) / 100.0)
+    mrr_novo = 0.0
+    for c in contratos:
+        novo_val = round(float(c["valor_mensal"] or 0) * fator, 2)
+        mrr_novo = round(mrr_novo + novo_val, 2)
+        conn.execute("UPDATE honorarios_contratos SET valor_mensal = ? WHERE id = ?", (novo_val, c["id"]))
+    conn.commit()
+    conn.close()
+    return {
+        "contratos_reajustados": len(contratos),
+        "indice": body.indice,
+        "percentual": body.percentual,
+        "mrr_anterior": mrr_anterior,
+        "mrr_novo": mrr_novo,
+        "impacto_mensal": round(mrr_novo - mrr_anterior, 2),
+    }
 
 
 @router.post("/api/honorarios/faturas/{fid}/pagar")

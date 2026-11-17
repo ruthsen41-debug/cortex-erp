@@ -126,7 +126,7 @@ async function switchDpTab(tab, noRebuildTabs = false) {
     case 'folha':        await renderFolha(body); break;
     case 'decimo':       await renderDecimo(body); break;
     case 'ferias':       await renderFerias(body); break;
-    case 'rescisao':     renderRescisao(body); break;
+    case 'rescisao':     await renderRescisao(body); break;
     case 'esocial':      renderEsocial(body); break;
     case 'afastamentos': await renderAfastamentos(body); break;
     case 'atestados':    await renderAtestados(body); break;
@@ -570,6 +570,59 @@ async function empPhotoRemove(empId) {
   } catch { alert('Erro de conexão.'); }
 }
 
+// ── Helpers do motor de rubricas ─────────────────────────────
+function _dpEsc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// Tabela de holerite: uma linha por rubrica (proventos x descontos), bases e avisos.
+function _dpHoleriteTable(h) {
+  const lines = h.lines || [];
+  const mov = lines.filter(l => l.tipo !== 'informativo');
+  const info = lines.filter(l => l.tipo === 'informativo');
+  const rows = mov.map(l => `
+    <tr class="border-b border-slate-100 dark:border-slate-800">
+      <td class="px-3 py-2 text-xs font-mono text-slate-400">${_dpEsc(l.codigo)}</td>
+      <td class="px-3 py-2 text-sm text-slate-700 dark:text-slate-200">${_dpEsc(l.nome)}${l.origem === 'lancamento' ? ' <span class="text-[10px] text-indigo-500">(lançamento)</span>' : ''}</td>
+      <td class="px-3 py-2 text-xs text-slate-500 text-right">${_dpEsc(l.referencia || '')}</td>
+      <td class="px-3 py-2 text-sm text-right text-emerald-600">${l.tipo === 'provento' ? fBRL2(l.valor) : ''}</td>
+      <td class="px-3 py-2 text-sm text-right text-rose-500">${l.tipo === 'desconto' ? fBRL2(l.valor) : ''}</td>
+    </tr>`).join('');
+  const totProv = h.gross_salary ?? mov.filter(l => l.tipo === 'provento').reduce((s, l) => s + Number(l.valor || 0), 0);
+  const totDesc = h.total_descontos ?? (Number(h.inss || 0) + Number(h.irrf || 0) + Number(h.vt_discount || 0) + Number(h.other_discounts || 0));
+  const avisos = Array.isArray(h.avisos) ? h.avisos : String(h.avisos || '').split(' | ').filter(Boolean);
+  return `
+    <div class="overflow-x-auto">
+      <table class="w-full max-w-2xl">
+        <thead><tr class="text-[11px] text-slate-400 uppercase border-b border-slate-200 dark:border-slate-700">
+          <th class="px-3 py-2 text-left font-semibold">Cód.</th>
+          <th class="px-3 py-2 text-left font-semibold">Rubrica</th>
+          <th class="px-3 py-2 text-right font-semibold">Ref.</th>
+          <th class="px-3 py-2 text-right font-semibold">Proventos</th>
+          <th class="px-3 py-2 text-right font-semibold">Descontos</th>
+        </tr></thead>
+        <tbody>${rows || '<tr><td colspan="5" class="px-3 py-4 text-xs text-slate-400 text-center">Folha processada antes do motor de rubricas: sem detalhamento por rubrica.</td></tr>'}</tbody>
+        <tfoot>
+          <tr class="border-t-2 border-slate-300 dark:border-slate-600">
+            <td colspan="3" class="px-3 py-2 text-xs font-bold text-slate-600 dark:text-slate-300">Totais</td>
+            <td class="px-3 py-2 text-sm font-bold text-right text-emerald-600">${fBRL2(totProv)}</td>
+            <td class="px-3 py-2 text-sm font-bold text-right text-rose-500">${fBRL2(totDesc)}</td>
+          </tr>
+          <tr>
+            <td colspan="4" class="px-3 py-2 text-sm font-bold text-slate-800 dark:text-slate-100">Líquido a receber</td>
+            <td class="px-3 py-2 text-lg font-extrabold text-right ${Number(h.net_salary) < 0 ? 'text-rose-600' : 'text-emerald-600'}">${fBRL2(h.net_salary)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+    <div class="flex flex-wrap gap-4 text-xs text-slate-500 mt-2">
+      ${info.map(l => `<span>${_dpEsc(l.nome)}: <strong class="text-blue-600">${fBRL2(l.valor)}</strong></span>`).join('')}
+      ${!info.length && h.fgts != null ? `<span>FGTS (encargo empresa): <strong class="text-blue-600">${fBRL2(h.fgts)}</strong></span>` : ''}
+    </div>
+    ${avisos.length ? `<div class="mt-3 text-xs text-amber-700 bg-amber-50 dark:bg-amber-900/20 dark:text-amber-300 rounded-lg px-3 py-2">
+      ${avisos.map(a => `<div>⚠ ${_dpEsc(a)}</div>`).join('')}</div>` : ''}`;
+}
+
 // ── 2. HOLERITE ──────────────────────────────────────────────
 async function renderHolerite(el) {
   const ativos = dpEmployees.filter(e => e.active);
@@ -579,7 +632,7 @@ async function renderHolerite(el) {
   el.innerHTML = `
     <div class="mb-6">
       <h2 class="font-bold text-slate-800 dark:text-slate-100 text-lg mb-1">Simulação de Holerite</h2>
-      <p class="text-xs text-slate-400">Calcula INSS, IRRF e líquido com base no salário cadastrado.</p>
+      <p class="text-xs text-slate-400">Calcula pelo motor de rubricas: ponto, afastamentos, benefícios, adiantamentos, pensão e lançamentos da competência.</p>
     </div>
     ${card2(`
       <div class="p-5">
@@ -589,6 +642,10 @@ async function renderHolerite(el) {
             <select id="hol-emp" class="${inputCls()} min-w-[220px]">
               <option value="">Selecione...</option>${opts}
             </select>
+          </div>
+          <div>
+            ${labelCls('Competência')}
+            <input id="hol-comp" type="month" value="${new Date().toISOString().slice(0,7)}" class="${inputCls()}">
           </div>
           <button onclick="calcHolerite()"
             class="bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold px-5 py-2 rounded-xl flex items-center gap-2">
@@ -605,40 +662,30 @@ async function calcHolerite() {
   const res = document.getElementById('hol-result');
   res.innerHTML = '<div class="text-xs text-slate-400">Calculando...</div>';
   try {
-    const r = await fetch(`/api/dp/employees/${empId}/holerite-preview`, { headers: authHeaders() });
-    if (!r.ok) { res.innerHTML = '<div class="text-xs text-rose-500">Erro ao calcular.</div>'; return; }
-    const { employee: emp, holerite: h } = await r.json();
-
-    const linhas = [
-      ['Salário Bruto', h.gross_salary, 'text-slate-700 dark:text-slate-200'],
-      ['INSS', -h.inss, 'text-rose-500'],
-      ['IRRF', -h.irrf, 'text-rose-500'],
-      ['VT Desconto', -(h.vt_discount || 0), 'text-orange-500'],
-      ['Outros Descontos', -(h.other_discounts || 0), 'text-orange-500'],
-    ];
-    const rows = linhas.filter(([, v]) => v !== 0).map(([label, val, cls]) => `
-      <tr class="border-b border-slate-100 dark:border-slate-800">
-        <td class="px-4 py-2.5 text-sm text-slate-600 dark:text-slate-300">${label}</td>
-        <td class="px-4 py-2.5 text-sm font-semibold text-right ${cls}">${val < 0 ? '-' : ''}${fBRL2(Math.abs(val))}</td>
-      </tr>`).join('');
+    const comp = document.getElementById('hol-comp')?.value || '';
+    const r = await fetch(`/api/dp/employees/${empId}/holerite-preview${comp ? `?competencia=${comp}` : ''}`, { headers: authHeaders() });
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      res.innerHTML = `<div class="text-xs text-rose-500">${_dpEsc(e.detail || 'Erro ao calcular.')}</div>`;
+      return;
+    }
+    const { employee: emp, holerite: h, tabelas } = await r.json();
+    const origem = Object.entries((tabelas && tabelas.origem) || {})
+      .filter(([k]) => ['inss', 'irrf', 'salario_minimo'].includes(k))
+      .map(([k, v]) => `${k.toUpperCase().replace('_', ' ')}: ${v}`).join(' · ');
 
     res.innerHTML = `
       <div class="mb-3 text-sm font-semibold text-slate-700 dark:text-slate-200">
-        ${emp.name} — ${emp.role || ''}
+        ${_dpEsc(emp.name)} — ${_dpEsc(emp.role || '')}
         ${emp.is_prolabore ? '<span class="ml-2 text-[10px] font-bold text-purple-500 bg-purple-50 dark:bg-purple-900/30 px-1.5 py-0.5 rounded-full">PRÓ-LABORE</span>' : ''}
       </div>
-      <table class="w-full max-w-sm mb-4">
-        <tbody>${rows}</tbody>
-        <tfoot><tr class="border-t-2 border-slate-300 dark:border-slate-600">
-          <td class="px-4 py-3 text-sm font-bold text-slate-800 dark:text-slate-100">Salário Líquido</td>
-          <td class="px-4 py-3 text-lg font-extrabold text-emerald-600 text-right">${fBRL2(h.net_salary)}</td>
-        </tr></tfoot>
-      </table>
-      <div class="flex gap-4 text-xs text-slate-500">
-        <span>FGTS (encargo empresa): <strong class="text-blue-600">${fBRL2(h.fgts)}</strong></span>
+      ${_dpHoleriteTable(h)}
+      <div class="flex flex-wrap gap-4 text-xs text-slate-500 mt-3">
+        <span>${h.dias_pagos} dia(s) pagos</span>
         <span>${emp.dependents || 0} dependente(s)</span>
         <span>VT nominal: ${fBRL2(emp.vt_monthly)}</span>
-      </div>`;
+      </div>
+      ${origem ? `<div class="text-[11px] text-slate-400 mt-2">Tabelas usadas — ${_dpEsc(origem)}</div>` : ''}`;
     if (window.lucide) lucide.createIcons();
   } catch { res.innerHTML = '<div class="text-xs text-rose-500">Erro de conexão.</div>'; }
 }
@@ -678,6 +725,9 @@ async function renderFolha(el) {
       <div class="flex items-center gap-3">
         <input id="folha-comp" type="month" value="${defComp}"
           class="text-xs border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-500">
+        <label class="text-xs text-slate-500 flex items-center gap-1.5" title="Desmarque se as horas extras do ponto vão para o banco de horas">
+          <input id="folha-he" type="checkbox" checked> Pagar horas extras do ponto
+        </label>
         <button onclick="processFolha()"
           class="bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-2">
           <i data-lucide="play" class="w-3.5 h-3.5"></i> Processar Folha
@@ -710,12 +760,32 @@ async function processFolha() {
   try {
     const r = await fetch('/api/dp/payroll/run', {
       method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ competence: comp }),
+      body: JSON.stringify({ competence: comp, pagar_horas_extras: document.getElementById('folha-he')?.checked !== false }),
     });
     if (!r.ok) { const e = await r.json(); alert(e.detail || 'Erro.'); return; }
+    const out = await r.json();
+    await renderFolha(document.getElementById('dp-body'));
+    if (window.lucide) lucide.createIcons();
+    if (out.run) await openFolhaDetail(out.run.id);
+    if (out.avisos && out.avisos.length) {
+      alert('Folha processada com avisos:\n\n' + out.avisos.map(a => `${a.employee_name}: ${a.avisos.join('; ')}`).join('\n'));
+    }
+  } catch { alert('Erro de conexão.'); }
+}
+
+async function deleteFolha(runId, comp) {
+  if (!confirm(`Excluir a folha ${comp}? Os holerites desta competência serão apagados e ela poderá ser processada de novo.`)) return;
+  try {
+    const r = await fetch(`/api/dp/payroll/${runId}`, { method: 'DELETE', headers: authHeaders() });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); alert(e.detail || 'Erro ao excluir.'); return; }
     await renderFolha(document.getElementById('dp-body'));
     if (window.lucide) lucide.createIcons();
   } catch { alert('Erro de conexão.'); }
+}
+
+function toggleFolhaLines(itemId) {
+  const row = document.getElementById(`folha-lines-${itemId}`);
+  if (row) row.classList.toggle('hidden');
 }
 
 async function openFolhaDetail(runId) {
@@ -726,8 +796,8 @@ async function openFolhaDetail(runId) {
     const r = await fetch(`/api/dp/payroll/${runId}`, { headers: authHeaders() });
     const { run, items } = await r.json();
     const rows = items.map(item => `
-      <tr class="border-b border-slate-100 dark:border-slate-800">
-        <td class="px-4 py-2.5 text-sm font-medium text-slate-800 dark:text-slate-200">${item.employee_name}</td>
+      <tr class="border-b border-slate-100 dark:border-slate-800 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40" onclick="toggleFolhaLines(${item.id})" title="Clique para ver as rubricas">
+        <td class="px-4 py-2.5 text-sm font-medium text-slate-800 dark:text-slate-200">${_dpEsc(item.employee_name)}${item.avisos ? ' <span title="Há avisos neste holerite">⚠</span>' : ''}</td>
         <td class="px-4 py-2.5 text-xs text-slate-500">${item.role || '-'}</td>
         <td class="px-4 py-2.5 text-xs font-mono text-slate-400">${item.matricula || '-'}</td>
         <td class="px-4 py-2.5 text-sm text-slate-600 dark:text-slate-300">${fBRL2(item.gross_salary)}</td>
@@ -736,15 +806,29 @@ async function openFolhaDetail(runId) {
         <td class="px-4 py-2.5 text-sm font-bold text-emerald-600">${fBRL2(item.net_salary)}</td>
         <td class="px-4 py-2.5 text-xs text-blue-500">${fBRL2(item.fgts)}</td>
         <td class="px-4 py-2.5 text-right">
-          <button onclick="downloadS1200(${runId},${item.employee_id})"
+          <button onclick="event.stopPropagation();downloadS1200(${runId},${item.employee_id})"
             class="text-xs text-indigo-500 hover:underline">S-1200</button>
         </td>
+      </tr>
+      <tr id="folha-lines-${item.id}" class="hidden bg-slate-50/60 dark:bg-slate-900/40">
+        <td colspan="9" class="px-6 py-4">${_dpHoleriteTable(item)}</td>
       </tr>`).join('');
 
     area.innerHTML = `
-      <h3 class="font-bold text-slate-700 dark:text-slate-200 mb-3">
-        Folha ${run.competence} — ${items.length} funcionário(s)
-      </h3>
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-bold text-slate-700 dark:text-slate-200">
+          Folha ${run.competence} — ${items.length} funcionário(s)
+          <span class="text-xs font-normal text-slate-400 ml-2">clique no funcionário para ver as rubricas</span>
+        </h3>
+        <div class="flex items-center gap-2">
+          <button onclick="downloadCnab240(${run.id},'${run.competence}')"
+            class="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 px-3 py-1.5 rounded-lg">
+            CNAB 240 (.REM)
+          </button>
+          ${run.status !== 'fechado' ? `<button onclick="deleteFolha(${run.id},'${run.competence}')"
+            class="text-xs text-rose-600 border border-rose-200 hover:bg-rose-50 px-3 py-1.5 rounded-lg">Excluir para reprocessar</button>` : ''}
+        </div>
+      </div>
       ${card2(`
         <div class="overflow-x-auto">
           <table class="w-full text-sm">
@@ -767,223 +851,660 @@ async function openFolhaDetail(runId) {
   } catch { area.innerHTML = '<div class="text-xs text-rose-500 p-4">Erro ao carregar detalhe.</div>'; }
 }
 
+function toggleEspecialLines(prefix, id) {
+  const row = document.getElementById(`${prefix}-lines-${id}`);
+  if (row) row.classList.toggle('hidden');
+}
+
+async function deleteEspecial(id, label, reloadTab) {
+  if (!confirm(`Excluir ${label}?`)) return;
+  try {
+    const r = await fetch(`/api/dp/especiais/${id}`, { method: 'DELETE', headers: authHeaders() });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { alert(d.detail || 'Erro ao excluir.'); return; }
+    if (d.funcionario_reativado) {
+      const er = await fetch('/api/dp/employees?active_only=false', { headers: authHeaders() });
+      if (er.ok) dpEmployees = await er.json();
+    }
+    await switchDpTab(reloadTab);
+  } catch { alert('Erro de conexão.'); }
+}
+
 // ── 4. 13º SALÁRIO ───────────────────────────────────────────
-async function renderDecimo(el) {
-  const opts = dpEmployees.filter(e => e.active)
-    .map(e => `<option value="${e.id}">${e.name} — ${fBRL2(e.salary)}</option>`).join('');
+async function renderDecimo(el, anoParam) {
+  const ano = parseInt(anoParam || new Date().getFullYear(), 10);
+  const opts = dpEmployees.filter(e => e.active && !e.is_prolabore)
+    .map(e => `<option value="${e.id}">${_dpEsc(e.name)} — ${fBRL2(e.salary)}</option>`).join('');
+
+  let regs = [];
+  try {
+    const r = await fetch(`/api/dp/decimo?ano=${ano}`, { headers: authHeaders() });
+    if (r.ok) regs = await r.json();
+  } catch { regs = []; }
+
+  const regRows = regs.map(r => `
+    <tr class="border-b border-slate-100 dark:border-slate-800 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40"
+        onclick="toggleEspecialLines('dec-reg', ${r.id})" title="Clique para ver as rubricas">
+      <td class="px-4 py-2.5 text-sm font-medium text-slate-800 dark:text-slate-200">${_dpEsc(r.employee_name)}</td>
+      <td class="px-4 py-2.5 text-xs">
+        <span class="px-2 py-0.5 rounded-full font-semibold ${r.tipo === 'decimo_1' ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/20' : 'bg-violet-50 text-violet-600 dark:bg-violet-900/20'}">
+          ${r.tipo === 'decimo_1' ? '1ª Parcela' : '2ª Parcela'}
+        </span>
+      </td>
+      <td class="px-4 py-2.5 text-xs text-slate-500">${_dpEsc(r.competencia || '-')}</td>
+      <td class="px-4 py-2.5 text-xs text-slate-400">${fDate2(r.data_pagamento)}</td>
+      <td class="px-4 py-2.5 text-sm text-slate-700 dark:text-slate-300">${fBRL2(r.total_proventos)}</td>
+      <td class="px-4 py-2.5 text-sm text-rose-500">-${fBRL2(r.total_descontos)}</td>
+      <td class="px-4 py-2.5 text-sm font-bold text-emerald-600">${fBRL2(r.liquido)}</td>
+      <td class="px-4 py-2.5 text-xs text-blue-600">${fBRL2(r.fgts)}</td>
+      <td class="px-4 py-2.5 text-right whitespace-nowrap">
+        <button onclick="event.stopPropagation();openEspecialDocumento(${r.id})"
+          class="text-xs text-violet-600 hover:underline mr-2">Recibo</button>
+        <button onclick="event.stopPropagation();deleteEspecial(${r.id}, 'este cálculo de 13º', 'decimo')"
+          class="text-xs text-rose-500 hover:underline">Excluir</button>
+      </td>
+    </tr>
+    <tr id="dec-reg-lines-${r.id}" class="hidden bg-slate-50/60 dark:bg-slate-900/40">
+      <td colspan="9" class="px-6 py-4">${_dpHoleriteTable(r)}</td>
+    </tr>`).join('');
 
   el.innerHTML = `
     <div class="mb-6">
-      <h2 class="font-bold text-slate-800 dark:text-slate-100 text-lg mb-1">Cálculo de 13º Salário</h2>
-      <p class="text-xs text-slate-400">Proporcional pelo número de meses trabalhados no ano.</p>
+      <h2 class="font-bold text-slate-800 dark:text-slate-100 text-lg mb-1">13º Salário</h2>
+      <p class="text-xs text-slate-400">Calcula 1ª e 2ª parcela pelo motor de rubricas com avos proporcionais, médias de variáveis e encargos.</p>
     </div>
     ${card2(`
       <div class="p-5">
-        <div class="flex flex-wrap gap-4 items-end mb-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-5 items-end">
           <div>
-            ${labelCls('Funcionário')}
-            <select id="dec-emp" class="${inputCls()} min-w-[220px]">
-              <option value="">Selecione...</option>${opts}
+            ${labelCls('Ano')}
+            <input id="dec-ano" type="number" min="2000" max="2100" value="${ano}"
+              onchange="renderDecimo(document.getElementById('dp-body'), this.value)" class="${inputCls()}">
+          </div>
+          <div>
+            ${labelCls('Parcela')}
+            <select id="dec-parcela" class="${inputCls()}">
+              <option value="1">1ª Parcela (Adiantamento até 30/11)</option>
+              <option value="2">2ª Parcela (Quitação até 20/12)</option>
             </select>
           </div>
           <div>
-            ${labelCls('Meses trabalhados')}
-            <input id="dec-meses" type="number" min="1" max="12" value="12" class="${inputCls()} w-28">
+            ${labelCls('Funcionário')}
+            <select id="dec-emp" class="${inputCls()}">
+              <option value="">Todos os ativos</option>${opts}
+            </select>
           </div>
-          <button onclick="calcDecimo()"
-            class="bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold px-5 py-2 rounded-xl flex items-center gap-2">
-            <i data-lucide="calculator" class="w-3.5 h-3.5"></i> Calcular
-          </button>
+          <div>
+            ${labelCls('Data de Pagamento (opcional)')}
+            <input id="dec-pagto" type="date" class="${inputCls()}">
+          </div>
+          <div class="flex gap-2">
+            <button onclick="previewDecimo()"
+              class="flex-1 bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 text-white text-xs font-semibold px-3 py-2 rounded-xl flex items-center justify-center gap-1.5">
+              <i data-lucide="calculator" class="w-3.5 h-3.5"></i> Simular
+            </button>
+            <button onclick="runDecimo()"
+              class="flex-1 bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold px-3 py-2 rounded-xl flex items-center justify-center gap-1.5">
+              <i data-lucide="play" class="w-3.5 h-3.5"></i> Gravar
+            </button>
+          </div>
         </div>
         <div id="dec-result"></div>
-      </div>`)}`;
+      </div>`)}
+    <div class="mt-6">
+      <h3 class="font-bold text-slate-700 dark:text-slate-200 text-sm mb-3">
+        13º Gravados em ${ano} (${regs.length})
+        <span class="text-xs font-normal text-slate-400 ml-2">clique na linha para detalhar as rubricas</span>
+      </h3>
+      ${card2(`
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead><tr class="text-xs text-slate-400 uppercase border-b border-slate-100 dark:border-slate-800">
+              <th class="px-4 py-2 text-left font-semibold">Funcionário</th>
+              <th class="px-4 py-2 text-left font-semibold">Parcela</th>
+              <th class="px-4 py-2 text-left font-semibold">Competência</th>
+              <th class="px-4 py-2 text-left font-semibold">Pagamento</th>
+              <th class="px-4 py-2 text-left font-semibold">Proventos</th>
+              <th class="px-4 py-2 text-left font-semibold">Descontos</th>
+              <th class="px-4 py-2 text-left font-semibold">Líquido</th>
+              <th class="px-4 py-2 text-left font-semibold">FGTS</th>
+              <th class="px-4 py-2 text-right font-semibold">Ação</th>
+            </tr></thead>
+            <tbody>${regRows || '<tr><td colspan="9" class="px-4 py-6 text-center text-slate-400 text-xs">Nenhum 13º gravado para este ano.</td></tr>'}</tbody>
+          </table>
+        </div>`)}
+    </div>`;
+  if (window.lucide) lucide.createIcons();
 }
 
-async function calcDecimo() {
+function _decimoPayload() {
+  const ano = parseInt(document.getElementById('dec-ano')?.value || new Date().getFullYear(), 10);
+  const parcela = parseInt(document.getElementById('dec-parcela')?.value || '1', 10);
   const empId = document.getElementById('dec-emp')?.value;
-  const meses = document.getElementById('dec-meses')?.value || 12;
-  if (!empId) { alert('Selecione um funcionário.'); return; }
+  const pagto = document.getElementById('dec-pagto')?.value || '';
+  return {
+    ano,
+    parcela,
+    employee_ids: empId ? [parseInt(empId, 10)] : null,
+    data_pagamento: pagto,
+  };
+}
+
+async function previewDecimo() {
+  const body = _decimoPayload();
   const res = document.getElementById('dec-result');
-  res.innerHTML = '<div class="text-xs text-slate-400">Calculando...</div>';
+  res.innerHTML = '<div class="text-xs text-slate-400">Calculando prévia...</div>';
   try {
-    const r = await fetch(`/api/dp/employees/${empId}/thirteenth?months_worked=${meses}`, { headers: authHeaders() });
-    if (!r.ok) { res.innerHTML = '<div class="text-xs text-rose-500">Erro.</div>'; return; }
-    const d = await r.json();
+    const r = await fetch('/api/dp/decimo/preview', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { res.innerHTML = `<div class="text-xs text-rose-500">${_dpEsc(d.detail || 'Erro ao simular.')}</div>`; return; }
+
+    const rows = (d.results || []).map(item => `
+      <tr class="border-b border-slate-100 dark:border-slate-800 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40"
+          onclick="toggleEspecialLines('dec-prev', ${item.employee_id})" title="Clique para ver as rubricas">
+        <td class="px-4 py-2 text-sm font-medium text-slate-800 dark:text-slate-200">${_dpEsc(item.employee_name)}</td>
+        <td class="px-4 py-2 text-xs text-slate-500">${item.avos}/12</td>
+        <td class="px-4 py-2 text-xs text-slate-500">${fBRL2(item.media_variaveis)}</td>
+        <td class="px-4 py-2 text-sm text-slate-700 dark:text-slate-300">${fBRL2(item.total_proventos)}</td>
+        <td class="px-4 py-2 text-sm text-rose-500">-${fBRL2(item.inss)}</td>
+        <td class="px-4 py-2 text-sm text-orange-500">-${fBRL2(item.irrf)}</td>
+        <td class="px-4 py-2 text-sm font-bold text-emerald-600">${fBRL2(item.liquido)}</td>
+        <td class="px-4 py-2 text-xs text-blue-600">${fBRL2(item.fgts)}</td>
+      </tr>
+      <tr id="dec-prev-lines-${item.employee_id}" class="hidden bg-slate-50/60 dark:bg-slate-900/40">
+        <td colspan="8" class="px-6 py-4">${_dpHoleriteTable(item)}</td>
+      </tr>`).join('');
+
     res.innerHTML = `
-      <div class="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-4">${d.employee_name}</div>
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-        ${kpiDP('Salário Base', fBRL2(d.salary), `${meses}/12 meses`, 'banknote', 'text-slate-600')}
-        ${kpiDP('Bruto 13º', fBRL2(d.gross_thirteenth), 'proporcional', 'gift', 'text-violet-600')}
-        ${kpiDP('INSS', fBRL2(d.inss), 'desconto', 'minus-circle', 'text-rose-500')}
-        ${kpiDP('Líquido 13º', fBRL2(d.net_thirteenth), '1ª + 2ª parcela', 'check-circle', 'text-emerald-600')}
+      <div class="flex flex-wrap items-center justify-between text-xs text-slate-500 mb-3">
+        <span>Prévia: <strong>${d.parcela}ª Parcela / ${d.ano}</strong> — ${d.results.length} funcionário(s)</span>
+        <span>Prazo legal: <strong>${fDate2(d.prazo_legal)}</strong></span>
       </div>
-      <div class="mt-4 flex gap-6 text-xs text-slate-500">
-        <span>1ª Parcela (nov): <strong>${fBRL2(d.first_installment)}</strong></span>
-        <span>2ª Parcela (dez): <strong>${fBRL2(d.second_installment)}</strong></span>
-        <span>FGTS: <strong class="text-blue-600">${fBRL2(d.fgts)}</strong></span>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        ${kpiDP('Total Proventos', fBRL2(d.totais?.proventos), `${d.parcela}ª parcela`, 'gift', 'text-violet-600')}
+        ${kpiDP('Total Descontos', fBRL2(d.totais?.descontos), 'INSS / IRRF / Adiant.', 'minus-circle', 'text-rose-500')}
+        ${kpiDP('Total Líquido', fBRL2(d.totais?.liquido), 'a pagar', 'check-circle', 'text-emerald-600')}
+        ${kpiDP('FGTS', fBRL2(d.totais?.fgts), '8% sobre base', 'piggy-bank', 'text-blue-600')}
+      </div>
+      <div class="overflow-x-auto border border-slate-100 dark:border-slate-800 rounded-xl">
+        <table class="w-full text-sm">
+          <thead><tr class="text-xs text-slate-400 uppercase border-b border-slate-100 dark:border-slate-800">
+            <th class="px-4 py-2 text-left font-semibold">Funcionário</th>
+            <th class="px-4 py-2 text-left font-semibold">Avos</th>
+            <th class="px-4 py-2 text-left font-semibold">Média Var.</th>
+            <th class="px-4 py-2 text-left font-semibold">Bruto</th>
+            <th class="px-4 py-2 text-left font-semibold">INSS</th>
+            <th class="px-4 py-2 text-left font-semibold">IRRF</th>
+            <th class="px-4 py-2 text-left font-semibold">Líquido</th>
+            <th class="px-4 py-2 text-left font-semibold">FGTS</th>
+          </tr></thead>
+          <tbody>${rows || '<tr><td colspan="8" class="px-4 py-4 text-center text-xs text-slate-400">Nenhum funcionário elegível para esta parcela.</td></tr>'}</tbody>
+        </table>
       </div>`;
     if (window.lucide) lucide.createIcons();
   } catch { res.innerHTML = '<div class="text-xs text-rose-500">Erro de conexão.</div>'; }
+}
+
+async function runDecimo() {
+  const body = _decimoPayload();
+  if (!confirm(`Processar e gravar a ${body.parcela}ª parcela do 13º de ${body.ano}?`)) return;
+  try {
+    const r = await fetch('/api/dp/decimo/run', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { alert(d.detail || 'Erro ao gravar 13º.'); return; }
+    alert(`13º gravado com sucesso! ${d.processados} funcionário(s) processado(s).`);
+    await renderDecimo(document.getElementById('dp-body'), body.ano);
+  } catch { alert('Erro de conexão.'); }
 }
 
 // ── 5. FÉRIAS ─────────────────────────────────────────────────
 async function renderFerias(el) {
-  const opts = dpEmployees.filter(e => e.active)
-    .map(e => `<option value="${e.id}">${e.name} — ${fBRL2(e.salary)}</option>`).join('');
+  const opts = dpEmployees.filter(e => e.active && !e.is_prolabore)
+    .map(e => `<option value="${e.id}">${_dpEsc(e.name)} — ${fBRL2(e.salary)}</option>`).join('');
+  const defInicio = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+
+  let alertas = [], regs = [];
+  try {
+    const [ra, rl] = await Promise.all([
+      fetch('/api/dp/ferias/alertas', { headers: authHeaders() }),
+      fetch('/api/dp/ferias', { headers: authHeaders() }),
+    ]);
+    if (ra.ok) alertas = await ra.json();
+    if (rl.ok) regs = await rl.json();
+  } catch { /* fallback */ }
+
+  const alertHtml = alertas.length ? `
+    <div class="mb-5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-2xl p-4 text-xs text-amber-800 dark:text-amber-200">
+      <div class="font-bold mb-1.5 flex items-center gap-1.5">
+        <i data-lucide="alert-triangle" class="w-4 h-4 text-amber-600"></i>
+        Alertas de Períodos Concessivos (${alertas.length})
+      </div>
+      <div class="space-y-1">
+        ${alertas.map(a => `
+          <div>
+            <strong>${_dpEsc(a.employee_name)}</strong> — período ${fDate2(a.inicio)} a ${fDate2(a.fim)} (${a.saldo}d):
+            ${a.status === 'vencido_dobro'
+              ? `<span class="text-rose-600 font-bold">Vencido desde ${fDate2(a.limite_concessivo)} (pagamento em dobro)</span>`
+              : `<span class="font-semibold">Concessivo vence em ${fDate2(a.limite_concessivo)}</span>`}
+          </div>`).join('')}
+      </div>
+    </div>` : '';
+
+  const regRows = regs.map(r => `
+    <tr class="border-b border-slate-100 dark:border-slate-800 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40"
+        onclick="toggleEspecialLines('fer-reg', ${r.id})" title="Clique para ver as rubricas">
+      <td class="px-4 py-2.5 text-sm font-medium text-slate-800 dark:text-slate-200">${_dpEsc(r.employee_name)}</td>
+      <td class="px-4 py-2.5 text-xs text-slate-500">${fDate2(r.referencia)}</td>
+      <td class="px-4 py-2.5 text-xs text-slate-600 dark:text-slate-300">${fDate2(r.data_inicio)} a ${fDate2(r.data_fim)}</td>
+      <td class="px-4 py-2.5 text-xs text-slate-500">${r.dias_gozo}d${r.dias_abono ? ` + ${r.dias_abono}d abono` : ''}</td>
+      <td class="px-4 py-2.5 text-sm text-slate-700 dark:text-slate-300">${fBRL2(r.total_proventos)}</td>
+      <td class="px-4 py-2.5 text-sm font-bold text-emerald-600">${fBRL2(r.liquido)}</td>
+      <td class="px-4 py-2.5 text-xs text-blue-600">${fBRL2(r.fgts)}</td>
+      <td class="px-4 py-2.5 text-right whitespace-nowrap">
+        <button onclick="event.stopPropagation();openEspecialDocumento(${r.id})"
+          class="text-xs text-violet-600 hover:underline mr-2">Recibo</button>
+        <button onclick="event.stopPropagation();deleteEspecial(${r.id}, 'estas férias', 'ferias')"
+          class="text-xs text-rose-500 hover:underline">Excluir</button>
+      </td>
+    </tr>
+    <tr id="fer-reg-lines-${r.id}" class="hidden bg-slate-50/60 dark:bg-slate-900/40">
+      <td colspan="8" class="px-6 py-4">${_dpHoleriteTable(r)}</td>
+    </tr>`).join('');
 
   el.innerHTML = `
     <div class="mb-6">
-      <h2 class="font-bold text-slate-800 dark:text-slate-100 text-lg mb-1">Cálculo de Férias</h2>
-      <p class="text-xs text-slate-400">Inclui 1/3 constitucional e desconto de INSS/IRRF.</p>
+      <h2 class="font-bold text-slate-800 dark:text-slate-100 text-lg mb-1">Férias</h2>
+      <p class="text-xs text-slate-400">Controle de períodos aquisitivos, abono pecuniário, férias em dobro, médias variáveis e reflexo na folha.</p>
     </div>
+    ${alertHtml}
     ${card2(`
       <div class="p-5">
-        <div class="flex flex-wrap gap-4 items-end mb-6">
-          <div>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4 mb-5 items-end">
+          <div class="lg:col-span-2">
             ${labelCls('Funcionário')}
-            <select id="fer-emp" class="${inputCls()} min-w-[220px]">
+            <select id="fer-emp" onchange="loadFeriasPeriodos()" class="${inputCls()}">
               <option value="">Selecione...</option>${opts}
             </select>
           </div>
-          <div>
-            ${labelCls('Dias de férias')}
-            <input id="fer-dias" type="number" min="1" max="30" value="30" class="${inputCls()} w-24">
+          <div class="lg:col-span-2">
+            ${labelCls('Período Aquisitivo')}
+            <select id="fer-periodo" class="${inputCls()}">
+              <option value="">Selecione o funcionário...</option>
+            </select>
           </div>
-          <button onclick="calcFerias()"
-            class="bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold px-5 py-2 rounded-xl flex items-center gap-2">
-            <i data-lucide="calculator" class="w-3.5 h-3.5"></i> Calcular
+          <div>
+            ${labelCls('Início do Gozo')}
+            <input id="fer-inicio" type="date" value="${defInicio}" class="${inputCls()}">
+          </div>
+          <div>
+            ${labelCls('Dias Gozo / Abono / Faltas')}
+            <div class="flex gap-1.5">
+              <input id="fer-dias" type="number" min="1" max="30" value="30" title="Dias de gozo" class="${inputCls()}">
+              <input id="fer-abono" type="number" min="0" max="10" value="0" title="Dias de abono pecuniário" class="${inputCls()}">
+              <input id="fer-faltas" type="number" min="0" max="60" placeholder="0" title="Faltas no período (opcional)" class="${inputCls()}">
+            </div>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2 mb-5">
+          <button onclick="previewFerias()"
+            class="bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-2">
+            <i data-lucide="calculator" class="w-3.5 h-3.5"></i> Simular Férias
+          </button>
+          <button onclick="saveFerias()"
+            class="bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-2">
+            <i data-lucide="save" class="w-3.5 h-3.5"></i> Gravar Férias
           </button>
         </div>
+        <div id="fer-periodos-box" class="mb-5"></div>
         <div id="fer-result"></div>
-      </div>`)}`;
+      </div>`)}
+    <div class="mt-6">
+      <h3 class="font-bold text-slate-700 dark:text-slate-200 text-sm mb-3">
+        Férias Gravadas (${regs.length})
+        <span class="text-xs font-normal text-slate-400 ml-2">clique na linha para detalhar as rubricas</span>
+      </h3>
+      ${card2(`
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead><tr class="text-xs text-slate-400 uppercase border-b border-slate-100 dark:border-slate-800">
+              <th class="px-4 py-2 text-left font-semibold">Funcionário</th>
+              <th class="px-4 py-2 text-left font-semibold">Período Aq.</th>
+              <th class="px-4 py-2 text-left font-semibold">Gozo</th>
+              <th class="px-4 py-2 text-left font-semibold">Dias</th>
+              <th class="px-4 py-2 text-left font-semibold">Bruto</th>
+              <th class="px-4 py-2 text-left font-semibold">Líquido</th>
+              <th class="px-4 py-2 text-left font-semibold">FGTS</th>
+              <th class="px-4 py-2 text-right font-semibold">Ação</th>
+            </tr></thead>
+            <tbody>${regRows || '<tr><td colspan="8" class="px-4 py-6 text-center text-slate-400 text-xs">Nenhuma férias gravada.</td></tr>'}</tbody>
+          </table>
+        </div>`)}
+    </div>`;
+  if (window.lucide) lucide.createIcons();
 }
 
-async function calcFerias() {
+async function loadFeriasPeriodos() {
   const empId = document.getElementById('fer-emp')?.value;
-  const dias  = document.getElementById('fer-dias')?.value || 30;
-  if (!empId) { alert('Selecione um funcionário.'); return; }
+  const sel = document.getElementById('fer-periodo');
+  const box = document.getElementById('fer-periodos-box');
+  if (!sel || !box) return;
+  if (!empId) {
+    sel.innerHTML = '<option value="">Selecione o funcionário...</option>';
+    box.innerHTML = '';
+    return;
+  }
+  box.innerHTML = '<div class="text-xs text-slate-400">Carregando períodos aquisitivos...</div>';
+  try {
+    const r = await fetch(`/api/dp/ferias/periodos/${empId}`, { headers: authHeaders() });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      sel.innerHTML = '<option value="">Indisponível</option>';
+      box.innerHTML = `<div class="text-xs text-rose-500">${_dpEsc(d.detail || 'Erro ao carregar períodos.')}</div>`;
+      return;
+    }
+    const comSaldo = (d.periodos || []).filter(p => p.completo && p.saldo > 0);
+    sel.innerHTML = comSaldo.length
+      ? comSaldo.map(p => `<option value="${p.inicio}">${fDate2(p.inicio)} a ${fDate2(p.fim)} — Saldo ${p.saldo}d</option>`).join('')
+      : '<option value="">Nenhum período completo com saldo</option>';
+
+    const statusBadge = {
+      quitado:        '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-500">Quitado</span>',
+      vencido_dobro:  '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700">Vencido (Dobro)</span>',
+      vence_em_breve: '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700">Vence em breve</span>',
+      a_gozar:        '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">A gozar</span>',
+      em_aquisicao:   '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700">Em aquisição</span>',
+    };
+
+    const pRows = (d.periodos || []).map(p => `
+      <tr class="border-b border-slate-100 dark:border-slate-800 text-xs">
+        <td class="px-3 py-1.5">${fDate2(p.inicio)} — ${fDate2(p.fim)}</td>
+        <td class="px-3 py-1.5">${fDate2(p.limite_concessivo)}</td>
+        <td class="px-3 py-1.5 text-right">${p.direito}d</td>
+        <td class="px-3 py-1.5 text-right">${p.gozados}d</td>
+        <td class="px-3 py-1.5 text-right font-bold">${p.saldo}d</td>
+        <td class="px-3 py-1.5 text-right">${p.avos}/12</td>
+        <td class="px-3 py-1.5">${statusBadge[p.status] || _dpEsc(p.status)}</td>
+      </tr>`).join('');
+
+    box.innerHTML = `
+      <div class="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-2">
+        Períodos aquisitivos de ${_dpEsc(d.employee_name)} — Saldo total disponível: <strong>${d.saldo_total} dia(s)</strong>
+      </div>
+      <div class="overflow-x-auto border border-slate-100 dark:border-slate-800 rounded-xl">
+        <table class="w-full text-left">
+          <thead><tr class="text-[11px] text-slate-400 uppercase border-b border-slate-100 dark:border-slate-800">
+            <th class="px-3 py-1.5">Período Aquisitivo</th>
+            <th class="px-3 py-1.5">Limite Concessivo</th>
+            <th class="px-3 py-1.5 text-right">Direito</th>
+            <th class="px-3 py-1.5 text-right">Gozados</th>
+            <th class="px-3 py-1.5 text-right">Saldo</th>
+            <th class="px-3 py-1.5 text-right">Avos</th>
+            <th class="px-3 py-1.5">Situação</th>
+          </tr></thead>
+          <tbody>${pRows || '<tr><td colspan="7" class="px-3 py-3 text-center text-xs text-slate-400">Sem períodos registrados.</td></tr>'}</tbody>
+        </table>
+      </div>`;
+  } catch { box.innerHTML = '<div class="text-xs text-rose-500">Erro de conexão.</div>'; }
+}
+
+function _feriasPayload() {
+  const empId = document.getElementById('fer-emp')?.value;
+  const faltas = document.getElementById('fer-faltas')?.value;
+  const payload = {
+    employee_id: empId ? parseInt(empId, 10) : null,
+    data_inicio: document.getElementById('fer-inicio')?.value || '',
+    dias_gozo: parseInt(document.getElementById('fer-dias')?.value || '30', 10),
+    dias_abono: parseInt(document.getElementById('fer-abono')?.value || '0', 10),
+    periodo_inicio: document.getElementById('fer-periodo')?.value || '',
+  };
+  if (faltas !== '' && faltas !== undefined) payload.faltas_periodo = parseInt(faltas, 10);
+  return payload;
+}
+
+async function previewFerias() {
+  const body = _feriasPayload();
+  if (!body.employee_id || !body.data_inicio) { alert('Selecione o funcionário e a data de início.'); return; }
   const res = document.getElementById('fer-result');
   res.innerHTML = '<div class="text-xs text-slate-400">Calculando...</div>';
   try {
-    const r = await fetch(`/api/dp/employees/${empId}/vacation?days=${dias}`, { headers: authHeaders() });
-    if (!r.ok) { res.innerHTML = '<div class="text-xs text-rose-500">Erro.</div>'; return; }
-    const d = await r.json();
+    const r = await fetch('/api/dp/ferias/preview', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { res.innerHTML = `<div class="text-xs text-rose-500">${_dpEsc(d.detail || 'Erro ao calcular.')}</div>`; return; }
+
     res.innerHTML = `
-      <div class="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-4">${d.employee_name} — ${dias} dias</div>
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-        ${kpiDP('Salário Proporcional', fBRL2(d.vacation_salary), `${dias} dias`, 'umbrella', 'text-blue-600')}
-        ${kpiDP('1/3 Constitucional', fBRL2(d.one_third), 'adicional', 'plus-circle', 'text-violet-600')}
-        ${kpiDP('Bruto Férias', fBRL2(d.gross_vacation), 'antes dos descontos', 'banknote', 'text-slate-600')}
-        ${kpiDP('Líquido Férias', fBRL2(d.net_vacation), 'a receber', 'check-circle', 'text-emerald-600')}
+      <div class="mb-3 flex flex-wrap gap-4 text-xs text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800/40 rounded-xl px-4 py-2.5">
+        <span><strong>${_dpEsc(d.employee_name)}</strong></span>
+        <span>Gozo: <strong>${fDate2(d.data_inicio)}</strong> a <strong>${fDate2(d.data_fim)}</strong> (${d.dias_gozo}d)</span>
+        <span>Retorno: <strong>${fDate2(d.data_retorno)}</strong></span>
+        <span>Pagto limite (2d antes): <strong>${fDate2(d.data_pagamento_limite)}</strong></span>
+        <span>Média variáveis: <strong>${fBRL2(d.media_variaveis)}</strong></span>
+        ${d.dias_dobro ? `<span class="text-rose-600 font-bold">Em dobro: ${d.dias_dobro}d</span>` : ''}
       </div>
-      <div class="mt-4 flex gap-6 text-xs text-slate-500">
-        <span>INSS: <strong class="text-rose-500">-${fBRL2(d.inss)}</strong></span>
-        <span>IRRF: <strong class="text-orange-500">-${fBRL2(d.irrf)}</strong></span>
-      </div>`;
+      ${_dpHoleriteTable(d)}`;
     if (window.lucide) lucide.createIcons();
   } catch { res.innerHTML = '<div class="text-xs text-rose-500">Erro de conexão.</div>'; }
 }
 
-// ── 6. RESCISÃO ───────────────────────────────────────────────
-function renderRescisao(el) {
-  const opts = dpEmployees.filter(e => e.active)
-    .map(e => `<option value="${e.id}">${e.name} — ${fBRL2(e.salary)}</option>`).join('');
+async function saveFerias() {
+  const body = _feriasPayload();
+  if (!body.employee_id || !body.data_inicio) { alert('Selecione o funcionário e a data de início.'); return; }
+  if (!confirm(`Gravar férias a partir de ${fDate2(body.data_inicio)} (${body.dias_gozo}d gozo, ${body.dias_abono}d abono)?`)) return;
+  try {
+    const r = await fetch('/api/dp/ferias', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { alert(d.detail || 'Erro ao gravar férias.'); return; }
+    alert('Férias gravadas com sucesso!');
+    await renderFerias(document.getElementById('dp-body'));
+  } catch { alert('Erro de conexão.'); }
+}
 
+// ── 6. RESCISÃO ───────────────────────────────────────────────
+async function renderRescisao(el) {
+  const opts = dpEmployees.filter(e => e.active)
+    .map(e => `<option value="${e.id}">${_dpEsc(e.name)} — ${fBRL2(e.salary)}</option>`).join('');
   const today = new Date().toISOString().slice(0, 10);
+
+  let regs = [];
+  try {
+    const r = await fetch('/api/dp/rescisao', { headers: authHeaders() });
+    if (r.ok) regs = await r.json();
+  } catch { regs = []; }
+
+  const regRows = regs.map(r => `
+    <tr class="border-b border-slate-100 dark:border-slate-800 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40"
+        onclick="toggleEspecialLines('res-reg', ${r.id})" title="Clique para ver as rubricas">
+      <td class="px-4 py-2.5 text-sm font-medium text-slate-800 dark:text-slate-200">${_dpEsc(r.employee_name)}</td>
+      <td class="px-4 py-2.5 text-xs text-slate-500">${_dpEsc((r.referencia || '').replace(/_/g, ' '))}</td>
+      <td class="px-4 py-2.5 text-xs text-slate-500">${fDate2(r.data_inicio)}</td>
+      <td class="px-4 py-2.5 text-xs text-slate-400">${fDate2(r.data_fim)}</td>
+      <td class="px-4 py-2.5 text-sm text-slate-700 dark:text-slate-300">${fBRL2(r.total_proventos)}</td>
+      <td class="px-4 py-2.5 text-sm font-bold text-emerald-600">${fBRL2(r.liquido)}</td>
+      <td class="px-4 py-2.5 text-xs text-blue-600">${fBRL2(r.multa_fgts)}</td>
+      <td class="px-4 py-2.5 text-right whitespace-nowrap">
+        <button onclick="event.stopPropagation();openEspecialDocumento(${r.id})"
+          class="text-xs text-violet-600 hover:underline mr-2">TRCT</button>
+        <button onclick="event.stopPropagation();downloadEspecialS2299(${r.id},${r.employee_id},'${_dpEsc(r.data_inicio)}')"
+          class="text-xs text-indigo-500 hover:underline mr-2">S-2299</button>
+        <button onclick="event.stopPropagation();deleteEspecial(${r.id}, 'esta rescisão', 'rescisao')"
+          class="text-xs text-rose-500 hover:underline">Excluir</button>
+      </td>
+    </tr>
+    <tr id="res-reg-lines-${r.id}" class="hidden bg-slate-50/60 dark:bg-slate-900/40">
+      <td colspan="8" class="px-6 py-4">${_dpHoleriteTable(r)}</td>
+    </tr>`).join('');
 
   el.innerHTML = `
     <div class="mb-6">
-      <h2 class="font-bold text-slate-800 dark:text-slate-100 text-lg mb-1">Cálculo de Rescisão</h2>
-      <p class="text-xs text-slate-400">Saldo de salário, 13º proporcional, férias, aviso prévio e multa FGTS.</p>
+      <h2 class="font-bold text-slate-800 dark:text-slate-100 text-lg mb-1">Cálculo de Rescisão (TRCT)</h2>
+      <p class="text-xs text-slate-400">Saldo de salário, aviso prévio proporcional (Lei 12.506), 13º, férias vencidas/proporcionais, médias e multa FGTS.</p>
     </div>
     ${card2(`
       <div class="p-5">
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          <div>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4 mb-4 items-end">
+          <div class="lg:col-span-2">
             ${labelCls('Funcionário')}
             <select id="res-emp" class="${inputCls()}">
               <option value="">Selecione...</option>${opts}
             </select>
           </div>
           <div>
-            ${labelCls('Data de Desligamento')}
+            ${labelCls('Desligamento')}
             <input id="res-date" type="date" value="${today}" class="${inputCls()}">
           </div>
           <div>
             ${labelCls('Tipo de Rescisão')}
             <select id="res-tipo" class="${inputCls()}">
-              <option value="sem_justa_causa">Sem Justa Causa (empresa)</option>
-              <option value="justa_causa">Justa Causa</option>
+              <option value="sem_justa_causa">Sem Justa Causa</option>
               <option value="pedido_demissao">Pedido de Demissão</option>
-              <option value="acordo_mutuo">Acordo Mútuo</option>
+              <option value="com_justa_causa">Justa Causa</option>
+              <option value="acordo">Acordo (CLT 484-A)</option>
+              <option value="termino_contrato">Término de Contrato</option>
             </select>
           </div>
-          <div class="flex items-end">
-            <button onclick="calcRescisao()"
-              class="w-full bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold px-5 py-2 rounded-xl flex items-center justify-center gap-2">
-              <i data-lucide="calculator" class="w-3.5 h-3.5"></i> Calcular
+          <div>
+            ${labelCls('Aviso Prévio')}
+            <select id="res-aviso" class="${inputCls()}">
+              <option value="indenizado">Indenizado</option>
+              <option value="trabalhado">Trabalhado</option>
+              <option value="dispensado">Dispensado</option>
+              <option value="nao_cumprido">Não cumprido (desconto)</option>
+            </select>
+          </div>
+          <div>
+            ${labelCls('Saldo FGTS (opcional)')}
+            <input id="res-fgts" type="number" step="0.01" min="0" placeholder="Estimado" class="${inputCls()}">
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center justify-between gap-4 mb-5">
+          <div class="flex flex-wrap items-center gap-4">
+            <div class="w-44">
+              ${labelCls('Outros descontos (opcional)')}
+              <input id="res-outros" type="number" step="0.01" min="0" placeholder="0,00" class="${inputCls()}">
+            </div>
+            <label class="text-xs text-slate-600 dark:text-slate-300 flex items-center gap-1.5 mt-4">
+              <input id="res-desligar" type="checkbox" checked> Desligar funcionário ao gravar
+            </label>
+          </div>
+          <div class="flex gap-2">
+            <button onclick="previewRescisao()"
+              class="bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-2">
+              <i data-lucide="calculator" class="w-3.5 h-3.5"></i> Simular Rescisão
+            </button>
+            <button onclick="saveRescisao()"
+              class="bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-2">
+              <i data-lucide="save" class="w-3.5 h-3.5"></i> Gravar Rescisão
             </button>
           </div>
         </div>
         <div id="res-result"></div>
-      </div>`)}`;
+      </div>`)}
+    <div class="mt-6">
+      <h3 class="font-bold text-slate-700 dark:text-slate-200 text-sm mb-3">
+        Rescisões Gravadas (${regs.length})
+        <span class="text-xs font-normal text-slate-400 ml-2">clique na linha para detalhar as rubricas</span>
+      </h3>
+      ${card2(`
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead><tr class="text-xs text-slate-400 uppercase border-b border-slate-100 dark:border-slate-800">
+              <th class="px-4 py-2 text-left font-semibold">Funcionário</th>
+              <th class="px-4 py-2 text-left font-semibold">Tipo</th>
+              <th class="px-4 py-2 text-left font-semibold">Desligamento</th>
+              <th class="px-4 py-2 text-left font-semibold">Projeção</th>
+              <th class="px-4 py-2 text-left font-semibold">Bruto</th>
+              <th class="px-4 py-2 text-left font-semibold">Líquido</th>
+              <th class="px-4 py-2 text-left font-semibold">Multa FGTS</th>
+              <th class="px-4 py-2 text-right font-semibold">Ações</th>
+            </tr></thead>
+            <tbody>${regRows || '<tr><td colspan="8" class="px-4 py-6 text-center text-slate-400 text-xs">Nenhuma rescisão gravada.</td></tr>'}</tbody>
+          </table>
+        </div>`)}
+    </div>`;
+  if (window.lucide) lucide.createIcons();
 }
 
-async function calcRescisao() {
+function _rescisaoPayload() {
   const empId = document.getElementById('res-emp')?.value;
-  const date  = document.getElementById('res-date')?.value;
-  const tipo  = document.getElementById('res-tipo')?.value;
-  if (!empId || !date) { alert('Selecione o funcionário e a data.'); return; }
+  const fgts = document.getElementById('res-fgts')?.value;
+  const outros = document.getElementById('res-outros')?.value;
+  const payload = {
+    employee_id: empId ? parseInt(empId, 10) : null,
+    data_desligamento: document.getElementById('res-date')?.value || '',
+    tipo: document.getElementById('res-tipo')?.value || 'sem_justa_causa',
+    aviso_modo: document.getElementById('res-aviso')?.value || 'indenizado',
+    desligar: document.getElementById('res-desligar')?.checked !== false,
+  };
+  if (fgts !== '' && fgts !== undefined) payload.saldo_fgts = parseFloat(fgts);
+  if (outros !== '' && outros !== undefined) payload.outros_descontos = parseFloat(outros);
+  return payload;
+}
+
+async function previewRescisao() {
+  const body = _rescisaoPayload();
+  if (!body.employee_id || !body.data_desligamento) { alert('Selecione o funcionário e a data.'); return; }
   const res = document.getElementById('res-result');
   res.innerHTML = '<div class="text-xs text-slate-400">Calculando...</div>';
   try {
-    const r = await fetch(`/api/dp/employees/${empId}/termination`, {
+    const r = await fetch('/api/dp/rescisao/preview', {
       method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ termination_date: date, termination_type: tipo }),
+      body: JSON.stringify(body),
     });
-    if (!r.ok) { const e = await r.json(); res.innerHTML = `<div class="text-xs text-rose-500">${e.detail || 'Erro.'}</div>`; return; }
-    const d = await r.json();
-    const emp = dpEmployees.find(e => e.id === parseInt(empId));
-
-    const linhas = [
-      ['Saldo de Salário', d.salary_balance],
-      ['13º Proporcional', d.thirteenth_proportional],
-      ['Férias Proporcionais', d.vacation_proportional],
-      ['1/3 de Férias', d.vacation_one_third],
-      ['Aviso Prévio', d.notice_period],
-      ['Multa FGTS (40%)', d.fgts_fine],
-    ].filter(([, v]) => v && parseFloat(v) > 0);
-
-    const rows = linhas.map(([label, val]) => `
-      <tr class="border-b border-slate-100 dark:border-slate-800">
-        <td class="px-4 py-2.5 text-sm text-slate-600 dark:text-slate-300">${label}</td>
-        <td class="px-4 py-2.5 text-sm font-semibold text-slate-800 dark:text-slate-200 text-right">${fBRL2(val)}</td>
-      </tr>`).join('');
-
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { res.innerHTML = `<div class="text-xs text-rose-500">${_dpEsc(d.detail || 'Erro ao simular.')}</div>`; return; }
+    const pl = d.plano || {};
     res.innerHTML = `
-      <div class="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-3">
-        ${d.employee_name} — ${tipo.replace(/_/g, ' ')} — ${fDate2(date)}
+      <div class="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">
+        ${_dpEsc(d.employee_name)} — ${_dpEsc(d.tipo_nome)} — Desligamento: ${fDate2(d.data_desligamento)}
       </div>
-      <table class="w-full max-w-sm mb-4">
-        <tbody>${rows}</tbody>
-        <tfoot><tr class="border-t-2 border-slate-300 dark:border-slate-600">
-          <td class="px-4 py-3 text-sm font-bold text-slate-800 dark:text-slate-100">Total Líquido Rescisão</td>
-          <td class="px-4 py-3 text-lg font-extrabold text-emerald-600 text-right">${fBRL2(d.total_net)}</td>
-        </tr></tfoot>
-      </table>
-      <p class="text-xs text-slate-400">
-        Meses trabalhados: ${d.months_worked || '-'} &nbsp;·&nbsp;
-        INSS: -${fBRL2(d.inss)} &nbsp;·&nbsp;
-        IRRF: -${fBRL2(d.irrf)}
-      </p>
-      ${emp ? `<div class="mt-4">
-        <button onclick="downloadS2299(${empId}, document.getElementById('res-date').value, document.getElementById('res-tipo').value)"
+      <div class="mb-4 flex flex-wrap gap-3 text-xs text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800/40 rounded-xl px-4 py-2.5">
+        <span>Saldo: <strong>${pl.saldo_dias ?? 0}d</strong></span>
+        <span>Aviso ind.: <strong>${pl.aviso_indenizado_dias ?? 0}d</strong> (proj. ${fDate2(pl.data_projetada)})</span>
+        <span>13º: <strong>${pl.avos_13 ?? 0}/12</strong>${pl.avos_13_indenizado ? ` + ${pl.avos_13_indenizado}/12 ind.` : ''}</span>
+        <span>Férias: <strong>${pl.ferias_vencidas_dias ?? 0}d venc.</strong> / <strong>${pl.avos_ferias ?? 0}/12 prop.</strong></span>
+        <span>FGTS mês: <strong class="text-blue-600">${fBRL2(d.fgts)}</strong></span>
+        <span>Multa FGTS: <strong class="text-blue-600">${fBRL2(d.multa_fgts)}</strong> (${_dpEsc(d.saldo_fgts_origem || '')})</span>
+      </div>
+      ${_dpHoleriteTable(d)}
+      <div class="mt-4">
+        <button onclick="downloadS2299(${d.employee_id},'${_dpEsc(d.data_desligamento)}','${_dpEsc(d.tipo)}')"
           class="text-xs text-indigo-500 hover:underline flex items-center gap-1">
           <i data-lucide="file-down" class="w-3.5 h-3.5"></i> Baixar S-2299 (eSocial Desligamento)
         </button>
-      </div>` : ''}`;
+      </div>`;
     if (window.lucide) lucide.createIcons();
   } catch { res.innerHTML = '<div class="text-xs text-rose-500">Erro de conexão.</div>'; }
+}
+
+async function saveRescisao() {
+  const body = _rescisaoPayload();
+  if (!body.employee_id || !body.data_desligamento) { alert('Selecione o funcionário e a data.'); return; }
+  if (!confirm(`Gravar rescisão em ${fDate2(body.data_desligamento)}?`)) return;
+  try {
+    const r = await fetch('/api/dp/rescisao', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { alert(d.detail || 'Erro ao gravar rescisão.'); return; }
+    if (d.desligado) {
+      const er = await fetch('/api/dp/employees?active_only=false', { headers: authHeaders() });
+      if (er.ok) dpEmployees = await er.json();
+    }
+    alert('Rescisão gravada com sucesso!');
+    await renderRescisao(document.getElementById('dp-body'));
+  } catch { alert('Erro de conexão.'); }
 }
 
 // ── 7. eSocial ────────────────────────────────────────────────
@@ -1088,13 +1609,48 @@ async function downloadS1200FromEsocial() {
 }
 
 async function downloadS1200(runId, empId) {
-  triggerDownload(`/api/dp/payroll/${runId}/employee/${empId}/esocial/s1200`);
+  const r = await fetch(`/api/dp/payroll/${runId}/employee/${empId}/esocial/s1200`, { headers: authHeaders() });
+  if (!r.ok) { alert('Erro ao gerar S-1200.'); return; }
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `S1200_${runId}_${empId}.xml`; a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function downloadCnab240(runId, comp) {
+  const r = await fetch(`/api/dp/payroll/${runId}/cnab240`, { headers: authHeaders() });
+  if (!r.ok) { const e = await r.json().catch(() => ({})); alert(e.detail || 'Erro ao gerar CNAB 240.'); return; }
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `CNAB240_FOLHA_${(comp || '').replace('-', '')}.rem`; a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function openEspecialDocumento(specialId) {
+  const r = await fetch(`/api/dp/especiais/${specialId}/documento`, { headers: authHeaders() });
+  if (!r.ok) { alert('Erro ao gerar documento.'); return; }
+  const html = await r.text();
+  const win = window.open('', '_blank');
+  if (win) { win.document.write(html); win.document.close(); }
+}
+
+async function downloadEspecialS2299(specialId, empId, dt) {
+  const r = await fetch(`/api/dp/especiais/${specialId}/esocial/s2299`, { headers: authHeaders() });
+  if (!r.ok) { alert('Erro ao gerar S-2299.'); return; }
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `S2299_${empId}_${(dt || '').replace(/-/g, '')}.xml`; a.click();
+  URL.revokeObjectURL(url);
 }
 
 async function downloadS2299(empId, termDate, terminationType) {
-  const motivo = terminationType === 'justa_causa' ? '02'
+  const motivo = (terminationType === 'justa_causa' || terminationType === 'com_justa_causa') ? '02'
     : terminationType === 'pedido_demissao' ? '03'
-    : terminationType === 'acordo_mutuo' ? '10'
+    : (terminationType === 'acordo_mutuo' || terminationType === 'acordo') ? '10'
+    : terminationType === 'termino_contrato' ? '11'
     : '01';
   const r = await fetch(`/api/dp/employees/${empId}/esocial/s2299`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
@@ -1676,12 +2232,27 @@ async function renderPonto(el) {
       <button onclick="pontoOpenModal()" class="bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-2">
         <i data-lucide="plus" class="w-3.5 h-3.5"></i> Lançar
       </button>
+      <button onclick="pontoOpenAfdModal()" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-2">
+        <i data-lucide="upload" class="w-3.5 h-3.5"></i> Importar AFD (REP)
+      </button>
       <button onclick="pontoEspelho()" class="bg-slate-600 hover:bg-slate-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-2">
         <i data-lucide="printer" class="w-3.5 h-3.5"></i> Espelho
       </button>
     </div>
     <div id="ponto-kpis" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5"></div>
     <div id="ponto-table"></div>
+    <div id="ponto-afd-modal" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" style="display:none!important">
+      <div class="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl p-6 w-full max-w-xl">
+        <h3 class="font-bold text-slate-800 dark:text-slate-100 mb-2">Importar Arquivo AFD (Portaria 671 / REP)</h3>
+        <p class="text-xs text-slate-400 mb-3">Selecione um arquivo .txt de AFD ou cole as linhas (formato AFD tipo 3 ou <code>CPF_OU_PIS;AAAA-MM-DD;08:00;12:00;13:00;17:00</code>).</p>
+        <input type="file" accept=".txt,.afd,.csv" onchange="pontoLoadAfdFile(this)" class="text-xs mb-3 block">
+        <textarea id="ponto-afd-text" rows="7" class="${inputCls()} font-mono text-xs mb-3" placeholder="Cole o conteúdo AFD aqui..."></textarea>
+        <div class="flex justify-end gap-2">
+          <button onclick="document.getElementById('ponto-afd-modal').style.display='none'" class="text-xs px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700">Cancelar</button>
+          <button onclick="pontoImportAfd()" class="bg-emerald-600 text-white text-xs font-semibold px-4 py-2 rounded-xl">Importar Marcações</button>
+        </div>
+      </div>
+    </div>
     <div id="ponto-modal" class="fixed inset-0 bg-black/60 z-50 flex items-center justify-center" style="display:none!important">
       <div class="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl p-6 w-full max-w-lg">
         <h3 class="font-bold text-slate-800 dark:text-slate-100 mb-4">Lançar Ponto</h3>
@@ -1799,6 +2370,34 @@ function pontoEdit(r) {
 
 function pontoCloseModal() {
   document.getElementById('ponto-modal').style.display = 'none';
+}
+
+function pontoOpenAfdModal() {
+  const m = document.getElementById('ponto-afd-modal');
+  if (m) m.style.display = 'flex';
+}
+
+function pontoLoadAfdFile(input) {
+  const f = input.files && input.files[0];
+  if (!f) return;
+  const r = new FileReader();
+  r.onload = () => { document.getElementById('ponto-afd-text').value = r.result || ''; };
+  r.readAsText(f);
+}
+
+async function pontoImportAfd() {
+  const conteudo = document.getElementById('ponto-afd-text')?.value || '';
+  const comp = document.getElementById('ponto-mes')?.value || '';
+  if (!conteudo.trim()) { alert('Informe ou carregue um arquivo AFD.'); return; }
+  try {
+    const res = await apiFetch('/api/dp/ponto/importar-afd', {
+      method: 'POST',
+      body: JSON.stringify({ conteudo, competencia: comp }),
+    });
+    document.getElementById('ponto-afd-modal').style.display = 'none';
+    alert(`AFD importado: ${res.registros_importados} registro(s), ${res.funcionarios_identificados} funcionário(s), ${res.horas_extras_totais}h extras.`);
+    await pontoLoad();
+  } catch (e) { alert('Erro ao importar AFD: ' + e.message); }
 }
 
 async function pontoSave() {
@@ -2495,8 +3094,8 @@ async function renderTabelasFiscais(el) {
                 ${t.tipo === 'SALARIO_MINIMO' ? '<th>Valor</th>' : '<th>Faixa De</th><th>Faixa Até</th><th>Alíquota (%)</th><th>Dedução (R$)</th>'}
               </tr></thead>
               <tbody>
-                ${(t.brackets||[]).map(b => t.tipo === 'SALARIO_MINIMO'
-                  ? `<tr><td>R$ ${Number(b.aliquota).toFixed(2)}</td></tr>`
+                ${(t.brackets||[]).map(b => ['salario_minimo','irrf_dependente','irrf_simplificado','salario_familia'].includes(String(t.tipo).toLowerCase())
+                  ? `<tr><td colspan="4">R$ ${Number(b.aliquota).toFixed(2)}${b.faixa_ate ? ` (remuneração até R$ ${Number(b.faixa_ate).toFixed(2)})` : ''}</td></tr>`
                   : `<tr><td>R$ ${Number(b.faixa_de).toFixed(2)}</td><td>${b.faixa_ate ? 'R$ '+Number(b.faixa_ate).toFixed(2) : 'Acima'}</td><td>${Number(b.aliquota).toFixed(2)}%</td><td>R$ ${Number(b.deducao||0).toFixed(2)}</td></tr>`
                 ).join('')}
               </tbody>
@@ -2509,8 +3108,12 @@ async function renderTabelasFiscais(el) {
   window.tfImportDefault = async () => {
     const a = document.getElementById('tfAno').value || ano;
     try {
-      await apiFetch(`/api/dp/tax-tables/seed-default?ano=${parseInt(a)}`, { method:'POST' });
-      showToast(`Tabelas ${a} importadas.`, 'success');
+      let r = await apiFetch(`/api/dp/tax-tables/seed-default?ano=${parseInt(a)}`, { method:'POST' });
+      if (/já existem/.test(r.msg || '')) {
+        if (!confirm(`As tabelas de ${a} já estão cadastradas. Substituir pelas tabelas legais padrão? (Edições manuais deste ano serão perdidas.)`)) return;
+        r = await apiFetch(`/api/dp/tax-tables/seed-default?ano=${parseInt(a)}&force=true`, { method:'POST' });
+      }
+      showToast(r.msg || `Tabelas ${a} importadas.`, 'success');
       window.tfLoadTables();
     } catch(e) { showToast('Erro: ' + e.message, 'error'); }
   };
@@ -2524,7 +3127,7 @@ async function renderRubricas(el) {
     <div class="page-header">
       <div>
         <h2 style="font-family:var(--font-display);font-size:1.4rem;font-weight:700;color:var(--text);margin:0">Rubricas de Folha</h2>
-        <p style="font-size:.8rem;color:var(--muted);margin:.25rem 0 0">Tabela de rubricas S-1010 do eSocial</p>
+        <p style="font-size:.8rem;color:var(--muted);margin:.25rem 0 0">Rubricas usadas no cálculo da folha (e na tabela S-1010 do eSocial). As incidências definem as bases de INSS, IRRF e FGTS.</p>
       </div>
       <div class="d-flex gap-2">
         <button class="btn btn-secondary" onclick="rubricSeedDefault()">Carregar Padrão</button>
@@ -2535,9 +3138,47 @@ async function renderRubricas(el) {
     <div id="rubricKpis" class="row g-3 mb-4"></div>
     <div class="table-responsive">
       <table class="table">
-        <thead><tr><th>Código</th><th>Nome</th><th>Tipo</th><th>INSS</th><th>IRRF</th><th>FGTS</th><th>Nat.eSocial</th><th>Ativo</th><th>Ações</th></tr></thead>
-        <tbody id="rubricTableBody"><tr><td colspan="9" class="text-center text-muted">Carregando...</td></tr></tbody>
+        <thead><tr><th>Código</th><th>Nome</th><th>Tipo</th><th>INSS</th><th>IRRF</th><th>FGTS</th><th>Fórmula</th><th>Nat.eSocial</th><th>Ativo</th><th>Ações</th></tr></thead>
+        <tbody id="rubricTableBody"><tr><td colspan="10" class="text-center text-muted">Carregando...</td></tr></tbody>
       </table>
+    </div>
+
+    <div class="page-header" style="margin-top:2rem">
+      <div>
+        <h3 style="font-size:1.1rem;font-weight:700;color:var(--text);margin:0">Lançamentos por Funcionário</h3>
+        <p style="font-size:.8rem;color:var(--muted);margin:.25rem 0 0">Comissões, prêmios, horas e descontos. Sem competência = fixo (entra todo mês).</p>
+      </div>
+      <div class="d-flex gap-2">
+        <input type="month" id="lancFiltroComp" class="form-control" style="width:auto" onchange="lancLoadTable()">
+        <button class="btn btn-primary" onclick="lancOpenModal()">+ Novo Lançamento</button>
+      </div>
+    </div>
+    <div class="table-responsive">
+      <table class="table">
+        <thead><tr><th>Funcionário</th><th>Rubrica</th><th>Tipo</th><th>Competência</th><th>Qtd.</th><th>Valor</th><th>Obs.</th><th>Ações</th></tr></thead>
+        <tbody id="lancTableBody"><tr><td colspan="8" class="text-center text-muted">Carregando...</td></tr></tbody>
+      </table>
+    </div>
+    <div id="lancModal" class="modal-overlay" style="display:none">
+      <div class="modal-box">
+        <h3>Novo Lançamento</h3>
+        <div class="form-row">
+          <div class="form-group"><label>Funcionário</label><select id="lancEmp" class="form-control"></select></div>
+          <div class="form-group"><label>Rubrica</label><select id="lancRubric" class="form-control" onchange="lancRubricHint()"></select></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Competência (vazio = fixo)</label><input type="month" id="lancComp" class="form-control"></div>
+          <div class="form-group"><label>Quantidade</label><input type="number" step="0.01" min="0" id="lancQtd" class="form-control" placeholder="0"></div>
+          <div class="form-group"><label>Valor (R$)</label><input type="number" step="0.01" min="0" id="lancValor" class="form-control" placeholder="0,00"></div>
+        </div>
+        <div class="form-group"><label>Observação</label><input type="text" id="lancObs" class="form-control"></div>
+        <div id="lancHint" style="font-size:.78rem;color:var(--muted)"></div>
+        <div id="lancModalError" class="alert alert-danger" style="display:none"></div>
+        <div class="d-flex gap-2 justify-content-end mt-3">
+          <button class="btn btn-secondary" onclick="document.getElementById('lancModal').style.display='none'">Cancelar</button>
+          <button class="btn btn-primary" onclick="lancSave()">Salvar</button>
+        </div>
+      </div>
     </div>
     <div id="rubricModal" class="modal-overlay" style="display:none">
       <div class="modal-box">
@@ -2559,6 +3200,15 @@ async function renderRubricas(el) {
           <div class="form-group"><label><input type="checkbox" id="rubricIRRF"> Incide IRRF</label></div>
           <div class="form-group"><label><input type="checkbox" id="rubricFGTS"> Incide FGTS</label></div>
         </div>
+        <div class="form-group">
+          <label>Fórmula (opcional)</label>
+          <input type="text" id="rubricFormula" class="form-control" placeholder="ex.: salario_base * 0.30  ou  25 * quantidade" onblur="rubricCheckFormula()">
+          <div id="rubricFormulaMsg" style="font-size:.78rem;margin-top:.25rem;color:var(--muted)">
+            Variáveis: salario_base, salario_hora, salario_dia, salario_minimo, dias_trabalhados, quantidade, valor, total_proventos, rubrica_0001…
+            Funções: min, max, se(condição, a, b), arred.
+          </div>
+        </div>
+        <div class="form-group"><label><input type="checkbox" id="rubricTodos"> Aplicar a todos os funcionários (exige fórmula)</label></div>
         <div id="rubricModalError" class="alert alert-danger" style="display:none"></div>
         <div class="d-flex gap-2 justify-content-end mt-3">
           <button class="btn btn-secondary" onclick="document.getElementById('rubricModal').style.display='none'">Cancelar</button>
@@ -2590,20 +3240,110 @@ async function rubricLoadTable() {
       <td><code>${r.codigo}</code></td><td>${r.nome}</td>
       <td><span class="badge ${badge[r.tipo]||'badge-secondary'}">${r.tipo}</span></td>
       <td>${r.incide_inss?'✓':'—'}</td><td>${r.incide_irrf?'✓':'—'}</td><td>${r.incide_fgts?'✓':'—'}</td>
+      <td>${r.formula ? `<code>${_dpEsc(r.formula)}</code>${r.aplica_todos ? ' <span class="badge badge-info">todos</span>' : ''}` : '—'}</td>
       <td><code>${r.esocial_nat_rubrica||''}</code></td>
       <td>${r.ativo?'<span class="badge badge-success">Sim</span>':'<span class="badge badge-secondary">Não</span>'}</td>
       <td>
         <button class="btn btn-sm btn-secondary" onclick="rubricEdit(${JSON.stringify(r).replace(/"/g,'&quot;')})">Editar</button>
         <button class="btn btn-sm btn-danger" onclick="rubricDelete(${r.id},'${r.nome.replace(/'/g,"\\'")}')">Excluir</button>
       </td></tr>`).join('')
-      : '<tr><td colspan="9" class="text-center text-muted">Nenhuma rubrica. Clique em "Carregar Padrão".</td></tr>';
-  } catch(e) { if (tbody) tbody.innerHTML = `<tr><td colspan="9" class="text-danger">${e.message}</td></tr>`; }
+      : '<tr><td colspan="10" class="text-center text-muted">Nenhuma rubrica. Clique em "Carregar Padrão".</td></tr>';
+    window._dpRubrics = rows;
+    await lancLoadTable();
+  } catch(e) { if (tbody) tbody.innerHTML = `<tr><td colspan="10" class="text-danger">${e.message}</td></tr>`; }
+}
+
+// Lançamentos de rubrica por funcionário
+const _LANC_HORAS = ['0002', '0003', '0004'];
+const _LANC_SISTEMA = ['0001','0005','0006','0008','0009','0010','0011','0012','0013','0020','0021','0022','0030','0031','0032','0040','0041','0042','0043','0044','0045','0046','0047','0100','0101','0102','0103','0104','0105','0106','0107','0108','0109','0110','0120','0121','0122','0130','0200','0201','0202','0203','0210'];
+
+async function lancLoadTable() {
+  const tbody = document.getElementById('lancTableBody');
+  if (!tbody) return;
+  try {
+    const comp = document.getElementById('lancFiltroComp')?.value || '';
+    const rows = await apiFetch(`/api/dp/employee-rubrics${comp ? `?competencia=${comp}` : ''}`);
+    tbody.innerHTML = rows.length ? rows.map(l => `<tr>
+      <td>${_dpEsc(l.employee_name)}</td>
+      <td><code>${_dpEsc(l.codigo)}</code> ${_dpEsc(l.rubric_nome)}</td>
+      <td><span class="badge ${l.tipo === 'desconto' ? 'badge-danger' : 'badge-success'}">${_dpEsc(l.tipo)}</span></td>
+      <td>${l.competencia ? _dpEsc(l.competencia) : '<span class="badge badge-info">fixo</span>'}</td>
+      <td>${Number(l.quantidade) ? Number(l.quantidade) : '—'}</td>
+      <td>${Number(l.valor) ? fBRL2(l.valor) : (l.formula ? '<span class="text-muted">fórmula</span>' : '—')}</td>
+      <td>${_dpEsc(l.observacao || '')}</td>
+      <td><button class="btn btn-sm btn-danger" onclick="lancDelete(${l.id})">Excluir</button></td>
+    </tr>`).join('') : '<tr><td colspan="8" class="text-center text-muted">Nenhum lançamento.</td></tr>';
+  } catch(e) { tbody.innerHTML = `<tr><td colspan="8" class="text-danger">${_dpEsc(e.message)}</td></tr>`; }
+}
+
+function lancOpenModal() {
+  const rubs = (window._dpRubrics || []).filter(r => r.ativo && r.tipo !== 'informativo' && !_LANC_SISTEMA.includes(r.codigo));
+  if (!rubs.length) { showToast('Cadastre uma rubrica antes de lançar.', 'error'); return; }
+  document.getElementById('lancEmp').innerHTML = dpEmployees.filter(e => e.active)
+    .map(e => `<option value="${e.id}">${_dpEsc(e.name)}</option>`).join('');
+  document.getElementById('lancRubric').innerHTML = rubs
+    .map(r => `<option value="${r.id}">${_dpEsc(r.codigo)} — ${_dpEsc(r.nome)}</option>`).join('');
+  document.getElementById('lancComp').value = document.getElementById('lancFiltroComp')?.value || '';
+  ['lancQtd', 'lancValor', 'lancObs'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('lancModalError').style.display = 'none';
+  lancRubricHint();
+  document.getElementById('lancModal').style.display = 'flex';
+}
+
+function lancRubricHint() {
+  const id = Number(document.getElementById('lancRubric').value);
+  const r = (window._dpRubrics || []).find(x => x.id === id);
+  const hint = document.getElementById('lancHint');
+  if (!r || !hint) return;
+  if (_LANC_HORAS.includes(r.codigo)) hint.textContent = 'Informe a quantidade de horas; o valor é calculado pelo sistema e soma às horas do ponto.';
+  else if (r.formula) hint.textContent = `Calculada pela fórmula: ${r.formula}. Se informar um valor, ele substitui a fórmula.`;
+  else hint.textContent = 'Informe o valor. Com quantidade, o total é valor × quantidade.';
+}
+
+async function lancSave() {
+  const errBox = document.getElementById('lancModalError');
+  const body = {
+    employee_id: Number(document.getElementById('lancEmp').value),
+    rubric_id: Number(document.getElementById('lancRubric').value),
+    competencia: document.getElementById('lancComp').value || '',
+    quantidade: Number(document.getElementById('lancQtd').value || 0),
+    valor: Number(document.getElementById('lancValor').value || 0),
+    observacao: document.getElementById('lancObs').value.trim(),
+  };
+  try {
+    await apiFetch('/api/dp/employee-rubrics', { method: 'POST', body: JSON.stringify(body) });
+    document.getElementById('lancModal').style.display = 'none';
+    showToast('Lançamento criado.', 'success');
+    await lancLoadTable();
+  } catch(e) { errBox.textContent = 'Erro: ' + e.message; errBox.style.display = ''; }
+}
+
+async function lancDelete(id) {
+  if (!confirm('Excluir este lançamento?')) return;
+  try {
+    await apiFetch(`/api/dp/employee-rubrics/${id}`, { method: 'DELETE' });
+    showToast('Lançamento excluído.', 'success');
+    await lancLoadTable();
+  } catch(e) { showToast('Erro: ' + e.message, 'error'); }
+}
+
+async function rubricCheckFormula() {
+  const formula = document.getElementById('rubricFormula').value.trim();
+  const msg = document.getElementById('rubricFormulaMsg');
+  if (!formula || !msg) return true;
+  try {
+    const r = await apiFetch('/api/dp/rubrics/validate-formula', { method: 'POST', body: JSON.stringify({ formula }) });
+    msg.textContent = r.ok ? '✓ Fórmula válida.' : '✗ ' + r.erro;
+    msg.style.color = r.ok ? 'var(--success, #059669)' : 'var(--danger, #dc2626)';
+    return r.ok;
+  } catch { return true; }
 }
 
 function rubricOpenModal() {
   document.getElementById('rubricModalTitle').textContent = 'Nova Rubrica';
   document.getElementById('rubricEditId').value = '';
-  ['rubricCodigo','rubricNome','rubricNat'].forEach(id => document.getElementById(id).value = '');
+  ['rubricCodigo','rubricNome','rubricNat','rubricFormula'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('rubricTodos').checked = false;
   document.getElementById('rubricTipo').value = 'provento';
   ['rubricINSS','rubricIRRF','rubricFGTS'].forEach(id => document.getElementById(id).checked = true);
   document.getElementById('rubricModalError').style.display = 'none';
@@ -2620,6 +3360,8 @@ function rubricEdit(r) {
   document.getElementById('rubricINSS').checked = !!r.incide_inss;
   document.getElementById('rubricIRRF').checked = !!r.incide_irrf;
   document.getElementById('rubricFGTS').checked = !!r.incide_fgts;
+  document.getElementById('rubricFormula').value = r.formula || '';
+  document.getElementById('rubricTodos').checked = !!r.aplica_todos;
   document.getElementById('rubricModalError').style.display = 'none';
   document.getElementById('rubricModal').style.display = 'flex';
 }
@@ -2634,9 +3376,12 @@ async function rubricSave() {
     incide_inss: document.getElementById('rubricINSS').checked ? 1 : 0,
     incide_irrf: document.getElementById('rubricIRRF').checked ? 1 : 0,
     incide_fgts: document.getElementById('rubricFGTS').checked ? 1 : 0,
+    formula: document.getElementById('rubricFormula').value.trim(),
+    aplica_todos: document.getElementById('rubricTodos').checked ? 1 : 0,
   };
   const errBox = document.getElementById('rubricModalError');
   if (!body.codigo || !body.nome) { errBox.textContent = 'Código e nome são obrigatórios.'; errBox.style.display = ''; return; }
+  if (body.aplica_todos && !body.formula) { errBox.textContent = 'Para aplicar a todos, informe uma fórmula.'; errBox.style.display = ''; return; }
   try {
     if (id) await apiFetch(`/api/dp/rubrics/${id}`, { method:'PUT', body: JSON.stringify(body) });
     else await apiFetch('/api/dp/rubrics', { method:'POST', body: JSON.stringify(body) });

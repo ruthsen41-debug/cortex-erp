@@ -11,8 +11,8 @@ let currentUserRole = 'admin';
 const ROLE_MODULES = {
   admin:      null,
   dp:         ['dp', 'conventions', 'employee_portal', 'settings'],
-  fiscal:     ['invoices', 'sped', 'nfe_manifest', 'dirbi', 'certificates', 'settings'],
-  contabil:   ['accounting', 'lalur', 'honorarios', 'audit', 'patrimony', 'simples', 'obligations', 'certificates', 'reports', 'settings'],
+  fiscal:     ['invoices', 'fiscal_books', 'sped', 'nfe_manifest', 'dirbi', 'certificates', 'settings'],
+  contabil:   ['accounting', 'fiscal_books', 'lalur', 'honorarios', 'audit', 'patrimony', 'simples', 'obligations', 'certificates', 'reports', 'settings'],
   comercial:  ['crm', 'sales', 'pdv', 'os', 'inventory', 'purchases', 'contracts', 'returns', 'quotes', 'settings'],
   financeiro: ['receivables', 'payables', 'ofx', 'reports', 'settings'],
 };
@@ -260,6 +260,10 @@ async function switchTab(tab) {
     case 'accounting':
       if (typeof renderAccounting === 'function') await renderAccounting(main);
       else main.innerHTML = '<div class="p-6 text-slate-400">Módulo contábil não carregado.</div>';
+      break;
+    case 'fiscal_books':
+      if (typeof renderFiscalBooks === 'function') await renderFiscalBooks(main);
+      else main.innerHTML = '<div class="p-6 text-slate-400">Módulo Escrita Fiscal não carregado.</div>';
       break;
     case 'dp':
       if (typeof renderDp === 'function') await renderDp(main);
@@ -3889,6 +3893,108 @@ async function submitCertificate(e) {
 }
 
 // Initial Boot
+async function refreshSidebarCompany() {
+  try {
+    const comp = await apiFetch('/api/company');
+    const el = document.getElementById('sidebar-company-name');
+    if (el && (comp.nome_fantasia || comp.razao_social)) {
+      el.textContent = comp.nome_fantasia || comp.razao_social;
+    }
+  } catch (e) {}
+}
+
+async function openCompanySwitcherModal() {
+  let data = { active_company_id: 1, companies: [] };
+  try {
+    data = await apiFetch('/api/company/list');
+  } catch (e) {
+    showToast('Erro ao carregar empresas: ' + e.message, 'error');
+    return;
+  }
+  const activeId = data.active_company_id;
+  const rows = (data.companies || []).map(c => {
+    const isAct = c.id === activeId;
+    return `
+      <div class="flex items-center justify-between gap-3 p-3 rounded-xl border ${isAct ? 'border-indigo-500 bg-indigo-50/60 dark:bg-indigo-900/20' : 'border-slate-200 dark:border-slate-700'}">
+        <div class="min-w-0">
+          <div class="font-semibold text-sm text-slate-800 dark:text-slate-100 truncate">${c.nome_fantasia || c.razao_social}</div>
+          <div class="text-xs text-slate-400 font-mono">${c.cnpj || 'Sem CNPJ'} · ${(c.regime_tributario || '').replace('_', ' ').toUpperCase()}</div>
+        </div>
+        ${isAct
+          ? '<span class="text-[10px] font-bold px-2.5 py-1 rounded-full bg-indigo-600 text-white shrink-0">ATIVA</span>'
+          : `<button onclick="switchActiveCompany(${c.id})" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg shrink-0">Selecionar</button>`}
+      </div>`;
+  }).join('');
+
+  openModal(`
+    <div class="bg-white dark:bg-slate-900 rounded-2xl p-6 space-y-5 max-w-2xl w-full">
+      <div class="flex items-center justify-between">
+        <h3 class="font-bold text-lg text-slate-800 dark:text-slate-100 flex items-center gap-2">
+          <i data-lucide="building-2" class="w-5 h-5 text-indigo-500"></i> Multiempresa — Escritório Contábil
+        </h3>
+        <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-4 h-4"></i></button>
+      </div>
+      <div class="space-y-2 max-h-60 overflow-y-auto">${rows || '<p class="text-xs text-slate-400">Nenhuma empresa cadastrada.</p>'}</div>
+      <div class="border-t border-slate-200 dark:border-slate-800 pt-4">
+        <div class="font-semibold text-xs uppercase text-slate-500 mb-3">Cadastrar Nova Empresa Cliente</div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <input id="nc-razao" class="input w-full text-xs" placeholder="Razão Social *"/>
+          <input id="nc-cnpj" class="input w-full text-xs" placeholder="CNPJ (00.000.000/0001-00)"/>
+          <select id="nc-regime" class="input w-full text-xs">
+            <option value="simples_nacional">Simples Nacional</option>
+            <option value="lucro_presumido">Lucro Presumido</option>
+            <option value="lucro_real">Lucro Real</option>
+            <option value="mei">MEI</option>
+          </select>
+          <div class="flex gap-2">
+            <input id="nc-cidade" class="input flex-1 text-xs" placeholder="Cidade" value="Cuiabá"/>
+            <input id="nc-uf" class="input w-16 text-xs uppercase" placeholder="UF" value="MT" maxlength="2"/>
+          </div>
+        </div>
+        <button onclick="createNewClientCompany()" class="mt-3 w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold py-2.5 rounded-xl">
+          + Cadastrar Empresa e Inicializar Plano de Contas / Acumuladores
+        </button>
+      </div>
+    </div>`);
+}
+
+async function switchActiveCompany(companyId) {
+  try {
+    const res = await apiFetch('/api/company/switch', {
+      method: 'POST',
+      body: JSON.stringify({ company_id: companyId }),
+    });
+    if (res.access_token) localStorage.setItem('cortex_token', res.access_token);
+    const sidebarName = document.getElementById('sidebar-company-name');
+    if (sidebarName && res.company) {
+      sidebarName.textContent = res.company.nome_fantasia || res.company.razao_social;
+    }
+    showToast(`Empresa ativa alterada para: ${res.company?.nome_fantasia || res.company?.razao_social}`, 'success');
+    closeModal();
+    await switchTab(currentTab);
+  } catch (e) {
+    showToast('Erro ao trocar empresa: ' + e.message, 'error');
+  }
+}
+
+async function createNewClientCompany() {
+  const payload = {
+    razao_social: document.getElementById('nc-razao')?.value?.trim(),
+    cnpj: document.getElementById('nc-cnpj')?.value?.trim() || '',
+    regime_tributario: document.getElementById('nc-regime')?.value || 'simples_nacional',
+    cidade: document.getElementById('nc-cidade')?.value?.trim() || 'Cuiabá',
+    uf: (document.getElementById('nc-uf')?.value?.trim() || 'MT').toUpperCase(),
+  };
+  if (!payload.razao_social) { showToast('Informe a Razão Social.', 'error'); return; }
+  try {
+    const res = await apiFetch('/api/company/create', { method: 'POST', body: JSON.stringify(payload) });
+    showToast(`Empresa "${res.company?.razao_social}" criada!`, 'success');
+    await switchActiveCompany(res.id);
+  } catch (e) {
+    showToast('Erro ao criar empresa: ' + e.message, 'error');
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   const theme = localStorage.getItem('cortex_theme');
   if (theme === 'dark') document.documentElement.classList.add('dark');
@@ -3902,6 +4008,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   } catch (e) {}
 
+  refreshSidebarCompany();
   switchTab(getFirstTab(currentUserRole));
   if (currentUserRole === 'admin') {
     refreshNotificationBadge();

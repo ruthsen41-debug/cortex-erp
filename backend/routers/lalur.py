@@ -231,3 +231,107 @@ def apuracao_lucro_real(
 @router.get("/api/lalur/sugestoes")
 def get_sugestoes():
     return {"adicoes": ADICOES_COMUNS, "exclusoes": EXCLUSOES_COMUNS}
+
+
+@router.get("/api/lalur/balancetes-suspensao")
+def balancetes_suspensao_reducao(
+    ano: Optional[int] = None,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """Compara mês a mês (Lucro Real Anual) a estimativa pela receita bruta vs. balancete acumulado de suspensão/redução."""
+    import calendar
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    yr = ano or date.today().year
+
+    lancs = rows_to_dicts(conn.execute(
+        "SELECT tipo, valor FROM lalur_lancamentos WHERE company_id = ? AND ano = ?",
+        (company_id, yr),
+    ).fetchall())
+    adicoes_anuais = sum(float(l["valor"] or 0) for l in lancs if l["tipo"] == "adicao")
+    exclusoes_anuais = sum(float(l["valor"] or 0) for l in lancs if l["tipo"] == "exclusao")
+
+    prejuizos_row = conn.execute(
+        "SELECT COALESCE(SUM(CASE WHEN saldo < 0 THEN ABS(saldo) ELSE 0 END),0) FROM lalur_parte_b WHERE company_id = ? AND ano < ?",
+        (company_id, yr),
+    ).fetchone()
+    prej_acum = float(prejuizos_row[0] or 0) if prejuizos_row else 0.0
+
+    meses = []
+    rec_acum = desp_acum = 0.0
+    pago_acum = 0.0
+    for m in range(1, 13):
+        last_day = calendar.monthrange(yr, m)[1]
+        s_dt = f"{yr}-{m:02d}-01"
+        e_dt = f"{yr}-{m:02d}-{last_day:02d}"
+
+        # Tenta contabilidade primeiro; se vazia, usa financeiro pago
+        acc_rec = float(conn.execute("""
+            SELECT COALESCE(SUM(l.credit - l.debit), 0)
+            FROM accounting_entry_lines l
+            JOIN accounting_entries e ON e.id = l.entry_id
+            JOIN accounting_accounts a ON a.id = l.account_id
+            WHERE e.company_id = ? AND a.account_type = 'receita' AND e.entry_date BETWEEN ? AND ?
+        """, (company_id, s_dt, e_dt)).fetchone()[0] or 0.0)
+        acc_desp = float(conn.execute("""
+            SELECT COALESCE(SUM(l.debit - l.credit), 0)
+            FROM accounting_entry_lines l
+            JOIN accounting_entries e ON e.id = l.entry_id
+            JOIN accounting_accounts a ON a.id = l.account_id
+            WHERE e.company_id = ? AND a.account_type IN ('custo', 'despesa') AND e.entry_date BETWEEN ? AND ?
+        """, (company_id, s_dt, e_dt)).fetchone()[0] or 0.0)
+
+        if acc_rec == 0.0 and acc_desp == 0.0:
+            acc_rec = float(conn.execute(
+                "SELECT COALESCE(SUM(amount),0) FROM financial_entries WHERE company_id=? AND type='receita' AND status='pago' AND due_date BETWEEN ? AND ?",
+                (company_id, s_dt, e_dt),
+            ).fetchone()[0] or 0.0)
+            acc_desp = float(conn.execute(
+                "SELECT COALESCE(SUM(amount),0) FROM financial_entries WHERE company_id=? AND type='despesa' AND status='pago' AND due_date BETWEEN ? AND ?",
+                (company_id, s_dt, e_dt),
+            ).fetchone()[0] or 0.0)
+
+        rec_acum += acc_rec
+        desp_acum += acc_desp
+
+        # 1) Estimativa mensal sobre a receita bruta do mês (8% IRPJ / 12% CSLL padrão)
+        base_est_ir = round(acc_rec * 0.08, 2)
+        base_est_cs = round(acc_rec * 0.12, 2)
+        ir_est = round(base_est_ir * 0.15 + max(0.0, base_est_ir - 20000.0) * 0.10, 2)
+        cs_est = round(base_est_cs * 0.09, 2)
+        tot_est = round(ir_est + cs_est, 2)
+
+        # 2) Balancete Acumulado de Suspensão/Redução (jan..m)
+        lucro_contab_acum = rec_acum - desp_acum
+        lair_acum = lucro_contab_acum + (adicoes_anuais * (m / 12.0)) - (exclusoes_anuais * (m / 12.0))
+        comp_prej = min(prej_acum, max(0.0, lair_acum * 0.30))
+        base_real_acum = max(0.0, lair_acum - comp_prej)
+        ir_real_acum = round(base_real_acum * 0.15 + max(0.0, base_real_acum - 20000.0 * m) * 0.10, 2)
+        cs_real_acum = round(base_real_acum * 0.09, 2)
+        tot_real_acum = round(ir_real_acum + cs_real_acum, 2)
+        devido_balancete_mes = max(0.0, round(tot_real_acum - pago_acum, 2))
+
+        melhor = "balancete_suspensao" if devido_balancete_mes < tot_est else "estimativa"
+        escolhido = min(tot_est, devido_balancete_mes)
+        pago_acum = round(pago_acum + escolhido, 2)
+
+        meses.append({
+            "competencia": f"{yr}-{m:02d}",
+            "mes": m,
+            "receita_mes": round(acc_rec, 2),
+            "despesa_mes": round(acc_desp, 2),
+            "lucro_contabil_acumulado": round(lucro_contab_acum, 2),
+            "base_lucro_real_acumulada": round(base_real_acum, 2),
+            "estimativa_mes": tot_est,
+            "balancete_suspensao_mes": devido_balancete_mes,
+            "modalidade_recomendada": melhor,
+            "economia_mes": round(max(0.0, tot_est - devido_balancete_mes), 2),
+        })
+
+    conn.close()
+    return {
+        "ano": yr,
+        "meses": meses,
+        "total_estimativa": round(sum(m["estimativa_mes"] for m in meses), 2),
+        "total_otimizado": round(sum(min(m["estimativa_mes"], m["balancete_suspensao_mes"]) for m in meses), 2),
+    }

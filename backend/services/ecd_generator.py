@@ -1,15 +1,19 @@
 """
 Gerador do SPED Contábil (ECD — Escrituração Contábil Digital).
-Blocos: 0 (Identificação), I (Plano de Contas), J (Demonstrações), L (Livro Diário), 9 (Encerramento).
-Referência: Guia Prático ECD v9.1 — Receita Federal do Brasil.
+Blocos: 0 (Identificação), I (Lançamentos Contábeis e Plano de Contas),
+        J (Demonstrações Contábeis e Termo de Encerramento), 9 (Controle).
+Referência: Guia Prático ECD Leiaute 9 — Receita Federal do Brasil.
 """
 import re
-from datetime import date
 from typing import Any, Dict, List
 
 
 def _c(val: Any) -> str:
     return str(val or "").strip().replace("|", "").replace("\n", " ")
+
+
+def _digits(val: Any) -> str:
+    return re.sub(r"\D", "", str(val or ""))
 
 
 def _d(dt: str) -> str:
@@ -23,19 +27,14 @@ def _d(dt: str) -> str:
 
 def _n(val: Any, dec: int = 2) -> str:
     try:
-        return f"{float(val or 0):.{dec}f}".replace(".", ",")
+        return f"{abs(float(val or 0)):.{dec}f}".replace(".", ",")
     except Exception:
         return "0,00"
 
 
-def _row(*fields) -> str:
-    return "|" + "|".join(str(f) for f in fields) + "|\r\n"
-
-
 class EcdGenerator:
     """
-    Gera o arquivo ECD (SPED Contábil) a partir dos dados da empresa e dos
-    lançamentos contábeis armazenados nas tabelas accounting_*.
+    Gera o arquivo ECD (SPED Contábil) em conformidade com o leiaute oficial do PVA RFB.
     """
 
     @staticmethod
@@ -50,139 +49,167 @@ class EcdGenerator:
         lines: List[str] = []
         reg_count: Dict[str, int] = {}
 
-        def emit(*fields):
-            row = _row(*fields)
+        def emit(*fields: Any) -> None:
             reg = str(fields[0])
+            row = "|" + "|".join(_c(f) if i > 0 else reg for i, f in enumerate(fields)) + "|\r\n"
             reg_count[reg] = reg_count.get(reg, 0) + 1
             lines.append(row)
 
-        cnpj = re.sub(r"\D", "", _c(company.get("cnpj", "")))
-        razao = _c(company.get("razao_social", "EMPRESA"))
-        uf = _c(company.get("uf", "MT"))
-        ie = re.sub(r"\D", "", _c(company.get("inscricao_estadual", "")))
-        im = _c(company.get("inscricao_municipal", ""))
-        email = _c(company.get("email", ""))
-        regime = _c(company.get("regime_tributario", "simples_nacional"))
-        ind_sit_esp = ""
-        ind_nire = "0"
-        hoje = date.today()
+        def close_block(prefix: str, close_reg: str) -> None:
+            reg_count[close_reg] = reg_count.get(close_reg, 0) + 1
+            tot = sum(v for k, v in reg_count.items() if k.startswith(prefix))
+            lines.append(f"|{close_reg}|{tot}|\r\n")
 
-        # ── BLOCO 0 ───────────────────────────────────────────────────
-        emit("0000", "LECD", "03.00", _d(start_date), _d(end_date),
-             razao, cnpj, "", uf, ie, im, email,
-             "0",    # ind_sit_ini: 0=regular
-             ind_nire, ind_sit_esp, "1")  # ind_grande_porte: 0=não
+        cnpj = _digits(company.get("cnpj"))
+        razao = _c(company.get("razao_social") or "EMPRESA")
+        uf = _c(company.get("uf") or "MT")
+        ie = _digits(company.get("inscricao_estadual"))
+        im = _c(company.get("inscricao_municipal"))
+        cod_mun = _digits(company.get("codigo_ibge_municipio")) or "5103403"
+        dt_ini = _d(start_date)
+        dt_fim = _d(end_date)
 
-        emit("0001", "1")  # abre bloco 0 (com dados)
+        # ── BLOCO 0 — Abertura, Identificação e Referências ──────────────────
+        emit("0000", "LECD", dt_ini, dt_fim, razao, cnpj, uf, ie, cod_mun, im,
+             "", "0", "0", "1", "0", "", "", "N", "N", "0", "0", "0")
+        emit("0001", "0")
+        emit("0007", uf, "")
+        emit("0020", "0", cnpj, uf, ie, cod_mun, im, "")
+        emit("0150", "1", razao, "01058", cnpj, "", "", uf, ie, "", cod_mun, "", "")
+        close_block("0", "0990")
 
-        emit("0007",        # Identificação dos signatários
-             "ADMINISTRADOR", "0", "10", cnpj, "1", "", "")
+        # ── BLOCO I — Lançamentos Contábeis ───────────────────────────────────
+        emit("I001", "0")
+        emit("I010", "G", "9.00")  # G = Livro Diário Geral, versão leiaute 9.00
+        emit("I030", "TERMO DE ABERTURA", "1", "DIARIO GERAL", "1", razao, "", cnpj,
+             dt_ini, "", _c(company.get("cidade") or "CUIABA"), dt_fim)
 
-        emit("0150",        # Tabela de Cadastro do Participante
-             "1", razao, "0", cnpj, "", "", "", uf, ie, im, email,
-             _c(company.get("cep", "")),
-             _c(company.get("logradouro", "")),
-             _c(company.get("numero", "")),
-             _c(company.get("complemento", "")),
-             _c(company.get("bairro", "")),
-             _c(company.get("cidade", "")),
-             "", "")
-
-        emit("0999", reg_count.get("0001", 0) + reg_count.get("0007", 0) +
-             reg_count.get("0150", 0) + 2)  # +2: 0000 e 0999
-
-        # ── BLOCO I — Plano de Contas ─────────────────────────────────
-        i_count = 0
-        emit("I001", "1")
-        i_count += 1
-
+        dt_alt = dt_ini
         for acc in accounts:
-            # Mapeia account_type p/ indicadores ECD
-            tp = acc.get("account_type", "")
-            ind_cta = "A" if acc.get("accepts_entries", 1) else "S"  # A=analítica S=sintética
-            # Nível hierárquico: contagem de pontos no código + 1
-            nivel = str(_c(acc.get("code", "")).count(".") + 1)
-            # Natureza: D=devedora C=credora
-            nat = "D" if acc.get("nature") == "devedora" else "C"
+            code = _c(acc.get("code"))
+            ind_cta = "A" if acc.get("accepts_entries", 1) else "S"
+            nivel = str(code.count(".") + 1)
+            nat_map = {
+                "ativo": "01",
+                "passivo": "02",
+                "patrimonio_liquido": "03",
+                "receita": "04",
+                "custo": "04",
+                "despesa": "04",
+            }
+            cod_nat = nat_map.get(acc.get("account_type", ""), "09")
+            emit("I050", dt_alt, cod_nat, ind_cta, nivel, code, _c(acc.get("parent_code")), _c(acc.get("name")))
+            ref_code = _c(acc.get("referencial_code"))
+            if ind_cta == "A" and ref_code:
+                emit("I051", "10", "", ref_code)
 
-            emit("I010",
-                 _c(acc.get("code")),   # cd_cta_ref
-                 _c(acc.get("name")),   # nome_cta
-                 _c(acc.get("code")),   # cod_cta (mesmo código)
-                 nivel,
-                 ind_cta,
-                 nat,
-                 _c(acc.get("parent_code", "")),
-                 "")
-            i_count += 1
+        # I150 / I155 — Saldos Periódicos
+        analiticas = [a for a in accounts if a.get("accepts_entries", 1)]
+        emit("I150", dt_ini, dt_fim)
+        for acc in analiticas:
+            td = float(acc.get("_total_debit", 0.0) or 0.0)
+            tc = float(acc.get("_total_credit", 0.0) or 0.0)
+            is_dev = acc.get("nature") == "devedora"
+            saldo = (td - tc) if is_dev else (tc - td)
+            ind_fin = "D" if (saldo >= 0 and is_dev) or (saldo < 0 and not is_dev) else "C"
+            emit("I155", _c(acc.get("code")), "", "0,00", "D" if is_dev else "C",
+                 _n(td), _n(tc), _n(saldo), ind_fin)
 
-            # Saldo inicial (zero para nova implementação)
-            if acc.get("accepts_entries", 1):
-                emit("I012", _c(acc.get("code")), _d(start_date), "0,00", nat)
-                i_count += 1
-
-        emit("I999", i_count + 2)
-
-        # ── BLOCO J — Balanços ────────────────────────────────────────
-        j_count = 0
-        emit("J001", "1")
-        j_count += 1
-
-        # J100 — Plano de Contas Referencial (simplificado)
-        for acc in accounts:
-            if not acc.get("accepts_entries", 1):
-                continue
-            nat = "D" if acc.get("nature") == "devedora" else "C"
-            td = round(float(acc.get("_total_debit", 0.0)), 2)
-            tc = round(float(acc.get("_total_credit", 0.0)), 2)
-            saldo = round((td - tc) if acc.get("nature") == "devedora" else (tc - td), 2)
-            emit("J100",
-                 _d(end_date),
-                 "0",           # DT_INI_BCIA
-                 _c(acc.get("code")),
-                 _n(td), _n(tc), _n(abs(saldo)), nat)
-            j_count += 1
-
-        emit("J999", j_count + 2)
-
-        # ── BLOCO L — Livro Diário ────────────────────────────────────
-        l_count = 0
-        emit("L001", "1")
-        l_count += 1
-
-        # L020 — cabeçalho de cada lançamento
+        # I200 / I250 — Lançamentos Contábeis (Livro Diário)
         for entry in entries:
             eid = str(entry.get("id", ""))
-            emit("L020",
-                 _d(entry.get("entry_date", "")),
-                 eid,                             # núm. lançamento
-                 _c(entry.get("description", "")),
-                 _c(entry.get("document_number", "")),
-                 "")
-            l_count += 1
-
+            vl_lcto = float(entry.get("total_debit") or 0.0)
+            ind_lcto = "E" if entry.get("entry_type") == "encerramento" else "N"
+            emit("I200", eid, _d(entry.get("entry_date", "")), _n(vl_lcto), ind_lcto, "")
             for ln in entry.get("lines", []):
-                debit  = float(ln.get("debit", 0.0))
-                credit = float(ln.get("credit", 0.0))
+                debit = float(ln.get("debit", 0.0) or 0.0)
+                credit = float(ln.get("credit", 0.0) or 0.0)
                 ind_dc = "D" if debit > 0 else "C"
-                valor  = debit if debit > 0 else credit
-                emit("L022",
+                valor = debit if debit > 0 else credit
+                if valor <= 0:
+                    continue
+                emit("I250",
                      _c(ln.get("account_code", ln.get("account_id", ""))),
-                     ind_dc,
+                     _c(ln.get("cost_center_id") or ""),
                      _n(valor),
-                     _c(ln.get("description", "")))
-                l_count += 1
+                     ind_dc,
+                     _c(entry.get("document_number") or ""),
+                     "",
+                     _c(ln.get("description") or entry.get("description") or "LANCTO CONTABIL"),
+                     "")
 
-        emit("L999", l_count + 2)
+        # I350 / I355 — Saldos das Contas de Resultado antes do Encerramento
+        resultado_accs = [a for a in analiticas if a.get("account_type") in ("receita", "custo", "despesa")]
+        if resultado_accs:
+            emit("I350", dt_fim)
+            for acc in resultado_accs:
+                td = float(acc.get("_total_debit", 0.0) or 0.0)
+                tc = float(acc.get("_total_credit", 0.0) or 0.0)
+                saldo = (td - tc) if acc.get("nature") == "devedora" else (tc - td)
+                if abs(saldo) < 0.01:
+                    continue
+                ind_dc = "D" if (acc.get("nature") == "devedora" and saldo >= 0) or (acc.get("nature") == "credora" and saldo < 0) else "C"
+                emit("I355", _c(acc.get("code")), "", _n(saldo), ind_dc)
 
-        # ── BLOCO 9 — Encerramento ────────────────────────────────────
-        emit("9001", "1")
-        total_lines = sum(reg_count.values()) + 4  # +4 p/ 9001..9999
-        emit("9900", "0", reg_count.get("0000", 0))
-        emit("9900", "I", sum(v for k, v in reg_count.items() if k.startswith("I")))
-        emit("9900", "J", sum(v for k, v in reg_count.items() if k.startswith("J")))
-        emit("9900", "L", sum(v for k, v in reg_count.items() if k.startswith("L")))
-        emit("9900", "9", 6)
-        emit("9999", total_lines + 10)
+        close_block("I", "I990")
+
+        # ── BLOCO J — Demonstrações Contábeis ────────────────────────────────
+        emit("J001", "0")
+        emit("J005", dt_ini, dt_fim, "1", "DEMONSTRACOES CONTABEIS CONSOLIDADAS")
+
+        # J100 — Balanço Patrimonial
+        bp_accs = [a for a in accounts if a.get("account_type") in ("ativo", "passivo", "patrimonio_liquido")]
+        for acc in bp_accs:
+            td = float(acc.get("_total_debit", 0.0) or 0.0)
+            tc = float(acc.get("_total_credit", 0.0) or 0.0)
+            saldo = (td - tc) if acc.get("nature") == "devedora" else (tc - td)
+            ind_grp = "A" if acc.get("account_type") == "ativo" else "P"
+            ind_cod = "T" if not acc.get("accepts_entries", 1) else "D"
+            ind_dc = "D" if (saldo >= 0 and acc.get("nature") == "devedora") or (saldo < 0 and acc.get("nature") != "devedora") else "C"
+            emit("J100", _c(acc.get("code")), ind_cod, str(_c(acc.get("code")).count(".") + 1),
+                 _c(acc.get("parent_code")), ind_grp, _c(acc.get("name")), "0,00", "D" if acc.get("nature") == "devedora" else "C",
+                 _n(saldo), ind_dc, "")
+
+        # J150 — Demonstração do Resultado do Exercício (DRE)
+        dre_accs = [a for a in accounts if a.get("account_type") in ("receita", "custo", "despesa")]
+        for idx, acc in enumerate(dre_accs, start=1):
+            td = float(acc.get("_total_debit", 0.0) or 0.0)
+            tc = float(acc.get("_total_credit", 0.0) or 0.0)
+            saldo = (tc - td) if acc.get("account_type") == "receita" else (td - tc)
+            ind_vl = "P" if (acc.get("account_type") == "receita" and saldo >= 0) else "N"
+            emit("J150", str(idx), _c(acc.get("code")), "D" if acc.get("accepts_entries", 1) else "T",
+                 str(_c(acc.get("code")).count(".") + 1), _c(acc.get("parent_code")),
+                 _c(acc.get("name")), _n(saldo), ind_vl, "R" if acc.get("account_type") == "receita" else "D", "")
+
+        # J210 — DLPA / DMPL resumida
+        emit("J210", "0", "2.3.03", "LUCROS OU PREJUIZOS ACUMULADOS", "0,00", "C", "0,00", "C")
+
+        # J900 / J930 — Termo de Encerramento e Signatários
+        total_prev_lines = len(lines) + 8
+        emit("J900", "TERMO DE ENCERRAMENTO", "1", "DIARIO GERAL", razao, str(total_prev_lines), dt_ini, dt_fim)
+        emit("J930", _c(company.get("razao_social") or "ADMINISTRADOR"), cnpj[:11] or "00000000000",
+             "ADMINISTRADOR", "900", "", _c(company.get("email")), _c(company.get("telefone")), uf, "", "", "N")
+        emit("J930", _c(company.get("contador_nome") or "CONTADOR RESPONSAVEL"),
+             _digits(company.get("contador_cpf")) or "00000000000",
+             "CONTADOR", "900", _c(company.get("contador_crc") or "CRC-000000/O"),
+             _c(company.get("contador_email") or company.get("email")), "", uf, "", "", "S")
+        close_block("J", "J990")
+
+        # ── BLOCO 9 — Controle e Encerramento ─────────────────────────────────
+        emit("9001", "0")
+        existing = sorted(reg_count.keys())
+        all_9900 = dict(reg_count)
+        all_9900["9900"] = len(existing) + 3
+        all_9900["9990"] = 1
+        all_9900["9999"] = 1
+        for reg, cnt in sorted(all_9900.items()):
+            lines.append(f"|9900|{reg}|{cnt}|\r\n")
+            reg_count["9900"] = reg_count.get("9900", 0) + 1
+
+        reg_count["9990"] = 1
+        reg_count["9999"] = 1
+        b9_tot = sum(v for k, v in reg_count.items() if k.startswith("9"))
+        lines.append(f"|9990|{b9_tot}|\r\n")
+        lines.append(f"|9999|{len(lines) + 1}|\r\n")
 
         return "".join(lines)

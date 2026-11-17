@@ -118,6 +118,9 @@
       <button onclick="switchTab('accounting')" id="nav-accounting" class="nav-item" data-label="Módulo Contábil">
         <i data-lucide="book-marked" class="nav-icon text-violet-500"></i><span class="nav-label">Módulo Contábil</span>
       </button>
+      <button onclick="switchTab('fiscal_books')" id="nav-fiscal_books" class="nav-item" data-label="Escrita Fiscal &amp; Apuração">
+        <i data-lucide="book-text" class="nav-icon text-blue-500"></i><span class="nav-label">Escrita Fiscal &amp; Apuração</span>
+      </button>
       <button onclick="switchTab('dp')" id="nav-dp" class="nav-item" data-label="Depto. Pessoal &amp; Folha">
         <i data-lucide="users-round" class="nav-icon text-teal-500"></i><span class="nav-label">Depto. Pessoal &amp; Folha</span>
       </button>
@@ -166,8 +169,11 @@
     </nav>
 
     <div class="cx-sb-footer">
-      <div class="cx-sb-company">
-        <div id="sidebar-company-name" class="cx-sb-cname">Cortex ERP Solutions</div>
+      <div class="cx-sb-company cursor-pointer hover:opacity-90 transition" onclick="openCompanySwitcherModal()" title="Trocar ou cadastrar empresa (Escritório Contábil)">
+        <div class="flex items-center justify-between gap-1">
+          <div id="sidebar-company-name" class="cx-sb-cname">Cortex ERP Solutions</div>
+          <i data-lucide="arrow-left-right" class="w-3.5 h-3.5 text-slate-400 shrink-0"></i>
+        </div>
         <div id="sidebar-company-env" class="cx-sb-env">
           <span class="cx-sb-dot"></span><span class="cx-sb-env-label">SEFAZ ATIVO</span>
         </div>
@@ -247,6 +253,7 @@
   <script src="/static/auth.js"></script>
   <script src="/static/app.js"></script>
   <script src="/static/accounting.js"></script>
+  <script src="/static/fiscal_books.js"></script>
   <script src="/static/dp.js"></script>
   <script src="/static/purchases.js"></script>
   <script src="/static/contracts.js"></script>

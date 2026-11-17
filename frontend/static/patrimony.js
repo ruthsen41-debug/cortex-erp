@@ -45,6 +45,9 @@ async function renderPatrimony(container) {
         <p class="text-xs text-slate-400 mt-0.5">Controle de bens, depreciação e CIAP</p>
       </div>
       <div class="flex gap-2 flex-wrap">
+        <button onclick="patOpenParallelModal()" class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-sm font-semibold transition">
+          <i data-lucide="git-compare" class="w-4 h-4"></i> CPC 27 × Fiscal
+        </button>
         <button onclick="patRunDepreciation()" class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold transition">
           <i data-lucide="calculator" class="w-4 h-4"></i> Depreciar Mês
         </button>
@@ -130,6 +133,9 @@ function patRow(a) {
     <td class="px-4 py-3"><span class="px-2 py-1 rounded-lg text-[10px] font-semibold ${statusColor}">${a.status}</span></td>
     <td class="px-4 py-3 text-right">
       <div class="flex gap-1 justify-end">
+        ${a.status !== 'baixado' ? `<button onclick="patOpenBaixaModal(${a.id}, '${(a.name||'').replace(/'/g,"\\'")}', ${a.net_value||0})" title="Baixar Bem" class="p-1.5 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-500/10 text-slate-400 hover:text-amber-500">
+          <i data-lucide="arrow-down-circle" class="w-3.5 h-3.5"></i>
+        </button>` : ''}
         <button onclick="patOpenModal(${JSON.stringify(a).replace(/"/g,'&quot;')})" class="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 hover:text-blue-500">
           <i data-lucide="pencil" class="w-3.5 h-3.5"></i>
         </button>
@@ -153,7 +159,9 @@ function patOpenModal(asset = null) {
       <div>${lblP('Categoria')}<select id="pat-cat" class="${inputP()}">${catOptions}</select></div>
       <div>${lblP('Data de Aquisição')}<input type="date" id="pat-date" class="${inputP()}" value="${asset?.acquisition_date||new Date().toISOString().slice(0,10)}" /></div>
       <div>${lblP('Valor de Aquisição (R$)')}<input type="number" id="pat-value" class="${inputP()}" value="${asset?.acquisition_value||''}" step="0.01" /></div>
-      <div>${lblP('Vida Útil (meses)')}<input type="number" id="pat-life" class="${inputP()}" value="${asset?.useful_life_months||60}" /></div>
+      <div>${lblP('Vida Útil Societária (meses)')}<input type="number" id="pat-life" class="${inputP()}" value="${asset?.useful_life_months||60}" /></div>
+      <div>${lblP('Vida Útil Fiscal IN 1.700 (meses)')}<input type="number" id="pat-tax-life" class="${inputP()}" value="${asset?.tax_useful_life_months||asset?.useful_life_months||60}" /></div>
+      <div>${lblP('Crédito ICMS CIAP (R$)')}<input type="number" id="pat-icms-cred" class="${inputP()}" value="${asset?.icms_credit_total||0}" step="0.01" /></div>
       <div>${lblP('Valor Residual (R$)')}<input type="number" id="pat-residual" class="${inputP()}" value="${asset?.residual_value||0}" step="0.01" /></div>
       <div>${lblP('Método de Depreciação')}
         <select id="pat-method" class="${inputP()}">
@@ -179,6 +187,8 @@ async function patSave(id) {
     acquisition_date: document.getElementById('pat-date')?.value,
     acquisition_value: parseFloat(document.getElementById('pat-value')?.value) || 0,
     useful_life_months: parseInt(document.getElementById('pat-life')?.value) || 60,
+    tax_useful_life_months: parseInt(document.getElementById('pat-tax-life')?.value) || 60,
+    icms_credit_total: parseFloat(document.getElementById('pat-icms-cred')?.value) || 0,
     residual_value: parseFloat(document.getElementById('pat-residual')?.value) || 0,
     depreciation_method: document.getElementById('pat-method')?.value,
     notes: document.getElementById('pat-notes')?.value,
@@ -239,4 +249,68 @@ async function patFilterAssets() {
     ? assets.map(a => patRow(a)).join('')
     : `<tr><td colspan="9" class="px-4 py-10 text-center text-slate-400">Nenhum bem encontrado.</td></tr>`;
   if (window.lucide) lucide.createIcons();
+}
+
+function patOpenBaixaModal(id, name, netVal) {
+  openModal(`
+  <div class="bg-white dark:bg-slate-900 rounded-2xl p-6 space-y-4">
+    <h3 class="font-bold text-lg text-slate-800 dark:text-white">Baixa Patrimonial — ${name}</h3>
+    <p class="text-xs text-slate-400">Valor contábil líquido atual: <strong>${fBRL_p(netVal)}</strong></p>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div>${lblP('Data da Baixa')}<input type="date" id="pb-date" class="${inputP()}" value="${new Date().toISOString().slice(0,10)}"/></div>
+      <div>${lblP('Valor da Venda / Alienação (R$)')}<input type="number" step="0.01" id="pb-val" class="${inputP()}" value="${netVal}"/></div>
+      <div>${lblP('Motivo')}<select id="pb-reason" class="${inputP()}">
+        <option value="venda">Venda</option><option value="obsolescencia">Obsolescência / Sucata</option><option value="sinistro">Sinistro</option>
+      </select></div>
+      <div class="flex items-center gap-2 pt-5">
+        <input type="checkbox" id="pb-contabil" checked class="w-4 h-4 accent-purple-600"/>
+        <label for="pb-contabil" class="text-xs text-slate-600 dark:text-slate-300">Gerar lançamento contábil automático</label>
+      </div>
+    </div>
+    <div class="flex gap-2 justify-end">
+      <button onclick="closeModal()" class="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs">Cancelar</button>
+      <button onclick="patConfirmBaixa(${id})" class="bg-rose-600 text-white px-4 py-2 rounded-xl text-xs font-semibold">Confirmar Baixa</button>
+    </div>
+  </div>`);
+}
+
+async function patConfirmBaixa(id) {
+  const payload = {
+    disposal_date: document.getElementById('pb-date').value,
+    disposal_value: parseFloat(document.getElementById('pb-val').value) || 0,
+    disposal_reason: document.getElementById('pb-reason').value,
+    gerar_contabil: document.getElementById('pb-contabil').checked,
+  };
+  const res = await apiFetch(`/api/patrimony/${id}/baixa`, { method: 'POST', body: JSON.stringify(payload) });
+  showToast(`Baixa concluída! Resultado: ${fBRL_p(res.capital_gain_loss)} (${res.tipo_resultado})`, 'success');
+  closeModal();
+  switchTab('patrimony');
+}
+
+async function patOpenParallelModal(gerarLalur = false) {
+  const comp = new Date().toISOString().slice(0, 7);
+  const d = await apiFetch(`/api/patrimony/depreciacao-paralela?competencia=${comp}&gerar_lalur=${gerarLalur}`).catch(() => null);
+  if (!d) { showToast('Erro ao calcular depreciação paralela.', 'error'); return; }
+  if (gerarLalur && d.lalur_lancamento_id) showToast(`Ajuste LALUR (${d.efeito_lalur}) lançado!`, 'success');
+  const rows = (d.items || []).map(i => `
+    <tr class="border-b border-slate-100 dark:border-slate-800 text-xs">
+      <td class="px-3 py-2">${i.name}</td>
+      <td class="px-3 py-2 text-right font-mono">${fBRL_p(i.depreciacao_societaria)} (${i.vida_societaria_meses}m)</td>
+      <td class="px-3 py-2 text-right font-mono">${fBRL_p(i.depreciacao_fiscal)} (${i.vida_fiscal_meses}m)</td>
+      <td class="px-3 py-2 text-right font-mono font-bold">${fBRL_p(i.diferenca_mensal)} (${i.efeito_lalur})</td>
+    </tr>`).join('') || '<tr><td colspan="4" class="text-center text-slate-400 py-4">Sem bens ativos.</td></tr>';
+  openModal(`
+  <div class="bg-white dark:bg-slate-900 rounded-2xl p-6 space-y-4 max-w-2xl w-full">
+    <h3 class="font-bold text-lg text-slate-800 dark:text-white">Depreciação Societária (CPC 27) × Fiscal (IN 1.700)</h3>
+    <div class="grid grid-cols-3 gap-3 text-xs">
+      <div class="p-3 rounded-xl bg-slate-50 dark:bg-slate-800">Societária: <strong>${fBRL_p(d.total_societaria)}</strong></div>
+      <div class="p-3 rounded-xl bg-slate-50 dark:bg-slate-800">Fiscal: <strong>${fBRL_p(d.total_fiscal)}</strong></div>
+      <div class="p-3 rounded-xl bg-slate-50 dark:bg-slate-800">LALUR (${d.efeito_lalur}): <strong>${fBRL_p(d.diferenca_liquida)}</strong></div>
+    </div>
+    <div class="overflow-x-auto max-h-64"><table class="w-full"><thead><tr class="text-[11px] text-slate-400 uppercase border-b"><th class="px-3 py-2 text-left">Bem</th><th class="px-3 py-2 text-right">Societária</th><th class="px-3 py-2 text-right">Fiscal</th><th class="px-3 py-2 text-right">Diferença</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="flex gap-2 justify-end">
+      <button onclick="closeModal()" class="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs">Fechar</button>
+      ${Math.abs(d.diferenca_liquida) > 0 ? `<button onclick="patOpenParallelModal(true)" class="bg-teal-600 text-white px-4 py-2 rounded-xl text-xs font-semibold">Lançar Ajuste no LALUR</button>` : ''}
+    </div>
+  </div>`);
 }

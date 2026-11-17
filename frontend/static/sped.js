@@ -494,7 +494,12 @@ async function renderSpedEcf(el) {
       <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5">
         <div class="font-semibold text-slate-700 dark:text-slate-200 text-sm mb-4">ECF — Escrituração Contábil Fiscal (IRPJ/CSLL)</div>
         ${lblSped('Ano-Calendário')}<input type="number" id="ecf-year" class="${inputSped()} mb-4" value="${year - 1}" min="2020" max="${year}" />
-        ${btnAmber('ecfPreview()', 'bar-chart-2', 'Pré-visualizar')}
+        <div class="flex flex-wrap gap-2">
+          ${btnAmber('ecfPreview()', 'bar-chart-2', 'Pré-visualizar')}
+          <button onclick="ecfDownloadTxt()" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-2 rounded-xl inline-flex items-center gap-1.5">
+            <i data-lucide="download" class="w-3.5 h-3.5"></i> Baixar SPED ECF (.txt)
+          </button>
+        </div>
       </div>
       <div id="ecf-result" class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5">
         <div class="text-xs text-slate-400 text-center py-8">Selecione o ano e clique em Pré-visualizar.</div>
@@ -516,6 +521,17 @@ async function renderSpedEcf(el) {
     </div>
   </div>`;
   if (window.lucide) lucide.createIcons();
+}
+
+async function ecfDownloadTxt() {
+  const year = parseInt(document.getElementById('ecf-year')?.value) || new Date().getFullYear() - 1;
+  const r = await fetch(`/api/reports/ecf?year=${year}`, { headers: authHeaders() });
+  if (!r.ok) { showToast('Erro ao gerar SPED ECF.', 'error'); return; }
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `SPED_ECF_${year}.txt`; a.click();
+  URL.revokeObjectURL(url);
 }
 
 async function ecfPreview() {

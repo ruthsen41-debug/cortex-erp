@@ -43,11 +43,16 @@ class EmployeeUpdate(BaseModel):
     phone: Optional[str] = None
     notes: Optional[str] = None
     active: Optional[bool] = None
+    insalubridade_grau: Optional[str] = None  # '', minimo, medio, maximo
+    periculosidade: Optional[int] = None
+    filhos_sal_familia: Optional[int] = None
+    horas_semana: Optional[float] = None
 
 
 class PayrollRunCreate(BaseModel):
-    competence: str = Field(..., description="YYYY-MM")
+    competence: str = Field(..., description="YYYY-MM", pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
     company_id: Optional[int] = 1
+    pagar_horas_extras: bool = True  # False = horas extras vão para o banco de horas
 
 
 class PayrollItemOverride(BaseModel):

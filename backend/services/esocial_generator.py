@@ -10,7 +10,7 @@ Versão do leiaute: S-1.3
 import re
 import uuid
 from datetime import date as _date
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 
 def _c(v: Any) -> str:
@@ -153,14 +153,61 @@ def gerar_s2200(empresa: Dict, funcionario: Dict) -> str:
     return xml
 
 
+_INFORMATIVO_CODES = {"0200", "0201", "0202", "0203", "0210"}
+
+
+def _extract_qtd(referencia: Any) -> str:
+    m = re.search(r"(\d+(?:[.,]\d+)?)", str(referencia or ""))
+    if m:
+        return m.group(1).replace(",", ".")
+    return "1"
+
+
+def _build_det_verbas(lines: List[Dict[str, Any]], tab_id: str) -> str:
+    parts = []
+    for ln in lines:
+        cod = str(ln.get("codigo") or "")
+        if ln.get("tipo") == "informativo" or cod in _INFORMATIVO_CODES:
+            continue
+        val = float(ln.get("valor") or 0)
+        if val <= 0:
+            continue
+        qtd = _extract_qtd(ln.get("referencia"))
+        parts.append(f"""                <detVerbas>
+                  <codRubr>{_c(cod)}</codRubr>
+                  <ideTabRubr>RUBR{_c(tab_id)}</ideTabRubr>
+                  <qtd>{qtd}</qtd>
+                  <fatorHr>0</fatorHr>
+                  <vrUnit>{_n(val)}</vrUnit>
+                  <vrRubr>{_n(val)}</vrRubr>
+                </detVerbas>""")
+    return "\n".join(parts)
+
+
 # ─── S-1200 — Remuneração Mensal ────────────────────────────────────────────
 
 def gerar_s1200(empresa: Dict, funcionario: Dict,
-                competencia: str, payroll_item: Dict) -> str:
+                competencia: str, payroll_item: Dict,
+                lines: Optional[List[Dict[str, Any]]] = None) -> str:
     """Gera o XML do evento S-1200 (Remuneração Mensal)."""
     ev_id = f"ID1{re.sub(r'\\D', '', _c(empresa.get('cnpj', '')))}{_date.today().strftime('%Y%m%d%H%M%S')}{'00002'}"
     cpf = re.sub(r"\D", "", _c(funcionario.get("cpf", "")))
     per_ref = competencia[:7].replace("-", "")  # YYYYMM
+    tab_id = str(empresa.get("id", "1"))
+    rub_lines = lines if lines is not None else payroll_item.get("lines")
+    det_verbas = _build_det_verbas(rub_lines or [], tab_id)
+    if not det_verbas:
+        det_verbas = f"""                <detVerbas>
+                  <codRubr>VENC001</codRubr>
+                  <ideTabRubr>{_c(tab_id)}</ideTabRubr>
+                  <qtd>1</qtd>
+                  <fatorHr>0</fatorHr>
+                  <vrUnit>{_n(payroll_item.get("gross_salary", 0))}</vrUnit>
+                  <vrRubr>{_n(payroll_item.get("gross_salary", 0))}</vrRubr>
+                </detVerbas>"""
+    base_inss = payroll_item.get("base_inss")
+    if base_inss is None:
+        base_inss = payroll_item.get("gross_salary", 0)
 
     xml = _header(empresa, empresa.get("cnpj", ""), empresa.get("cnpj", ""), ev_id)
     xml += f"""
@@ -180,14 +227,7 @@ def gerar_s1200(empresa: Dict, funcionario: Dict,
               <nrInsc>{re.sub(r"\\D", "", _c(empresa.get("cnpj", "")))}</nrInsc>
               <ideLotacao>
                 <codLotacao>001</codLotacao>
-                <detVerbas>
-                  <codRubr>VENC001</codRubr>
-                  <ideTabRubr>{_c(empresa.get("id", "1"))}</ideTabRubr>
-                  <qtd>1</qtd>
-                  <fatorHr>0</fatorHr>
-                  <vrUnit>{_n(payroll_item.get("gross_salary", 0))}</vrUnit>
-                  <vrRubr>{_n(payroll_item.get("gross_salary", 0))}</vrRubr>
-                </detVerbas>
+{det_verbas}
                 <infoAgNocivo>
                   <grauExp>0</grauExp>
                 </infoAgNocivo>
@@ -200,7 +240,7 @@ def gerar_s1200(empresa: Dict, funcionario: Dict,
                 <codLotacao>001</codLotacao>
                 <infoBaseCS>
                   <tpIncCP>11</tpIncCP>
-                  <vrBcCP00>{_n(payroll_item.get("gross_salary", 0))}</vrBcCP00>
+                  <vrBcCP00>{_n(base_inss)}</vrBcCP00>
                   <vrBcCP15>0.00</vrBcCP15>
                   <vrBcCP20>0.00</vrBcCP20>
                   <vrBcCP25>0.00</vrBcCP25>
@@ -306,13 +346,34 @@ def gerar_s2210(empresa: Dict, funcionario: Dict, acidente: Dict) -> str:
 # ─── S-2299 — Desligamento ───────────────────────────────────────────────────
 
 def gerar_s2299(empresa: Dict, funcionario: Dict,
-                termination_date: str, motivo: str = "02") -> str:
+                termination_date: str, motivo: str = "02",
+                rescisao: Optional[Dict[str, Any]] = None) -> str:
     """
     Gera o XML do evento S-2299 (Desligamento).
     motivo: 01=aposentadoria, 02=pedido demissão, 03=dispensa s/jc, 04=dispensa c/jc
     """
-    ev_id = f"ID1{re.sub(r'\\D', '', _c(empresa.get('cnpj', '')))}{_date.today().strftime('%Y%m%d%H%M%S')}{'00003'}"
+    cnpj_clean = re.sub(r"\D", "", _c(empresa.get("cnpj", "")))
+    ev_id = f"ID1{cnpj_clean}{_date.today().strftime('%Y%m%d%H%M%S')}{'00003'}"
     cpf = re.sub(r"\D", "", _c(funcionario.get("cpf", "")))
+    dt_proj = ""
+    verbas_resc = ""
+    if rescisao:
+        proj_raw = (rescisao.get("plano") or {}).get("data_projetada") or rescisao.get("data_fim") or ""
+        dt_proj = _d(proj_raw) if proj_raw else ""
+        det_verbas = _build_det_verbas(rescisao.get("lines") or [], str(empresa.get("id", "1")))
+        if det_verbas:
+            verbas_resc = f"""
+            <verbasResc>
+              <dmDev>
+                <ideDmDev>RESC1</ideDmDev>
+                <ideEstabLot>
+                  <tpInsc>1</tpInsc>
+                  <nrInsc>{cnpj_clean}</nrInsc>
+                  <codLotacao>001</codLotacao>
+{det_verbas}
+                </ideEstabLot>
+              </dmDev>
+            </verbasResc>"""
 
     xml = _header(empresa, empresa.get("cnpj", ""), empresa.get("cnpj", ""), ev_id)
     xml += f"""
@@ -326,14 +387,14 @@ def gerar_s2299(empresa: Dict, funcionario: Dict,
           <infoDeslig>
             <dtDeslig>{_d(termination_date)}</dtDeslig>
             <mtvDeslig>{motivo}</mtvDeslig>
-            <dtProjFimAPI></dtProjFimAPI>
+            <dtProjFimAPI>{dt_proj}</dtProjFimAPI>
             <indPensAlim>N</indPensAlim>
             <pensAlim>0.00</pensAlim>
             <dtPagto>{_d(termination_date)}</dtPagto>
             <tpPagtoAPI>1</tpPagtoAPI>
             <perRef>{termination_date[:7]}</perRef>
             <infoMV></infoMV>
-            <quarentena>0</quarentena>
+            <quarentena>0</quarentena>{verbas_resc}
           </infoDeslig>
         </evtDeslig>"""
     xml += _footer()
