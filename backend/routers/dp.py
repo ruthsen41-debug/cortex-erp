@@ -15,7 +15,7 @@ try:
     from ..database import get_conn
     from ..auth import get_current_user
     from ..utils import rows_to_dicts
-    from ..schemas.dp import EmployeeCreate, EmployeeUpdate, PayrollRunCreate, TerminationRequest
+    from ..schemas.dp import EmployeeCreate, EmployeeUpdate, EmployeeFicha, EmployeeDependent, PayrollRunCreate, TerminationRequest
     from ..services.payroll_calculator import calculate_payroll, calc_thirteenth, calc_vacation, calc_termination
     from ..services.esocial_generator import (gerar_s2200, gerar_s1200, gerar_s2299, gerar_s2230, gerar_s2210,
         gerar_s1000, gerar_s1005, gerar_s1020, gerar_s1050, gerar_s1070, gerar_s3000, gerar_s5001, gerar_s5011,
@@ -23,11 +23,13 @@ try:
     from ..services import payroll_engine, payroll_special
     from ..services.payroll_tables import default_seed, load_tables
     from ..services.formula_engine import FormulaError, FUNCOES as FORMULA_FUNCOES
+    from ..services.ficha_registro import gerar_ficha_registro_html
+    from ..services.folha_impressao import gerar_folha_html, gerar_recibos_html
 except ImportError:
     from database import get_conn
     from auth import get_current_user
     from utils import rows_to_dicts
-    from schemas.dp import EmployeeCreate, EmployeeUpdate, PayrollRunCreate, TerminationRequest
+    from schemas.dp import EmployeeCreate, EmployeeUpdate, EmployeeFicha, EmployeeDependent, PayrollRunCreate, TerminationRequest
     from services.payroll_calculator import calculate_payroll, calc_thirteenth, calc_vacation, calc_termination
     from services.esocial_generator import (gerar_s2200, gerar_s1200, gerar_s2299, gerar_s2230, gerar_s2210,
         gerar_s1000, gerar_s1005, gerar_s1020, gerar_s1050, gerar_s1070, gerar_s3000, gerar_s5001, gerar_s5011,
@@ -35,6 +37,8 @@ except ImportError:
     from services import payroll_engine, payroll_special
     from services.payroll_tables import default_seed, load_tables
     from services.formula_engine import FormulaError, FUNCOES as FORMULA_FUNCOES
+    from services.ficha_registro import gerar_ficha_registro_html
+    from services.folha_impressao import gerar_folha_html, gerar_recibos_html
 
 router = APIRouter(prefix="/api/dp", tags=["Departamento Pessoal"])
 
@@ -100,8 +104,12 @@ def create_employee(data: EmployeeCreate, current_user: Dict[str, Any] = Depends
         data.email or "", data.phone or "", data.cep or "", data.address or "",
         matricula, data.notes or "",
     ))
-    conn.commit()
     new_id = cur.lastrowid
+    ficha = {k: v for k, v in data.model_dump(include=set(EmployeeFicha.model_fields)).items() if v is not None}
+    if ficha:
+        conn.execute(f"UPDATE employees SET {', '.join(f'{k} = ?' for k in ficha)} WHERE id = ?",
+                     [*ficha.values(), new_id])
+    conn.commit()
     row = dict(conn.execute("SELECT * FROM employees WHERE id = ?", (new_id,)).fetchone())
     conn.close()
     return row
@@ -120,9 +128,17 @@ def update_employee(
         conn.close()
         raise HTTPException(status_code=404, detail="Funcionário não encontrado.")
 
+    payload = data.model_dump(exclude_none=True)
+    if payload.get("cpf") and conn.execute(
+        "SELECT 1 FROM employees WHERE cpf = ? AND company_id = ? AND id <> ?",
+        (payload["cpf"], company_id, emp_id),
+    ).fetchone():
+        conn.close()
+        raise HTTPException(status_code=400, detail="CPF já cadastrado em outro funcionário.")
+
     fields, values = [], []
-    for field, value in data.model_dump(exclude_none=True).items():
-        if field == "active":
+    for field, value in payload.items():
+        if field in ("active", "is_prolabore"):
             value = int(value)
         fields.append(f"{field} = ?")
         values.append(value)
@@ -134,6 +150,99 @@ def update_employee(
     row = dict(conn.execute("SELECT * FROM employees WHERE id = ?", (emp_id,)).fetchone())
     conn.close()
     return row
+
+
+# ─── DEPENDENTES ──────────────────────────────────────────────────────────────
+
+def _emp_da_empresa(conn, emp_id: int, company_id: int) -> None:
+    if not conn.execute("SELECT 1 FROM employees WHERE id = ? AND company_id = ?",
+                        (emp_id, company_id)).fetchone():
+        conn.close()
+        raise HTTPException(status_code=404, detail="Funcionário não encontrado.")
+
+
+def _recontar_dependentes(conn, emp_id: int) -> None:
+    """Mantém os contadores usados pelo motor de folha em sincronia com a lista de dependentes.
+    Salário-família: filhos/enteados até 14 anos marcados (art. 66 da Lei 8.213/91)."""
+    rows = rows_to_dicts(conn.execute(
+        "SELECT * FROM employee_dependents WHERE employee_id = ?", (emp_id,)).fetchall())
+    hoje = date.today()
+
+    def menor_14(d):
+        try:
+            n = date.fromisoformat((d or "")[:10])
+        except ValueError:
+            return True
+        return (hoje.year - n.year - ((hoje.month, hoje.day) < (n.month, n.day))) < 14
+
+    irrf = sum(1 for r in rows if r.get("irrf"))
+    sf = sum(1 for r in rows if r.get("salario_familia") and menor_14(r.get("data_nascimento")))
+    conn.execute("UPDATE employees SET dependents = ?, filhos_sal_familia = ? WHERE id = ?", (irrf, sf, emp_id))
+
+
+@router.get("/employees/{emp_id}/dependents")
+def list_dependents(emp_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    _emp_da_empresa(conn, emp_id, company_id)
+    rows = rows_to_dicts(conn.execute(
+        "SELECT * FROM employee_dependents WHERE employee_id = ? AND company_id = ? ORDER BY data_nascimento, nome",
+        (emp_id, company_id)).fetchall())
+    conn.close()
+    return rows
+
+
+@router.post("/employees/{emp_id}/dependents", status_code=201)
+def add_dependent(emp_id: int, data: EmployeeDependent, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    _emp_da_empresa(conn, emp_id, company_id)
+    cur = conn.cursor()
+    cur.execute("""INSERT INTO employee_dependents
+        (company_id, employee_id, nome, cpf, data_nascimento, parentesco, sexo, irrf, salario_familia, plano_saude)
+        VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        (company_id, emp_id, data.nome.strip(), data.cpf or "", data.data_nascimento or "",
+         data.parentesco or "03", data.sexo or "", int(data.irrf or 0),
+         int(data.salario_familia or 0), int(data.plano_saude or 0)))
+    new_id = cur.lastrowid
+    _recontar_dependentes(conn, emp_id)
+    conn.commit()
+    row = dict(conn.execute("SELECT * FROM employee_dependents WHERE id = ?", (new_id,)).fetchone())
+    conn.close()
+    return row
+
+
+@router.put("/employees/{emp_id}/dependents/{dep_id}")
+def update_dependent(emp_id: int, dep_id: int, data: EmployeeDependent,
+                     current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    _emp_da_empresa(conn, emp_id, company_id)
+    cur = conn.execute("""UPDATE employee_dependents SET nome = ?, cpf = ?, data_nascimento = ?, parentesco = ?,
+        sexo = ?, irrf = ?, salario_familia = ?, plano_saude = ? WHERE id = ? AND employee_id = ?""",
+        (data.nome.strip(), data.cpf or "", data.data_nascimento or "", data.parentesco or "03",
+         data.sexo or "", int(data.irrf or 0), int(data.salario_familia or 0), int(data.plano_saude or 0),
+         dep_id, emp_id))
+    if cur.rowcount == 0:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Dependente não encontrado.")
+    _recontar_dependentes(conn, emp_id)
+    conn.commit()
+    row = dict(conn.execute("SELECT * FROM employee_dependents WHERE id = ?", (dep_id,)).fetchone())
+    conn.close()
+    return row
+
+
+@router.delete("/employees/{emp_id}/dependents/{dep_id}")
+def delete_dependent(emp_id: int, dep_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    _emp_da_empresa(conn, emp_id, company_id)
+    conn.execute("DELETE FROM employee_dependents WHERE id = ? AND employee_id = ?", (dep_id, emp_id))
+    _recontar_dependentes(conn, emp_id)
+    conn.commit()
+    conn.close()
+    return {"ok": True}
 
 
 @router.put("/employees/{emp_id}/photo")
@@ -364,6 +473,75 @@ def get_payroll_run(run_id: int, current_user: Dict[str, Any] = Depends(get_curr
     if not out:
         raise HTTPException(status_code=404, detail="Folha não encontrada.")
     return out
+
+
+def _load_payroll_print(conn, run_id: int, company_id: int, employee_id: Optional[int] = None):
+    """Folha + itens com os dados de cadastro que os impressos (holerite e folha) exibem."""
+    run = conn.execute(
+        "SELECT * FROM payroll_runs WHERE id = ? AND company_id = ?", (run_id, company_id)).fetchone()
+    if not run:
+        return None, None, []
+    company = dict(conn.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone() or {})
+    sql = """
+        SELECT pi.*, e.name AS employee_name, e.role, e.cpf, e.matricula, e.cbo, e.department,
+               e.admission_date, e.salary, e.dependents
+        FROM payroll_items pi JOIN employees e ON e.id = pi.employee_id
+        WHERE pi.run_id = ?"""
+    params: List[Any] = [run_id]
+    if employee_id:
+        sql += " AND pi.employee_id = ?"
+        params.append(employee_id)
+    items = rows_to_dicts(conn.execute(sql + " ORDER BY e.name", params).fetchall())
+    lines = rows_to_dicts(conn.execute(
+        "SELECT * FROM payroll_item_lines WHERE run_id = ? ORDER BY item_id, tipo DESC, codigo, id",
+        (run_id,)).fetchall())
+    por_item: Dict[int, List[Dict[str, Any]]] = {}
+    for ln in lines:
+        por_item.setdefault(ln["item_id"], []).append(ln)
+    for it in items:
+        it["lines"] = por_item.get(it["id"], [])
+    return dict(run), company, items
+
+
+@router.get("/payroll/{run_id:int}/recibos")
+def imprimir_recibos(run_id: int, employee_id: Optional[int] = Query(default=None),
+                     current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Recibo de pagamento de salário (holerite) em 2 vias; um funcionário ou a folha inteira."""
+    conn = get_conn()
+    run, company, items = _load_payroll_print(conn, run_id, current_user.get("company_id", 1), employee_id)
+    conn.close()
+    if not run:
+        raise HTTPException(status_code=404, detail="Folha não encontrada.")
+    if not items:
+        raise HTTPException(status_code=404, detail="Nenhum holerite encontrado nesta folha.")
+    return Response(content=gerar_recibos_html(company, run, items), media_type="text/html")
+
+
+@router.get("/payroll/{run_id:int}/folha-impressa")
+def imprimir_folha(run_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Folha de pagamento analítica com resumo por rubrica, bases e encargos."""
+    conn = get_conn()
+    run, company, items = _load_payroll_print(conn, run_id, current_user.get("company_id", 1))
+    conn.close()
+    if not run:
+        raise HTTPException(status_code=404, detail="Folha não encontrada.")
+    return Response(content=gerar_folha_html(company, run, items), media_type="text/html")
+
+
+@router.get("/employees/{emp_id}/holerites")
+def listar_holerites_funcionario(emp_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Holerites já processados do funcionário (mais recentes primeiro), para o portal."""
+    conn = get_conn()
+    rows = rows_to_dicts(conn.execute("""
+        SELECT pr.id AS run_id, pr.competence AS competencia, COALESCE(pr.tipo, 'mensal') AS tipo,
+               pi.gross_salary, pi.net_salary
+        FROM payroll_items pi
+        JOIN payroll_runs pr ON pr.id = pi.run_id
+        WHERE pi.employee_id = ? AND pr.company_id = ?
+        ORDER BY pr.competence DESC, pr.id DESC LIMIT 36
+    """, (emp_id, current_user.get("company_id", 1))).fetchall())
+    conn.close()
+    return rows
 
 
 @router.delete("/payroll/{run_id:int}")
@@ -1459,10 +1637,14 @@ def esocial_s2200(emp_id: int, current_user: Dict[str, Any] = Depends(get_curren
         "SELECT * FROM employees WHERE id = ? AND company_id = ?", (emp_id, company_id)
     ).fetchone()
     company = conn.execute("SELECT * FROM companies WHERE id = ?", (company_id,)).fetchone()
-    conn.close()
     if not emp:
+        conn.close()
         raise HTTPException(status_code=404, detail="Funcionário não encontrado.")
-    xml = gerar_s2200(dict(company), dict(emp))
+    emp = dict(emp)
+    emp["_dependentes"] = rows_to_dicts(conn.execute(
+        "SELECT * FROM employee_dependents WHERE employee_id = ?", (emp_id,)).fetchall())
+    conn.close()
+    xml = gerar_s2200(dict(company), emp)
     filename = f"S2200_{dict(emp)['cpf'].replace('.','').replace('-','')}_{date.today().strftime('%Y%m%d')}.xml"
     return Response(content=xml, media_type="application/xml",
                     headers={"Content-Disposition": f'attachment; filename="{filename}"'})
@@ -4896,6 +5078,19 @@ def gerar_contrato(
 </div>
 </body></html>"""
     return Response(content=html, media_type="text/html")
+
+
+@router.get("/employees/{emp_id}/documento/ficha-registro")
+def gerar_ficha_registro(emp_id: int, current_user=Depends(get_current_user)):
+    """Ficha de Registro de Empregado (art. 41 da CLT) para imprimir ou salvar em PDF."""
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    emp, co = _get_emp_company(emp_id, cid, conn)
+    deps = [dict(r) for r in conn.execute(
+        "SELECT * FROM employee_dependents WHERE employee_id=? AND company_id=? ORDER BY id",
+        (emp_id, cid)).fetchall()]
+    conn.close()
+    return Response(content=gerar_ficha_registro_html(emp, co, deps), media_type="text/html")
 
 
 @router.get("/employees/{emp_id}/documento/advertencia")

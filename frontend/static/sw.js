@@ -1,4 +1,4 @@
-﻿const CACHE_NAME = 'cortex-erp-v10';
+﻿const CACHE_NAME = 'cortex-erp-v11';
 const STATIC_ASSETS = [
   '/',
   '/static/auth.js',

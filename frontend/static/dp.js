@@ -240,262 +240,6 @@ async function renderFuncionarios(el) {
       </div>`)}`;
 }
 
-function openNewEmpModal() {
-  openModal(`
-    <div class="bg-white dark:bg-slate-900 rounded-2xl p-6 max-w-2xl w-full">
-      <h3 class="font-bold text-slate-800 dark:text-slate-100 mb-5 text-lg flex items-center gap-2">
-        <i data-lucide="user-plus" class="w-5 h-5 text-violet-500"></i> Novo Funcionário
-      </h3>
-
-      <!-- Foto 3x4 -->
-      <div class="flex items-start gap-5 mb-5 pb-5 border-b border-slate-100 dark:border-slate-800">
-        <div>
-          <div id="new-emp-photo-preview"
-            style="width:90px;height:120px;border-radius:6px;overflow:hidden;border:2px dashed #d1d5db;background:#f9fafb;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-direction:column;gap:4px"
-            onclick="document.getElementById('new-emp-photo-input').click()">
-            <i data-lucide="camera" style="width:28px;height:28px;color:#9ca3af"></i>
-            <span style="font-size:10px;color:#9ca3af">Foto 3x4</span>
-          </div>
-          <input type="file" id="new-emp-photo-input" accept="image/*" style="display:none" onchange="newEmpPhotoPreview(this)">
-        </div>
-        <div style="flex:1">
-          <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-            <strong>Foto opcional.</strong> Clique para selecionar.<br>
-            Formatos aceitos: JPG, PNG.<br>
-            Tamanho recomendado: 3×4 cm (retrato).
-          </p>
-        </div>
-      </div>
-
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div class="md:col-span-2">
-          ${labelCls('Nome completo *')}
-          <input id="emp-name" class="${inputCls()}" placeholder="Nome do funcionário">
-        </div>
-        <div>
-          ${labelCls('CPF *')}
-          <input id="emp-cpf" class="${inputCls()}" placeholder="000.000.000-00">
-        </div>
-        <div>
-          ${labelCls('PIS/PASEP')}
-          <input id="emp-pis" class="${inputCls()}" placeholder="000.00000.00-0">
-        </div>
-        <div>
-          ${labelCls('Cargo *')}
-          <input id="emp-role" class="${inputCls()}" placeholder="ex: Analista">
-        </div>
-        <div>
-          ${labelCls('Departamento')}
-          <input id="emp-dept" class="${inputCls()}" placeholder="ex: TI">
-        </div>
-        <div>
-          ${labelCls('Salário Bruto (R$) *')}
-          <input id="emp-salary" type="number" step="0.01" class="${inputCls()}" placeholder="0.00">
-        </div>
-        <div>
-          ${labelCls('Data de Admissão *')}
-          <input id="emp-admission" type="date" class="${inputCls()}">
-        </div>
-        <div>
-          ${labelCls('Dependentes (IRRF)')}
-          <input id="emp-deps" type="number" min="0" value="0" class="${inputCls()}">
-        </div>
-        <div>
-          ${labelCls('Vale-Transporte Mensal (R$)')}
-          <input id="emp-vt" type="number" step="0.01" value="0" class="${inputCls()}">
-        </div>
-        <div>
-          ${labelCls('E-mail')}
-          <input id="emp-email" type="email" class="${inputCls()}" placeholder="email@empresa.com">
-        </div>
-        <div>
-          ${labelCls('Telefone')}
-          <input id="emp-phone" class="${inputCls()}" placeholder="(11) 99999-9999">
-        </div>
-        <div class="md:col-span-2 flex items-center gap-3">
-          <input id="emp-prolabore" type="checkbox" class="rounded">
-          <label for="emp-prolabore" class="text-sm text-slate-700 dark:text-slate-300">
-            Pró-labore (sócio/administrador) — INSS flat 11%, sem FGTS
-          </label>
-        </div>
-      </div>
-      <div class="flex justify-end gap-3 mt-6">
-        <button onclick="closeModal()" class="px-4 py-2 text-sm text-slate-500 hover:text-slate-700">Cancelar</button>
-        <button onclick="saveNewEmp()"
-          class="bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold px-5 py-2 rounded-xl">
-          Salvar Funcionário
-        </button>
-      </div>
-    </div>`);
-  if (window.lucide) lucide.createIcons();
-}
-
-async function saveNewEmp() {
-  const name       = document.getElementById('emp-name')?.value.trim();
-  const cpf        = document.getElementById('emp-cpf')?.value.trim();
-  const role       = document.getElementById('emp-role')?.value.trim();
-  const salary     = document.getElementById('emp-salary')?.value;
-  const admission  = document.getElementById('emp-admission')?.value;
-
-  if (!name || !cpf || !role || !salary || !admission) {
-    alert('Preencha os campos obrigatórios: Nome, CPF, Cargo, Salário e Admissão.');
-    return;
-  }
-
-  const payload = {
-    name, cpf, role, salary: parseFloat(salary), admission_date: admission,
-    pis_pasep:   document.getElementById('emp-pis')?.value.trim() || null,
-    department:  document.getElementById('emp-dept')?.value.trim() || null,
-    dependents:  parseInt(document.getElementById('emp-deps')?.value || 0),
-    vt_monthly:  parseFloat(document.getElementById('emp-vt')?.value || 0),
-    email:       document.getElementById('emp-email')?.value.trim() || null,
-    phone:       document.getElementById('emp-phone')?.value.trim() || null,
-    is_prolabore: document.getElementById('emp-prolabore')?.checked || false,
-  };
-
-  try {
-    const r = await fetch('/api/dp/employees', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify(payload),
-    });
-    if (!r.ok) {
-      const err = await r.json();
-      alert(err.detail || 'Erro ao salvar.');
-      return;
-    }
-    const emp = await r.json();
-
-    // Salva foto se foi selecionada
-    if (_newEmpPhotoBase64 && emp.id) {
-      await fetch(`/api/dp/employees/${emp.id}/photo`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({ photo: _newEmpPhotoBase64 }),
-      });
-      emp.photo = _newEmpPhotoBase64;
-      _newEmpPhotoBase64 = null;
-    }
-
-    dpEmployees.push(emp);
-    closeModal();
-    await switchDpTab('funcionarios', true);
-    if (window.lucide) lucide.createIcons();
-  } catch { alert('Erro de conexão.'); }
-}
-
-async function openEditEmpModal(id) {
-  let emp = dpEmployees.find(e => e.id === id);
-  if (!emp) {
-    try {
-      const r = await fetch(`/api/dp/employees/${id}`, { headers: authHeaders() });
-      emp = await r.json();
-    } catch { alert('Erro ao carregar funcionário.'); return; }
-  }
-
-  openModal(`
-    <div class="bg-white dark:bg-slate-900 rounded-2xl p-6 max-w-2xl w-full">
-      <h3 class="font-bold text-slate-800 dark:text-slate-100 mb-5 text-lg flex items-center gap-2">
-        <i data-lucide="user-cog" class="w-5 h-5 text-violet-500"></i> Editar Funcionário
-      </h3>
-
-      <!-- Foto 3x4 -->
-      <div class="flex items-start gap-5 mb-5 pb-5 border-b border-slate-100 dark:border-slate-800">
-        <div>
-          <div id="edit-emp-photo-preview" style="width:90px;height:120px;border-radius:6px;overflow:hidden;border:2px solid #e5e7eb;background:#f9fafb;display:flex;align-items:center;justify-content:center;cursor:pointer" onclick="document.getElementById('edit-emp-photo-input').click()">
-            ${emp.photo
-              ? `<img src="${emp.photo}" style="width:100%;height:100%;object-fit:cover">`
-              : `<div style="text-align:center;color:#9ca3af"><i data-lucide="camera" style="width:28px;height:28px;margin:0 auto 4px;display:block"></i><span style="font-size:10px">Foto 3x4</span></div>`}
-          </div>
-          <input type="file" id="edit-emp-photo-input" accept="image/*" style="display:none" onchange="empPhotoPreview(${emp.id}, this)">
-          ${emp.photo ? `<button onclick="empPhotoRemove(${emp.id})" style="margin-top:6px;width:100%;font-size:11px;color:#ef4444;background:none;border:none;cursor:pointer">Remover foto</button>` : ''}
-        </div>
-        <div style="flex:1">
-          <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-            Clique na imagem para selecionar a foto.<br>
-            Formatos: JPG, PNG. Tamanho recomendado: 3×4 cm.<br>
-            A foto será exibida na lista e no portal do funcionário.
-          </p>
-        </div>
-      </div>
-
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div class="md:col-span-2">
-          ${labelCls('Nome completo *')}
-          <input id="edit-emp-name" class="${inputCls()}" value="${emp.name || ''}">
-        </div>
-        <div>
-          ${labelCls('Cargo *')}
-          <input id="edit-emp-role" class="${inputCls()}" value="${emp.role || ''}">
-        </div>
-        <div>
-          ${labelCls('Departamento')}
-          <input id="edit-emp-dept" class="${inputCls()}" value="${emp.department || ''}">
-        </div>
-        <div>
-          ${labelCls('Salário Bruto (R$) *')}
-          <input id="edit-emp-salary" type="number" step="0.01" class="${inputCls()}" value="${emp.salary || ''}">
-        </div>
-        <div>
-          ${labelCls('Dependentes (IRRF)')}
-          <input id="edit-emp-deps" type="number" min="0" class="${inputCls()}" value="${emp.dependents || 0}">
-        </div>
-        <div>
-          ${labelCls('Vale-Transporte Mensal (R$)')}
-          <input id="edit-emp-vt" type="number" step="0.01" class="${inputCls()}" value="${emp.vt_monthly || 0}">
-        </div>
-        <div>
-          ${labelCls('E-mail')}
-          <input id="edit-emp-email" type="email" class="${inputCls()}" value="${emp.email || ''}">
-        </div>
-        <div>
-          ${labelCls('Telefone')}
-          <input id="edit-emp-phone" class="${inputCls()}" value="${emp.phone || ''}">
-        </div>
-        <div class="md:col-span-2 flex items-center gap-3">
-          <input id="edit-emp-prolabore" type="checkbox" class="rounded" ${emp.is_prolabore ? 'checked' : ''}>
-          <label for="edit-emp-prolabore" class="text-sm text-slate-700 dark:text-slate-300">
-            Pró-labore (sócio/administrador)
-          </label>
-        </div>
-      </div>
-      <div class="flex justify-end gap-3 mt-6">
-        <button onclick="closeModal()" class="px-4 py-2 text-sm text-slate-500 hover:text-slate-700">Cancelar</button>
-        <button onclick="saveEditEmp(${id})"
-          class="bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold px-5 py-2 rounded-xl">
-          Salvar Alterações
-        </button>
-      </div>
-    </div>`);
-  if (window.lucide) lucide.createIcons();
-}
-
-async function saveEditEmp(id) {
-  const payload = {
-    name:        document.getElementById('edit-emp-name')?.value.trim() || undefined,
-    role:        document.getElementById('edit-emp-role')?.value.trim() || undefined,
-    department:  document.getElementById('edit-emp-dept')?.value.trim() || undefined,
-    salary:      parseFloat(document.getElementById('edit-emp-salary')?.value) || undefined,
-    dependents:  parseInt(document.getElementById('edit-emp-deps')?.value || 0),
-    vt_monthly:  parseFloat(document.getElementById('edit-emp-vt')?.value || 0),
-    email:       document.getElementById('edit-emp-email')?.value.trim() || undefined,
-    phone:       document.getElementById('edit-emp-phone')?.value.trim() || undefined,
-    is_prolabore: document.getElementById('edit-emp-prolabore')?.checked,
-  };
-
-  try {
-    const r = await fetch(`/api/dp/employees/${id}`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify(payload),
-    });
-    if (!r.ok) { const e = await r.json(); alert(e.detail || 'Erro.'); return; }
-    const updated = await r.json();
-    const idx = dpEmployees.findIndex(e => e.id === id);
-    if (idx >= 0) dpEmployees[idx] = updated;
-    closeModal();
-    await switchDpTab('funcionarios', true);
-    if (window.lucide) lucide.createIcons();
-  } catch { alert('Erro de conexão.'); }
-}
-
 async function deactivateEmp(id, name) {
   if (!confirm(`Desligar funcionário "${name}"? Ele ficará inativo no sistema.`)) return;
   try {
@@ -509,7 +253,7 @@ async function deactivateEmp(id, name) {
 }
 
 // ── FOTO — preview no modal de novo funcionário ───────────────
-let _newEmpPhotoBase64 = null;
+var _newEmpPhotoBase64 = null;
 function newEmpPhotoPreview(input) {
   const file = input.files[0];
   if (!file) return;
@@ -805,7 +549,10 @@ async function openFolhaDetail(runId) {
         <td class="px-4 py-2.5 text-sm text-orange-500">-${fBRL2(item.irrf)}</td>
         <td class="px-4 py-2.5 text-sm font-bold text-emerald-600">${fBRL2(item.net_salary)}</td>
         <td class="px-4 py-2.5 text-xs text-blue-500">${fBRL2(item.fgts)}</td>
-        <td class="px-4 py-2.5 text-right">
+        <td class="px-4 py-2.5 text-right whitespace-nowrap">
+          <button onclick="event.stopPropagation();openAuthDoc('/api/dp/payroll/${runId}/recibos?employee_id=${item.employee_id}')"
+            class="inline-flex items-center gap-1 text-xs text-violet-600 hover:underline mr-3" title="Imprimir recibo de pagamento">
+            <i data-lucide="printer" class="w-3.5 h-3.5"></i>Holerite</button>
           <button onclick="event.stopPropagation();downloadS1200(${runId},${item.employee_id})"
             class="text-xs text-indigo-500 hover:underline">S-1200</button>
         </td>
@@ -820,7 +567,13 @@ async function openFolhaDetail(runId) {
           Folha ${run.competence} — ${items.length} funcionário(s)
           <span class="text-xs font-normal text-slate-400 ml-2">clique no funcionário para ver as rubricas</span>
         </h3>
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
+          <button onclick="openAuthDoc('/api/dp/payroll/${run.id}/recibos')"
+            class="inline-flex items-center gap-1.5 text-xs text-white bg-violet-600 hover:bg-violet-700 px-3 py-1.5 rounded-lg">
+            <i data-lucide="printer" class="w-3.5 h-3.5"></i> Imprimir holerites</button>
+          <button onclick="openAuthDoc('/api/dp/payroll/${run.id}/folha-impressa')"
+            class="inline-flex items-center gap-1.5 text-xs text-violet-700 bg-violet-50 border border-violet-200 hover:bg-violet-100 px-3 py-1.5 rounded-lg">
+            <i data-lucide="file-text" class="w-3.5 h-3.5"></i> Imprimir folha</button>
           <button onclick="downloadCnab240(${run.id},'${run.competence}')"
             class="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 px-3 py-1.5 rounded-lg">
             CNAB 240 (.REM)
@@ -1681,9 +1434,46 @@ async function downloadS2299FromEsocial() {
   URL.revokeObjectURL(url);
 }
 
-function triggerDownload(url) {
-  const a = document.createElement('a');
-  a.href = url; a.target = '_blank'; a.click();
+// Download autenticado: um link comum abre sem o token Bearer e a API responde 401.
+async function triggerDownload(url) {
+  try {
+    const r = await fetch(url, { headers: authHeaders() });
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      alert(e.detail || `Erro ao gerar arquivo (${r.status}).`);
+      return;
+    }
+    const cd = r.headers.get('Content-Disposition') || '';
+    const m = cd.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+    const nome = m ? decodeURIComponent(m[1]) : url.split('?')[0].split('/').pop();
+    const blobUrl = URL.createObjectURL(await r.blob());
+    const a = document.createElement('a');
+    a.href = blobUrl; a.download = nome;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 4000);
+  } catch { alert('Erro de conexão ao baixar arquivo.'); }
+}
+
+// Abre um documento HTML da API (com token Bearer) numa nova aba, pronto para imprimir.
+// A aba é aberta antes do fetch para o navegador não bloquear como pop-up.
+async function openAuthDoc(url) {
+  const w = window.open('', '_blank');
+  if (w) w.document.write('<p style="font-family:Arial;padding:24px;color:#555">Gerando documento…</p>');
+  try {
+    const r = await fetch(url, { headers: authHeaders() });
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      if (w) w.close();
+      alert(e.detail || `Erro ao gerar documento (${r.status}).`);
+      return;
+    }
+    const html = await r.text();
+    if (!w) { alert('Permita pop-ups deste site para abrir o documento.'); return; }
+    w.document.open(); w.document.write(html); w.document.close();
+  } catch {
+    if (w) w.close();
+    alert('Erro de conexão ao gerar documento.');
+  }
 }
 
 // ── 8. AFASTAMENTOS ──────────────────────────────────────────
@@ -3410,7 +3200,7 @@ async function rubricSeedDefault() {
 
 function rubricDownloadS1010() {
   const ano = new Date().getFullYear();
-  window.open(`/api/dp/esocial/s1010?ano=${ano}`, '_blank');
+  triggerDownload(`/api/dp/esocial/s1010?ano=${ano}`);
 }
 
 // ── ESOCIAL PERIÓDICO ─────────────────────────────────────────────────────────
@@ -3474,12 +3264,12 @@ async function renderEsocialPeriodico(el) {
 
   window.espDownloadAll = () => {
     const c = document.getElementById('espComp').value;
-    window.open(`/api/dp/esocial/s1200/${c}/todos`, '_blank');
+    triggerDownload(`/api/dp/esocial/s1200/${c}/todos`);
   };
 
   window.espDownloadS1299 = () => {
     const c = document.getElementById('espComp').value;
-    window.open(`/api/dp/esocial/s1299/${c}`, '_blank');
+    triggerDownload(`/api/dp/esocial/s1299/${c}`);
   };
 
   window.espMarkSent = async () => {
@@ -3553,11 +3343,11 @@ async function renderSefip(el) {
       ];
 
       const btnDownload = isFgts
-        ? `<button class="btn btn-success" onclick="window.open('/api/dp/fgts-digital/${c}/xml','_blank')">
+        ? `<button class="btn btn-success" onclick="triggerDownload('/api/dp/fgts-digital/${c}/xml')">
              <i data-lucide="download" style="width:15px;height:15px;margin-right:6px"></i>Baixar XML — FGTS Digital
            </button>
            <span class="text-muted small ms-2">Importar em fgts.digital.caixa.gov.br</span>`
-        : `<button class="btn btn-primary" onclick="window.open('/api/dp/sefip/${c}/arquivo','_blank')">
+        : `<button class="btn btn-primary" onclick="triggerDownload('/api/dp/sefip/${c}/arquivo')">
              <i data-lucide="download" style="width:15px;height:15px;margin-right:6px"></i>Baixar Arquivo SEFIP (GRF)
            </button>
            <span class="text-muted small ms-2">Válido para fiscalizações e retificações até fev/2024</span>`;
@@ -5217,7 +5007,7 @@ async function renderPortalFuncionario(el) {
     let holerites = [], ferias = {}, afastamentos = [], fgtsData = {}, asos = [], reqFerias = [];
     try {
       [holerites, afastamentos, asos, reqFerias] = await Promise.all([
-        apiFetch(`/api/dp/payroll/${emp.id}/history`).catch(() => []),
+        apiFetch(`/api/dp/employees/${emp.id}/holerites`).catch(() => []),
         apiFetch(`/api/dp/absences?employee_id=${emp.id}`).catch(() => []),
         apiFetch(`/api/dp/medical-exams?employee_id=${emp.id}`).catch(() => []),
         apiFetch(`/api/dp/vacation-requests?employee_id=${emp.id}`).catch(() => []),
@@ -5252,8 +5042,9 @@ async function renderPortalFuncionario(el) {
         <!-- Holerites -->
         <div class="card"><div class="card-header"><h4 class="font-bold text-slate-800 dark:text-slate-100">Holerites</h4></div><div class="card-body">
           ${holerites.length ? `<div class="space-y-2 max-h-48 overflow-y-auto">
-            ${holerites.map(h=>`<div class="flex justify-between items-center"><span class="text-sm">${h.competencia}</span>
-              <button onclick="openAuthed('/api/dp/payslip/${emp.id}/${h.competencia}')" class="btn btn-sm btn-secondary">Baixar</button>
+            ${holerites.map(h=>`<div class="flex justify-between items-center gap-2"><span class="text-sm">${h.competencia}${h.tipo && h.tipo !== 'mensal' ? ` <span class="text-xs text-slate-400">(${h.tipo})</span>` : ''}</span>
+              <span class="text-xs text-slate-500 ml-auto">${fBRL2(h.net_salary)}</span>
+              <button onclick="openAuthDoc('/api/dp/payroll/${h.run_id}/recibos?employee_id=${emp.id}')" class="btn btn-sm btn-secondary">Baixar</button>
             </div>`).join('')}</div>` : '<p class="text-muted text-sm">Nenhum holerite disponível.</p>'}
         </div></div>
 
@@ -5362,6 +5153,11 @@ function renderDocumentos(el) {
     <h2 class="font-bold text-slate-800 dark:text-slate-100 text-lg mb-5">Documentos Trabalhistas</h2>
     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
 
+      ${docCard('id-card','Ficha de Registro de Empregado','text-indigo-600',`
+        <div>${labelCls('Funcionário')}<select id="doc-ficha-emp" class="${inputCls()}">${opts}</select></div>
+        <p class="text-xs text-slate-400">Registro do empregado (art. 41 da CLT) com foto, documentos, contrato, salário, jornada e dependentes, para assinatura e arquivo.</p>`,
+        'btn-ficha','Imprimir Ficha','window._docFicha()')}
+
       ${docCard('file-signature','Contrato de Trabalho','text-violet-600',`
         <div>${labelCls('Funcionário')}<select id="doc-ctr-emp" class="${inputCls()}">${opts}</select></div>
         <div>${labelCls('Tipo de Contrato')}
@@ -5406,11 +5202,17 @@ function renderDocumentos(el) {
 
   if (window.lucide) lucide.createIcons();
 
+  window._docFicha = () => {
+    const emp = document.getElementById('doc-ficha-emp')?.value;
+    if (!emp) return alert('Selecione um funcionário.');
+    openAuthDoc(`/api/dp/employees/${emp}/documento/ficha-registro`);
+  };
+
   window._docContrato = () => {
     const emp = document.getElementById('doc-ctr-emp')?.value;
     const tipo = document.getElementById('doc-ctr-tipo')?.value || 'experiencia';
     if (!emp) return alert('Selecione um funcionário.');
-    window.open(`/api/dp/employees/${emp}/documento/contrato?tipo=${tipo}`, '_blank');
+    openAuthDoc(`/api/dp/employees/${emp}/documento/contrato?tipo=${tipo}`);
   };
 
   window._docAdvertencia = () => {
@@ -5418,7 +5220,7 @@ function renderDocumentos(el) {
     const motivo = encodeURIComponent(document.getElementById('doc-adv-motivo')?.value || '');
     const data = document.getElementById('doc-adv-data')?.value || '';
     if (!emp) return alert('Selecione um funcionário.');
-    window.open(`/api/dp/employees/${emp}/documento/advertencia?motivo=${motivo}&data_ocorrencia=${data}`, '_blank');
+    openAuthDoc(`/api/dp/employees/${emp}/documento/advertencia?motivo=${motivo}&data_ocorrencia=${data}`);
   };
 
   window._docSuspensao = () => {
@@ -5427,14 +5229,14 @@ function renderDocumentos(el) {
     const data = document.getElementById('doc-sus-data')?.value || '';
     const dias = document.getElementById('doc-sus-dias')?.value || 1;
     if (!emp) return alert('Selecione um funcionário.');
-    window.open(`/api/dp/employees/${emp}/documento/suspensao?motivo=${motivo}&data_ocorrencia=${data}&dias=${dias}`, '_blank');
+    openAuthDoc(`/api/dp/employees/${emp}/documento/suspensao?motivo=${motivo}&data_ocorrencia=${data}&dias=${dias}`);
   };
 
   window._docQuitacao = () => {
     const emp = document.getElementById('doc-quit-emp')?.value;
     const ano = document.getElementById('doc-quit-ano')?.value || (new Date().getFullYear() - 1);
     if (!emp) return alert('Selecione um funcionário.');
-    window.open(`/api/dp/employees/${emp}/documento/quitacao-anual?ano=${ano}`, '_blank');
+    openAuthDoc(`/api/dp/employees/${emp}/documento/quitacao-anual?ano=${ano}`);
   };
 
   window._docFeriasColetivas = () => {
@@ -5443,7 +5245,7 @@ function renderDocumentos(el) {
     const dept = encodeURIComponent(document.getElementById('doc-fc-dept')?.value || '');
     if (!ini || !fim) return alert('Informe o período de início e término.');
     if (ini > fim) return alert('A data de início deve ser anterior ao término.');
-    window.open(`/api/dp/documento/ferias-coletivas?inicio=${ini}&fim=${fim}&departamento=${dept}`, '_blank');
+    openAuthDoc(`/api/dp/documento/ferias-coletivas?inicio=${ini}&fim=${fim}&departamento=${dept}`);
   };
 }
 
@@ -5637,6 +5439,14 @@ async function renderRelFolhaAnalitica(el) {
             class="border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 text-sm bg-white dark:bg-slate-900">
           <button onclick="window._loadFolhaAnalitica(document.getElementById('fa-comp-input').value)"
             class="px-4 py-1.5 bg-violet-600 text-white rounded-xl text-sm font-semibold hover:bg-violet-700">Buscar</button>
+          ${run ? `<div class="ml-auto flex flex-wrap gap-2">
+            <button onclick="openAuthDoc('/api/dp/payroll/${run.id}/folha-impressa')"
+              class="inline-flex items-center gap-1.5 px-4 py-1.5 border border-violet-200 text-violet-700 bg-violet-50 hover:bg-violet-100 rounded-xl text-sm font-semibold">
+              <i data-lucide="printer" class="w-4 h-4"></i> Imprimir folha</button>
+            <button onclick="openAuthDoc('/api/dp/payroll/${run.id}/recibos')"
+              class="inline-flex items-center gap-1.5 px-4 py-1.5 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl text-sm font-semibold">
+              <i data-lucide="receipt" class="w-4 h-4"></i> Imprimir holerites</button>
+          </div>` : ''}
         </div>
         ${noRun}
         ${run ? `
@@ -6728,7 +6538,7 @@ async function renderSst(el) {
               <td class="p-2 border border-slate-100 text-center">${e.quantidade}</td>
               <td class="p-2 border border-slate-100 text-center">${e.motivo}</td>
               <td class="p-2 border border-slate-100 text-center flex gap-1 justify-center">
-                <button onclick="window.open('/api/dp/epi/${e.id}/recibo','_blank')" class="text-violet-600 text-xs hover:underline">recibo</button>
+                <button onclick="openAuthDoc('/api/dp/epi/${e.id}/recibo')" class="text-violet-600 text-xs hover:underline">recibo</button>
                 <button onclick="window._delEpi(${e.id})" class="text-red-500 text-xs hover:underline ml-1">del</button>
               </td>
             </tr>`).join('') || '<tr><td colspan="7" class="text-center text-slate-400 p-4">Nenhuma entrega registrada.</td></tr>'}
@@ -7040,7 +6850,7 @@ async function renderReintegracoes(el) {
               <td class="p-3 border border-slate-100 text-center">${fDate2(r.data_reintegracao)}</td>
               <td class="p-3 border border-slate-100">${r.nr_processo||'-'}</td>
               <td class="p-3 border border-slate-100 text-center">
-                <button onclick="window.open('/api/dp/reintegracoes/${r.id}/s2298','_blank')" class="text-violet-600 text-xs hover:underline">S-2298</button>
+                <button onclick="triggerDownload('/api/dp/reintegracoes/${r.id}/s2298')" class="text-violet-600 text-xs hover:underline">S-2298</button>
               </td>
             </tr>`).join('') || '<tr><td colspan="5" class="text-center text-slate-400 p-6">Nenhuma reintegração registrada.</td></tr>'}
           </tbody>

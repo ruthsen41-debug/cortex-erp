@@ -2804,7 +2804,74 @@ def migrate_db(conn: sqlite3.Connection) -> None:
         pass
 
     _migrate_superadmin(cur)
+    _migrate_ficha_funcionario(cur)
     conn.commit()
+
+
+# Ficha completa do empregado (padrão Domínio / leiaute S-2200 do eSocial)
+EMPLOYEE_FICHA_COLUMNS = [
+    # Dados pessoais
+    ("nome_social", "TEXT DEFAULT ''"), ("estado_civil", "TEXT DEFAULT '1'"),
+    ("raca_cor", "TEXT DEFAULT '1'"), ("grau_instrucao", "TEXT DEFAULT '07'"),
+    ("nacionalidade", "TEXT DEFAULT 'Brasileira'"), ("pais_nascimento", "TEXT DEFAULT '105'"),
+    ("naturalidade", "TEXT DEFAULT ''"), ("uf_nascimento", "TEXT DEFAULT ''"),
+    ("cod_municipio_nasc", "TEXT DEFAULT ''"), ("nome_mae", "TEXT DEFAULT ''"),
+    ("nome_pai", "TEXT DEFAULT ''"), ("deficiencia", "TEXT DEFAULT ''"),
+    ("celular", "TEXT DEFAULT ''"), ("tipo_sanguineo", "TEXT DEFAULT ''"),
+    # Documentos
+    ("rg_orgao", "TEXT DEFAULT ''"), ("rg_uf", "TEXT DEFAULT ''"), ("rg_emissao", "TEXT DEFAULT ''"),
+    ("ctps_serie", "TEXT DEFAULT ''"), ("ctps_uf", "TEXT DEFAULT ''"), ("ctps_emissao", "TEXT DEFAULT ''"),
+    ("titulo_eleitor", "TEXT DEFAULT ''"), ("titulo_zona", "TEXT DEFAULT ''"), ("titulo_secao", "TEXT DEFAULT ''"),
+    ("cnh", "TEXT DEFAULT ''"), ("cnh_categoria", "TEXT DEFAULT ''"), ("cnh_validade", "TEXT DEFAULT ''"),
+    ("cnh_uf", "TEXT DEFAULT ''"), ("reservista", "TEXT DEFAULT ''"),
+    ("conselho_classe", "TEXT DEFAULT ''"), ("conselho_numero", "TEXT DEFAULT ''"), ("conselho_uf", "TEXT DEFAULT ''"),
+    # Endereço
+    ("logradouro", "TEXT DEFAULT ''"), ("numero", "TEXT DEFAULT ''"), ("complemento", "TEXT DEFAULT ''"),
+    ("bairro", "TEXT DEFAULT ''"), ("cidade", "TEXT DEFAULT ''"), ("uf", "TEXT DEFAULT ''"),
+    ("cod_municipio", "TEXT DEFAULT ''"),
+    # Contrato
+    ("tipo_admissao", "TEXT DEFAULT '1'"), ("ind_admissao", "TEXT DEFAULT '1'"),
+    ("tipo_contrato", "TEXT DEFAULT 'indeterminado'"), ("data_termino_contrato", "TEXT DEFAULT ''"),
+    ("experiencia_dias", "INTEGER DEFAULT 0"), ("experiencia_prorrogacao", "INTEGER DEFAULT 0"),
+    ("primeiro_emprego", "INTEGER DEFAULT 0"), ("regime_previdenciario", "TEXT DEFAULT '1'"),
+    ("centro_custo", "TEXT DEFAULT ''"), ("funcao", "TEXT DEFAULT ''"), ("local_trabalho", "TEXT DEFAULT ''"),
+    ("sindicato_nome", "TEXT DEFAULT ''"), ("sindicato_cnpj", "TEXT DEFAULT ''"),
+    ("data_base_mes", "TEXT DEFAULT ''"), ("contribuicao_sindical", "INTEGER DEFAULT 0"),
+    # Salário e jornada
+    ("tipo_salario", "TEXT DEFAULT '5'"), ("forma_pagamento", "TEXT DEFAULT 'deposito'"),
+    ("adiantamento_pct", "REAL DEFAULT 0"), ("escala", "TEXT DEFAULT ''"),
+    ("horario_entrada", "TEXT DEFAULT ''"), ("horario_saida", "TEXT DEFAULT ''"),
+    ("intervalo_inicio", "TEXT DEFAULT ''"), ("intervalo_fim", "TEXT DEFAULT ''"),
+    ("descricao_jornada", "TEXT DEFAULT ''"),
+    # Bancário / PIX
+    ("bank_code", "TEXT DEFAULT ''"), ("bank_account_type", "TEXT DEFAULT 'corrente'"),
+    ("pix_tipo", "TEXT DEFAULT ''"), ("pix_chave", "TEXT DEFAULT ''"),
+    # Saúde ocupacional / FGTS
+    ("aso_admissional_data", "TEXT DEFAULT ''"), ("aso_resultado", "TEXT DEFAULT ''"),
+    ("fgts_opcao_data", "TEXT DEFAULT ''"),
+]
+
+
+def _migrate_ficha_funcionario(cur) -> None:
+    emp_cols = [c["name"] for c in cur.execute("PRAGMA table_info(employees)").fetchall()]
+    for col, ddl in EMPLOYEE_FICHA_COLUMNS:
+        if col not in emp_cols:
+            cur.execute(f"ALTER TABLE employees ADD COLUMN {col} {ddl}")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS employee_dependents (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL,
+        employee_id INTEGER NOT NULL,
+        nome TEXT NOT NULL,
+        cpf TEXT DEFAULT '',
+        data_nascimento TEXT DEFAULT '',
+        parentesco TEXT DEFAULT '03',
+        sexo TEXT DEFAULT '',
+        irrf INTEGER DEFAULT 1,
+        salario_familia INTEGER DEFAULT 0,
+        plano_saude INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
 
 
 def _migrate_superadmin(cur) -> None:

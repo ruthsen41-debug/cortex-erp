@@ -84,13 +84,94 @@ def _ide_empregador(cnpj: str) -> str:
 
 # ─── S-2200 — Admissão ───────────────────────────────────────────────────────
 
+def _tag(nome: str, valor: Any) -> str:
+    """Tag opcional: só sai no XML quando há valor."""
+    v = _c(valor)
+    return f"<{nome}>{v}</{nome}>" if v else ""
+
+
+def _so_digitos(v: Any) -> str:
+    return re.sub(r"\D", "", _c(v))
+
+
+_DEFICIENCIAS = {"fisica": "defFisica", "visual": "defVisual", "auditiva": "defAuditiva",
+                 "mental": "defMental", "intelectual": "defIntelectual"}
+
+
 def gerar_s2200(empresa: Dict, funcionario: Dict) -> str:
-    """Gera o XML do evento S-2200 (Admissão / Cadastramento Inicial)."""
-    ev_id = f"ID1{re.sub(r'\\D', '', _c(empresa.get('cnpj', '')))}{_date.today().strftime('%Y%m%d%H%M%S')}{'00001'}"
-    cpf = re.sub(r"\D", "", _c(funcionario.get("cpf", "")))
-    adm = _d(funcionario.get("admission_date", ""))
-    categoria = _c(funcionario.get("esocial_category", "101"))  # 101=CLT
-    regime = _c(funcionario.get("regime_previdenciario", "1"))   # 1=RGPS
+    """Gera o XML do evento S-2200 (Admissão / Cadastramento Inicial) a partir da ficha completa."""
+    f = funcionario
+    cnpj = _so_digitos(empresa.get("cnpj", ""))
+    ev_id = f"ID1{cnpj}{_date.today().strftime('%Y%m%d%H%M%S')}00001"
+    cpf = _so_digitos(f.get("cpf", ""))
+    adm = _d(f.get("admission_date", ""))
+    categoria = _c(f.get("esocial_category") or "101")
+    regime = _c(f.get("regime_previdenciario") or "1")
+    horas = f.get("horas_semana") or 44
+
+    # Documentos (cada grupo só entra se preenchido)
+    docs = ""
+    if f.get("ctps"):
+        docs += f"<CTPS><nrCtps>{_c(f['ctps'])}</nrCtps>{_tag('serieCtps', f.get('ctps_serie'))}{_tag('ufCtps', f.get('ctps_uf'))}</CTPS>"
+    if f.get("rg"):
+        docs += (f"<RG><nrRg>{_c(f['rg'])}</nrRg>{_tag('orgaoEmissor', f.get('rg_orgao'))}"
+                 f"{_tag('dtExped', _d(f.get('rg_emissao', '')))}</RG>")
+    if f.get("conselho_numero"):
+        docs += (f"<OC><nrOc>{_c(f['conselho_numero'])}</nrOc>{_tag('orgaoEmissor', f.get('conselho_classe'))}"
+                 f"{_tag('ufOc', f.get('conselho_uf'))}</OC>")
+    if f.get("cnh"):
+        docs += (f"<CNH><nrRegCnh>{_c(f['cnh'])}</nrRegCnh>{_tag('ufCnh', f.get('cnh_uf'))}"
+                 f"{_tag('dtValid', _d(f.get('cnh_validade', '')))}{_tag('categoriaCnh', f.get('cnh_categoria'))}</CNH>")
+
+    endereco = ""
+    if f.get("logradouro") or f.get("cep"):
+        endereco = (
+            "<endereco><brasil>"
+            f"{_tag('dscLograd', f.get('logradouro') or f.get('address'))}"
+            f"<nrLograd>{_c(f.get('numero') or 'S/N')}</nrLograd>"
+            f"{_tag('complemento', f.get('complemento'))}{_tag('bairro', f.get('bairro'))}"
+            f"{_tag('cep', _so_digitos(f.get('cep')))}{_tag('codMunic', f.get('cod_municipio'))}"
+            f"{_tag('uf', f.get('uf'))}"
+            "</brasil></endereco>")
+
+    deficiencia = ""
+    defi = (f.get("deficiencia") or "").lower()
+    if defi:
+        flags = "".join(f"<{tag}>{'S' if defi == k else 'N'}</{tag}>" for k, tag in _DEFICIENCIAS.items())
+        deficiencia = (f"<infoDeficiencia>{flags}<reabReadap>{'S' if defi == 'reabilitado' else 'N'}</reabReadap>"
+                       f"<infoCota>S</infoCota></infoDeficiencia>")
+
+    dependentes = "".join(
+        "<dependente>"
+        f"<tpDep>{_c(d.get('parentesco') or '03')}</tpDep><nmDep>{_c(d.get('nome'))}</nmDep>"
+        f"<dtNascto>{_d(d.get('data_nascimento', ''))}</dtNascto>"
+        f"{_tag('cpfDep', _so_digitos(d.get('cpf')))}{_tag('sexoDep', d.get('sexo'))}"
+        f"<depIRRF>{'S' if d.get('irrf') else 'N'}</depIRRF><depSF>{'S' if d.get('salario_familia') else 'N'}</depSF>"
+        "<incTrab>N</incTrab></dependente>"
+        for d in (f.get("_dependentes") or []))
+
+    contato = ""
+    fone = _so_digitos(f.get("celular") or f.get("phone"))
+    if fone or f.get("email"):
+        contato = f"<contato>{_tag('fonePrinc', fone)}{_tag('emailPrinc', f.get('email'))}</contato>"
+
+    duracao = "<tpContr>1</tpContr>"
+    if (f.get("tipo_contrato") or "indeterminado") in ("determinado", "experiencia"):
+        termino = f.get("data_termino_contrato") or ""
+        if not termino and f.get("experiencia_dias") and adm:
+            try:
+                from datetime import timedelta
+                termino = (_date.fromisoformat(adm) + timedelta(days=int(f["experiencia_dias"]) - 1)).isoformat()
+            except ValueError:
+                termino = ""
+        duracao = f"<tpContr>2</tpContr>{_tag('dtTerm', _d(termino))}"
+
+    jornada = f.get("descricao_jornada") or (
+        f"{f.get('escala') or 'Segunda a Sexta'} {f.get('horario_entrada') or '08:00'} às {f.get('horario_saida') or '17:00'}"
+        + (f" (intervalo {f['intervalo_inicio']}-{f['intervalo_fim']})"
+           if f.get("intervalo_inicio") and f.get("intervalo_fim") else ""))
+    tmp_parc = "1" if (f.get("jornada_tipo") == "parcial" or float(horas) <= 30) else "0"
+    documentos = f"<documentos>{docs}</documentos>" if docs else ""
 
     xml = _header(empresa, empresa.get("cnpj", ""), empresa.get("cnpj", ""), ev_id)
     xml += f"""
@@ -99,54 +180,59 @@ def gerar_s2200(empresa: Dict, funcionario: Dict) -> str:
           {_ide_empregador(empresa.get("cnpj", ""))[9:]}
           <trabalhador>
             <cpfTrab>{cpf}</cpfTrab>
-            <nmTrab>{_c(funcionario.get("name"))}</nmTrab>
-            <sexo>{_c(funcionario.get("sexo", "M"))}</sexo>
-            <racaCor>1</racaCor>
-            <estCiv>1</estCiv>
-            <grauInstr>07</grauInstr>
+            <nmTrab>{_c(f.get("name"))}</nmTrab>
+            <sexo>{_c(f.get("sexo") or "M")}</sexo>
+            <racaCor>{_c(f.get("raca_cor") or "6")}</racaCor>
+            <estCiv>{_c(f.get("estado_civil") or "1")}</estCiv>
+            <grauInstr>{_c(f.get("grau_instrucao") or "07")}</grauInstr>
+            {_tag("nmSoc", f.get("nome_social"))}
             <nascimento>
-              <dtNascto>{_d(funcionario.get("birth_date", "1990-01-01"))}</dtNascto>
-              <codMunic>5102504</codMunic>
-              <uf>{_c(funcionario.get("uf", "MT"))}</uf>
+              <dtNascto>{_d(f.get("birth_date") or "")}</dtNascto>
+              <paisNascto>{_c(f.get("pais_nascimento") or "105")}</paisNascto>
+              <paisNac>{_c(f.get("pais_nascimento") or "105")}</paisNac>
             </nascimento>
-            <documentos>
-              <CNH>
-                <nrReg>{_c(funcionario.get("cnh", ""))}</nrReg>
-              </CNH>
-            </documentos>
+            {documentos}{endereco}{deficiencia}{dependentes}{contato}
           </trabalhador>
           <vinculo>
-            <matriCad>{_c(funcionario.get("matricula", "001"))}</matriCad>
+            <matricula>{_c(f.get("matricula") or "001")}</matricula>
             <tpRegTrab>1</tpRegTrab>
             <tpRegPrev>{regime}</tpRegPrev>
-            <dtAdm>{adm}</dtAdm>
-            <tpAdmissao>1</tpAdmissao>
-            <indAdmissao>1</indAdmissao>
-            <nrProcTrab></nrProcTrab>
-            <natAtividade>1</natAtividade>
-            <dtBase></dtBase>
-            <cnpjSindLaboral></cnpjSindLaboral>
-            <cargo>
-              <nmCargo>{_c(funcionario.get("role", "Funcionário"))}</nmCargo>
-              <CBOCargo>{_c(funcionario.get("cbo", "111105"))}</CBOCargo>
-            </cargo>
-            <remuneracao>
-              <vrSalFx>{_n(funcionario.get("salary", 0))}</vrSalFx>
-              <undSalFixo>5</undSalFixo>
-            </remuneracao>
-            <localTrabalho>
-              <localTrabGeral>
-                <tpInsc>1</tpInsc>
-                <nrInsc>{re.sub(r"\\D", "", _c(empresa.get("cnpj", "")))}</nrInsc>
-              </localTrabGeral>
-            </localTrabalho>
+            <cadIni>N</cadIni>
+            <infoRegimeTrab>
+              <infoCeletista>
+                <dtAdm>{adm}</dtAdm>
+                <tpAdmissao>{_c(f.get("tipo_admissao") or "1")}</tpAdmissao>
+                <indAdmissao>{_c(f.get("ind_admissao") or "1")}</indAdmissao>
+                <tpRegJor>1</tpRegJor>
+                <natAtividade>1</natAtividade>
+                {_tag("dtBase", f.get("data_base_mes"))}
+                {_tag("cnpjSindCategProf", _so_digitos(f.get("sindicato_cnpj")))}
+              </infoCeletista>
+            </infoRegimeTrab>
             <infoContrato>
-              <tpJornada>2</tpJornada>
-              <descJorn>Segunda a Sexta 08:00 às 17:00</descJorn>
-              <qtdHrsSem>44</qtdHrsSem>
-              <natAtividade>1</natAtividade>
+              <nmCargo>{_c(f.get("role") or "Funcionário")}</nmCargo>
+              <CBOCargo>{_c(f.get("cbo") or "111105")}</CBOCargo>
+              {_tag("nmFuncao", f.get("funcao"))}
+              <codCateg>{categoria}</codCateg>
+              <remuneracao>
+                <vrSalFx>{_n(f.get("salary", 0))}</vrSalFx>
+                <undSalFixo>{_c(f.get("tipo_salario") or "5")}</undSalFixo>
+              </remuneracao>
+              <duracao>{duracao}</duracao>
+              <localTrabalho>
+                <localTrabGeral>
+                  <tpInsc>1</tpInsc>
+                  <nrInsc>{cnpj}</nrInsc>
+                </localTrabGeral>
+              </localTrabalho>
+              <horContratual>
+                <qtdHrsSem>{_n(horas)}</qtdHrsSem>
+                <tpJornada>9</tpJornada>
+                <tmpParc>{tmp_parc}</tmpParc>
+                <horNoturno>N</horNoturno>
+                <dscJorn>{_c(jornada)}</dscJorn>
+              </horContratual>
             </infoContrato>
-            <categoria>{categoria}</categoria>
           </vinculo>
         </evtAdmissao>"""
     xml += _footer()

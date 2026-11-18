@@ -109,6 +109,7 @@ function openModal(htmlContent) {
   const backdrop = document.getElementById('modal-backdrop');
   const box = document.getElementById('modal-box');
   if (!backdrop || !box) return;
+  box.className = 'w-full max-w-3xl max-h-[90vh] overflow-y-auto custom-scroll p-6';
   box.innerHTML = htmlContent;
   backdrop.classList.remove('hidden');
   backdrop.classList.add('flex');
