@@ -1,0 +1,23 @@
+<!-- Configuração do serviço do Windows (WinSW). %BASE% = pasta de instalação. -->
+<service>
+  <id>CortexERP</id>
+  <name>Cortex ERP - Servidor</name>
+  <description>Servidor do Cortex ERP para os computadores do escritório. Inicia automaticamente com o Windows.</description>
+  <executable>%BASE%\python\python.exe</executable>
+  <arguments>"%BASE%\cortex_servidor.py"</arguments>
+  <workingdirectory>%BASE%\app</workingdirectory>
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+  <onfailure action="restart" delay="10 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <onfailure action="restart" delay="60 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  <stoptimeout>15 sec</stoptimeout>
+  <logpath>%BASE%\logs</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>8</keepFiles>
+  </log>
+  <env name="PYTHONUNBUFFERED" value="1"/>
+  <env name="PYTHONIOENCODING" value="utf-8"/>
+</service>

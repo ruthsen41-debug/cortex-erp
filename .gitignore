@@ -33,3 +33,8 @@ htmlcov/
 Thumbs.db
 
 data/.jwt_secret
+
+# Instalador do servidor (gerados)
+installer/build/
+installer/cache/
+installer/Output/
