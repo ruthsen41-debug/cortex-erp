@@ -7,7 +7,8 @@ from typing import Any, Dict, List
 MESES = ["", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto",
          "Setembro", "Outubro", "Novembro", "Dezembro"]
 TIPOS_FOLHA = {"mensal": "Folha mensal", "adiantamento": "Adiantamento", "13_1": "13º salário — 1ª parcela",
-               "13_2": "13º salário — 2ª parcela", "complementar": "Folha complementar"}
+               "13_2": "13º salário — 2ª parcela", "complementar": "Folha complementar",
+               "dissidio": "Diferenças de dissídio / acordo / convenção"}
 
 # Códigos informativos gravados pelo motor de rubricas
 COD_BASE_INSS, COD_BASE_IRRF, COD_BASE_FGTS, COD_FGTS = "0201", "0202", "0203", "0200"

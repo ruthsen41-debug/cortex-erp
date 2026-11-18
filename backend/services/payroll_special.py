@@ -186,7 +186,8 @@ def direito_ferias(faltas: int) -> int:
 
 
 def calc_ferias(ctx: Contexto, tables: TaxTables, rubrics: Optional[Dict[str, Any]], dias_gozo: int,
-                dias_abono: int = 0, media: float = 0.0, dias_dobro: int = 0) -> Dict[str, Any]:
+                dias_abono: int = 0, media: float = 0.0, dias_dobro: int = 0,
+                adiantamento_13: float = 0.0) -> Dict[str, Any]:
     f = _Folha(rubrics)
     dia = (ctx.remuneracao(tables)) / 30.0
     media_dia = float(media or 0) / 30.0
@@ -201,8 +202,12 @@ def calc_ferias(ctx: Contexto, tables: TaxTables, rubrics: Optional[Dict[str, An
         f.avisos.append(f"{dias_dobro} dia(s) gozados após o período concessivo: pagos em dobro (CLT art. 137).")
     inss, irrf = _encargos(f, ctx, tables, "ferias", "INSS", "IRRF", "INSS s/ Férias", "IRRF s/ Férias",
                            so_pensao_percentual=True)
+    # Lei 4.749/65 art. 2º §2º: 1ª parcela do 13º paga com as férias, a pedido do empregado.
+    # Sem INSS/IRRF (tributados na 2ª parcela); com FGTS.
+    v_ad13 = f.add("DECIMO_ADIANT", adiantamento_13, "50%", "decimo")
     fgts = r2(f.base("incide_fgts") * tables.fgts_aliquota)
     return f.resultado(ctx, dias_gozo=dias_gozo, dias_abono=dias_abono, dias_dobro=dias_dobro,
+                       adiantamento_13=v_ad13,
                        inss=inss, irrf=irrf, fgts=fgts,
                        base_inss=f.base("incide_inss"), base_fgts=f.base("incide_fgts"))
 
@@ -235,10 +240,13 @@ def avos_ferias(inicio: date, ate: date) -> int:
 
 
 def periodos_aquisitivos(admissao: date, ate: date, gozados: Optional[Dict[str, float]] = None,
-                         faltas: Optional[Dict[str, int]] = None) -> List[Dict[str, Any]]:
+                         faltas: Optional[Dict[str, int]] = None,
+                         dias_inss: Optional[Callable[[date, date], int]] = None) -> List[Dict[str, Any]]:
     """
     Períodos aquisitivos desde a admissão até `ate`.
     gozados/faltas: por data de início do período (ISO) → dias já quitados / faltas injustificadas.
+    dias_inss: (início, fim) → dias de benefício do INSS; mais de 180 dias no período = perda do
+    direito (CLT art. 133, IV).
     """
     gozados, faltas = gozados or {}, faltas or {}
     out: List[Dict[str, Any]] = []
@@ -252,9 +260,16 @@ def periodos_aquisitivos(admissao: date, ate: date, gozados: Optional[Dict[str, 
         completo = fim <= ate
         chave = inicio.isoformat()
         direito = direito_ferias(int(faltas.get(chave, 0)))
+        perda_afast = bool(dias_inss and dias_inss(inicio, min(fim, ate)) > 180)
+        if perda_afast:
+            direito = 0
         usados = float(gozados.get(chave, 0))
         saldo = max(0.0, direito - usados) if completo else 0.0
-        if not completo:
+        if perda_afast:
+            status = "perda_afastamento"
+        elif completo and direito == 0:
+            status = "perda_faltas"
+        elif not completo:
             status = "em_aquisicao"
         elif saldo <= 0:
             status = "quitado"
@@ -267,7 +282,7 @@ def periodos_aquisitivos(admissao: date, ate: date, gozados: Optional[Dict[str, 
         out.append({
             "inicio": chave, "fim": fim.isoformat(), "limite_concessivo": limite.isoformat(),
             "completo": completo, "direito": direito, "gozados": usados, "saldo": saldo,
-            "avos": 12 if completo else avos_ferias(inicio, ate), "status": status,
+            "avos": 0 if perda_afast else (12 if completo else avos_ferias(inicio, ate)), "status": status,
         })
         i += 1
     return out
@@ -307,7 +322,7 @@ def planejar_rescisao(admissao: date, desligamento: date, tipo: str, aviso_modo:
                               + avos_decimo(admissao, projetada.year, projetada))
 
     vencidas = dobro = avos_prop = 0.0
-    for p in periodos_aquisitivos(admissao, projetada, gozados, faltas):
+    for p in periodos_aquisitivos(admissao, projetada, gozados, faltas, dias_inss):
         if p["completo"]:
             vencidas += p["saldo"]
             if p["saldo"] and desligamento > date.fromisoformat(p["limite_concessivo"]):

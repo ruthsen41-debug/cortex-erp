@@ -302,6 +302,11 @@ def _ultimo_dia(per: str) -> str:
     return f"{per}-{calendar.monthrange(a, m)[1]:02d}"
 
 
+def ide_dm_dev_folha(tipo: str, per: str, run_id: int) -> str:
+    """Identificador do demonstrativo: FOL (mensal e complementar) ou DIS (diferenças de dissídio)."""
+    return f"{'DIS' if tipo == 'dissidio' else 'FOL'}{per.replace('-', '')}R{run_id}"
+
+
 def remuneracoes_do_periodo(conn, cid: int, per: str, ind_apuracao: str = "1") -> Dict[str, Dict[str, Any]]:
     """Todos os valores devidos no período, agrupados por trabalhador (um S-1200 por CPF).
 
@@ -330,8 +335,11 @@ def remuneracoes_do_periodo(conn, cid: int, per: str, ind_apuracao: str = "1") -
                  "matricula": emp.get("matricula"), "linhas": _linhas_especial(conn, sp["id"])})
         return grupos
 
-    for it in conn.execute("""SELECT pi.*, pr.id AS run FROM payroll_items pi JOIN payroll_runs pr ON pr.id = pi.run_id
-                              WHERE pr.company_id = ? AND pr.competence = ? AND COALESCE(pr.tipo, 'mensal') = 'mensal'""",
+    for it in conn.execute("""SELECT pi.*, pr.id AS run, COALESCE(pr.tipo, 'mensal') AS run_tipo, pr.info AS run_info
+                              FROM payroll_items pi JOIN payroll_runs pr ON pr.id = pi.run_id
+                              WHERE pr.company_id = ? AND pr.competence = ? AND pr.status != 'cancelado'
+                                AND COALESCE(pr.tipo, 'mensal') IN ('mensal', 'complementar', 'dissidio')
+                              ORDER BY pr.id""",
                            (cid, per)).fetchall():
         it = dict(it)
         emp = _funcionario(conn, cid, it["employee_id"])
@@ -341,9 +349,14 @@ def remuneracoes_do_periodo(conn, cid: int, per: str, ind_apuracao: str = "1") -
             linhas = [{"codigo": "0001", "tipo": "provento", "referencia": "30d", "valor": it.get("gross_salary")},
                       {"codigo": "0100", "tipo": "desconto", "valor": it.get("inss")},
                       {"codigo": "0101", "tipo": "desconto", "valor": it.get("irrf")}]
-        add(f"E{emp['id']}", emp_trab(emp), "remuneracao", emp["id"], emp["id"],
-            {"ide_dm_dev": f"FOL{per.replace('-', '')}R{it['run']}", "cod_categ": emp.get("esocial_category") or "101",
-             "matricula": emp.get("matricula"), "linhas": linhas})
+        dm = {"ide_dm_dev": ide_dm_dev_folha(it["run_tipo"], per, it["run"]),
+              "cod_categ": emp.get("esocial_category") or "101", "matricula": emp.get("matricula"), "linhas": linhas}
+        if it["run_tipo"] == "dissidio":
+            try:
+                dm["per_ant"] = json.loads(it.get("run_info") or "{}")
+            except ValueError:
+                dm["per_ant"] = {}
+        add(f"E{emp['id']}", emp_trab(emp), "remuneracao", emp["id"], emp["id"], dm)
 
     for sp in conn.execute("""SELECT * FROM payroll_special WHERE company_id = ? AND status != 'cancelado' AND (
                                 (tipo = 'ferias' AND COALESCE(NULLIF(substr(competencia, 1, 7), ''), substr(data_inicio, 1, 7)) = ?)
@@ -391,14 +404,18 @@ def pagamentos_do_periodo(conn, cid: int, per_pg: str) -> Dict[str, Dict[str, An
 
     runs = [dict(r) for r in conn.execute(
         """SELECT * FROM payroll_runs WHERE company_id = ? AND substr(COALESCE(data_pagamento, ''), 1, 7) = ?
-           AND COALESCE(tipo, 'mensal') = 'mensal'""", (cid, per_pg)).fetchall()]
+           AND status != 'cancelado' AND COALESCE(tipo, 'mensal') IN ('mensal', 'complementar', 'dissidio')""",
+        (cid, per_pg)).fetchall()]
     for run in runs:
         for it in conn.execute("SELECT * FROM payroll_items WHERE run_id = ?", (run["id"],)).fetchall():
             it = dict(it)
             emp = _funcionario(conn, cid, it["employee_id"])
             add(f"E{emp['id']}", {"cpf": emp.get("cpf")}, "pagamento", emp["id"], emp["id"],
                 {"dt_pgto": run["data_pagamento"], "tp_pgto": "1", "per_ref": run["competence"],
-                 "ide_dm_dev": f"FOL{run['competence'].replace('-', '')}R{run['id']}", "vr_liq": it.get("net_salary")})
+                 "ide_dm_dev": ide_dm_dev_folha(run.get("tipo") or "mensal", run["competence"], run["id"]),
+                 "vr_liq": it.get("net_salary")})
+        if (run.get("tipo") or "mensal") != "mensal":
+            continue  # bolsa de estágio só acompanha a folha mensal
         per = run["competence"]
         for es in conn.execute("""SELECT * FROM interns WHERE company_id = ? AND COALESCE(bolsa_auxilio, 0) > 0
                                   AND data_inicio <= ? AND COALESCE(NULLIF(data_termino_real, ''), data_fim, '9999-12-31') >= ?""",

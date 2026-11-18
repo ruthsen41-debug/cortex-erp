@@ -45,6 +45,7 @@ function dpTabs() {
     { id: 'atestados',    icon: 'file-heart',      label: 'Atestados' },
     { id: 'cat',          icon: 'triangle-alert',  label: 'CAT' },
     { id: 'ponto',        icon: 'clock',           label: 'Ponto' },
+    { id: 'escalas',      icon: 'calendar-range',  label: 'Escalas & Horários' },
     { id: 'banco_horas',  icon: 'timer',           label: 'Banco de Horas' },
     { id: 'cargos',       icon: 'briefcase',       label: 'Cargos & Depts' },
     { id: 'historico',    icon: 'trending-up',     label: 'Histórico Salarial' },
@@ -130,6 +131,7 @@ async function switchDpTab(tab, noRebuildTabs = false) {
     case 'atestados':    await renderAtestados(body); break;
     case 'cat':          await renderCat(body); break;
     case 'ponto':        await renderPonto(body); break;
+    case 'escalas':      await renderEscalas(body); break;
     case 'banco_horas':  await renderBancoHoras(body); break;
     case 'cargos':       await renderCargos(body); break;
     case 'historico':    await renderHistoricoSalarial(body); break;
@@ -447,6 +449,7 @@ async function renderFolha(el) {
     <tr class="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition cursor-pointer"
         onclick="openFolhaDetail(${run.id})">
       <td class="px-4 py-3 text-sm font-mono font-semibold text-slate-700 dark:text-slate-200">${run.competence}</td>
+      <td class="px-4 py-3">${dpTipoFolhaBadge(run.tipo)}</td>
       <td class="px-4 py-3 text-xs text-slate-500">${run.employee_count} funcionário(s)</td>
       <td class="px-4 py-3 text-sm font-semibold text-slate-700 dark:text-slate-200">${fBRL2(run.total_gross)}</td>
       <td class="px-4 py-3 text-sm text-rose-500">-${fBRL2(run.total_discounts)}</td>
@@ -474,6 +477,12 @@ async function renderFolha(el) {
           class="bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-2">
           <i data-lucide="play" class="w-3.5 h-3.5"></i> Processar Folha
         </button>
+        <button onclick="abrirFolhaComplementar()" title="Pagar diferenças na competência de uma folha já processada"
+          class="text-xs font-semibold px-3 py-2 rounded-xl border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100 flex items-center gap-1.5">
+          <i data-lucide="file-plus-2" class="w-3.5 h-3.5"></i> Complementar</button>
+        <button onclick="abrirDissidio()" title="Diferenças retroativas de dissídio, acordo ou convenção coletiva"
+          class="text-xs font-semibold px-3 py-2 rounded-xl border border-violet-200 text-violet-700 bg-violet-50 hover:bg-violet-100 flex items-center gap-1.5">
+          <i data-lucide="history" class="w-3.5 h-3.5"></i> Dissídio retroativo</button>
       </div>
     </div>
     ${card2(`
@@ -481,6 +490,7 @@ async function renderFolha(el) {
         <table class="w-full text-sm">
           <thead><tr class="text-xs text-slate-400 uppercase border-b border-slate-100 dark:border-slate-800">
             <th class="px-4 py-2 text-left font-semibold">Competência</th>
+            <th class="px-4 py-2 text-left font-semibold">Tipo</th>
             <th class="px-4 py-2 text-left font-semibold">Funcionários</th>
             <th class="px-4 py-2 text-left font-semibold">Bruto</th>
             <th class="px-4 py-2 text-left font-semibold">Descontos</th>
@@ -489,7 +499,7 @@ async function renderFolha(el) {
             <th class="px-4 py-2 text-left font-semibold">Status</th>
             <th class="px-4 py-2 text-right font-semibold">Detalhe</th>
           </tr></thead>
-          <tbody>${runsRows || '<tr><td colspan="8" class="px-4 py-8 text-center text-slate-400 text-xs">Nenhuma folha processada.</td></tr>'}</tbody>
+          <tbody>${runsRows || '<tr><td colspan="9" class="px-4 py-8 text-center text-slate-400 text-xs">Nenhuma folha processada.</td></tr>'}</tbody>
         </table>
       </div>`)}
     <div id="folha-detail-area" class="mt-6"></div>`;
@@ -560,7 +570,8 @@ async function openFolhaDetail(runId) {
     area.innerHTML = `
       <div class="flex items-center justify-between mb-3">
         <h3 class="font-bold text-slate-700 dark:text-slate-200">
-          Folha ${run.competence} — ${items.length} funcionário(s)
+          Folha ${run.competence} ${dpTipoFolhaBadge(run.tipo)} — ${items.length} funcionário(s)
+          ${run.descricao ? `<span class="text-xs font-normal text-slate-500 ml-1">${_dpEsc(run.descricao)}</span>` : ''}
           <span class="text-xs font-normal text-slate-400 ml-2">clique no funcionário para ver as rubricas</span>
         </h3>
         <div class="flex flex-wrap items-center gap-2">
@@ -903,6 +914,11 @@ async function renderFerias(el) {
             </div>
           </div>
         </div>
+        <label class="flex items-start gap-2 text-xs text-slate-600 dark:text-slate-300 mb-4 cursor-pointer">
+          <input id="fer-adiant13" type="checkbox" class="mt-0.5">
+          <span>Pagar a 1ª parcela do 13º junto com as férias
+            <span class="text-slate-400">(a pedido do empregado, feito em janeiro — Lei 4.749/65 art. 2º §2º; sem INSS/IRRF agora, com FGTS)</span></span>
+        </label>
         <div class="flex flex-wrap gap-2 mb-5">
           <button onclick="previewFerias()"
             class="bg-slate-800 hover:bg-slate-900 dark:bg-slate-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-2">
@@ -971,6 +987,8 @@ async function loadFeriasPeriodos() {
       vence_em_breve: '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700">Vence em breve</span>',
       a_gozar:        '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">A gozar</span>',
       em_aquisicao:   '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700">Em aquisição</span>',
+      perda_afastamento: '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200 text-slate-600" title="Mais de 180 dias de benefício do INSS no período (CLT art. 133, IV)">Perdido — afastamento INSS</span>',
+      perda_faltas:   '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-200 text-slate-600" title="Mais de 32 faltas injustificadas no período (CLT art. 130)">Perdido — faltas</span>',
     };
 
     const pRows = (d.periodos || []).map(p => `
@@ -1014,6 +1032,7 @@ function _feriasPayload() {
     dias_gozo: parseInt(document.getElementById('fer-dias')?.value || '30', 10),
     dias_abono: parseInt(document.getElementById('fer-abono')?.value || '0', 10),
     periodo_inicio: document.getElementById('fer-periodo')?.value || '',
+    adiantar_13: !!document.getElementById('fer-adiant13')?.checked,
   };
   if (faltas !== '' && faltas !== undefined) payload.faltas_periodo = parseInt(faltas, 10);
   return payload;

@@ -18,10 +18,10 @@ Documento gerado em `2026-11-16` com o mapeamento módulo a módulo do que **já
 
 ### O que falta para igualar o Domínio Folha
 1. **Transmissão direta ao WebService do eSocial (mTLS A1) e retorno de recibos:** enviar lotes SOAP/REST diretamente ao governo usando o certificado A1 e importar eventos totalizadores de retorno (`S-5001` INSS, `S-5002` IRRF, `S-5003` FGTS, `S-5011`).
-2. **Folha Complementar e Dissídio Coletivo Retroativo:** cálculo automático das diferenças salariais retroativas à data-base do sindicato (geração de folha complementar de dissídio e parcelamento).
+2. ✅ (2026-11-18) **Folha Complementar e Dissídio Coletivo Retroativo:** cálculo automático das diferenças salariais retroativas à data-base do sindicato (geração de folha complementar de dissídio e parcelamento).
 3. **Importação de arquivo AFD / Portaria 671 (Relógio de Ponto Eletrônico):** leitura de marcações brutas do REP e apuração automática de horas extras (50%/100%), intrajornada, interjornada, DSR e adicional noturno.
 4. **Arquivo bancário CNAB 240 de pagamento de folha:** geração de remessa bancária para crédito de salários em lote (Itaú, Bradesco, Banco do Brasil, Santander, Caixa).
-5. **Troca de escala / horários complexos (12x36, turnos ininterruptos):** calendário de escalas cíclicas integrado ao controle de ponto.
+5. ✅ (2026-11-18) **Troca de escala / horários complexos (12x36, turnos ininterruptos):** calendário de escalas cíclicas integrado ao controle de ponto.
 
 ---
 
@@ -112,7 +112,9 @@ Documento gerado em `2026-11-16` com o mapeamento módulo a módulo do que **já
   - [x] Eventos eSocial `S-1200` e `S-2299` detalhados por rubrica (`backend/services/esocial_generator.py`, `backend/routers/dp.py`)
   - [x] TRCT oficial, Recibo de Férias e Recibo de 13º imprimíveis em HTML (`GET /api/dp/especiais/{id}/documento`, `frontend/static/dp.js`)
   - [x] Importação de arquivo AFD Portaria 671 / 1.510 (`POST /api/dp/ponto/importar-afd`) e Remessa Bancária CNAB 240 (`GET /api/dp/payroll/{run_id}/cnab240`)
-  - [ ] Folha Complementar / Dissídio retroativo no novo motor, escalas cíclicas 12x36 e transmissão eSocial direta (mTLS)
+  - [x] Folha Complementar (`POST /api/dp/payroll/complementar`, recalcula o mês e paga só a diferença) e Dissídio/Acordo/Convenção retroativo (`POST /api/dp/payroll/dissidio`: INSS por mês de referência, IRRF no mês do pagamento ou RRA, FGTS, reajuste do cadastro) com S-1200 `infoPerAnt`/`ideADC` validado no XSD (`backend/services/payroll_complementar.py`) — 2026-11-18
+  - [x] Escalas cíclicas 12x36, 24x48, 24x72, 5x1, 6x1 e personalizadas com turmas, hora noturna reduzida e prorrogação (Súmula 60), integradas ao ponto, à importação AFD (plantão que vira a meia-noite) e ao adicional noturno da folha (`backend/services/escalas.py`, aba DP › Escalas & Horários) — 2026-11-18
+  - [ ] Transmissão eSocial direta (mTLS): implementada na Central do eSocial; falta testar no ambiente do governo com um certificado A1 real
 
 - [x] **Etapa 2 — Escrita Fiscal Completa (Acumuladores, Livros e Apuração)**
   - [x] Tabelas `fiscal_accumulators`, `fiscal_entries`, `fiscal_apurations` e seed dos acumuladores `101`–`401` (`backend/database.py`)

@@ -2807,6 +2807,8 @@ def migrate_db(conn: sqlite3.Connection) -> None:
     _migrate_ficha_funcionario(cur)
     _migrate_esocial_central(cur)
     _migrate_esocial_complementos(cur)
+    _migrate_complementar_escalas(cur)
+    _migrate_dp_rotinas(cur)
     conn.commit()
 
 
@@ -2967,6 +2969,82 @@ ESOCIAL_COLUNAS_EXTRAS = {
     "autonomous_workers": [("data_nascimento", "TEXT DEFAULT ''")],  # S-1200 do contribuinte individual
     "payroll_runs": [("data_pagamento", "TEXT DEFAULT ''")],  # S-1210
 }
+
+
+# Folha complementar / dissídio retroativo e escalas cíclicas (12x36 etc.)
+COMPLEMENTAR_ESCALAS_COLUNAS = {
+    "payroll_runs": [("parent_run_id", "INTEGER"), ("descricao", "TEXT DEFAULT ''"), ("info", "TEXT DEFAULT ''")],
+    "payroll_item_lines": [("per_ref", "TEXT DEFAULT ''")],
+    "work_schedules": [
+        ("ciclo", "TEXT DEFAULT ''"), ("data_inicio_ciclo", "TEXT DEFAULT ''"),
+        ("intervalo_inicio", "TEXT DEFAULT ''"), ("prorrogacao_noturna", "INTEGER DEFAULT 1"),
+        ("feriados_compensados", "INTEGER DEFAULT 1"), ("adicional_noturno_auto", "INTEGER DEFAULT 0"),
+    ],
+    "employees": [("work_schedule_id", "INTEGER"), ("escala_inicio", "TEXT DEFAULT ''")],
+}
+
+
+def _migrate_complementar_escalas(cur) -> None:
+    for tabela, colunas in COMPLEMENTAR_ESCALAS_COLUNAS.items():
+        existentes = [c["name"] for c in cur.execute(f"PRAGMA table_info({tabela})").fetchall()]
+        if not existentes:
+            continue
+        for col, ddl in colunas:
+            if col not in existentes:
+                cur.execute(f"ALTER TABLE {tabela} ADD COLUMN {col} {ddl}")
+
+
+def _migrate_dp_rotinas(cur) -> None:
+    """Rotinas do DP: programação de férias, fechamento de competência, vale-transporte por
+    quantidade de vales e registro de envio de holerites por e-mail."""
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS ferias_programacao (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL,
+        employee_id INTEGER NOT NULL,
+        periodo_inicio TEXT DEFAULT '',
+        data_inicio TEXT NOT NULL,
+        dias_gozo INTEGER DEFAULT 30,
+        dias_abono INTEGER DEFAULT 0,
+        adiantar_13 INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'programada',
+        special_id INTEGER,
+        observacao TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS payroll_competencias (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL,
+        competencia TEXT NOT NULL,
+        status TEXT DEFAULT 'aberta',
+        fechado_em TEXT DEFAULT '',
+        fechado_por TEXT DEFAULT '',
+        observacao TEXT DEFAULT ''
+    )""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS employee_vt (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL,
+        employee_id INTEGER NOT NULL,
+        descricao TEXT DEFAULT '',
+        tarifa REAL DEFAULT 0,
+        vales_dia INTEGER DEFAULT 2,
+        dias_mes INTEGER DEFAULT 0,
+        ativo INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS holerite_envios (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL,
+        run_id INTEGER NOT NULL,
+        employee_id INTEGER NOT NULL,
+        email TEXT DEFAULT '',
+        status TEXT DEFAULT '',
+        erro TEXT DEFAULT '',
+        enviado_em TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
 
 
 def _migrate_esocial_complementos(cur) -> None:

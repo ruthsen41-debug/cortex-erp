@@ -657,6 +657,49 @@ def s2299(company, cfg, amb: int, emp: Dict[str, Any], mtv_deslig: str, dt_desli
 CATEG_COMPL_CONT = ("2", "304", "305", "4", "5", "7", "902")
 
 
+def _info_per_ant(dm, company, cfg, d: Dict[str, Any], linhas: List[Dict[str, Any]], per_apur: str) -> int:
+    """Grupo infoPerAnt: diferenças de acordo/convenção/dissídio de períodos anteriores, um idePeriodo
+    por mês de referência (perRef)."""
+    acordo = d.get("per_ant") or {}
+    tp = txt(acordo.get("tp_acordo")) or "C"
+    dt = data_iso(acordo.get("dt_acordo"))
+    problemas = []
+    if tp in ("A", "B", "C", "D", "E") and not dt:
+        problemas.append("Diferenças retroativas sem a data do acordo/convenção/sentença")
+    if dt and dt[:7] > per_apur:
+        problemas.append("Data do acordo posterior ao período de apuração")
+    _checa(problemas)
+    pant = _grupo(dm, "infoPerAnt")
+    adc = _grupo(pant, "ideADC")
+    if dt:
+        _el(adc, "dtAcConv", dt)
+    _el(adc, "tpAcConv", tp, True)
+    _el(adc, "dsc", (txt(acordo.get("descricao")) or "Diferencas salariais")[:255], True)
+    _el(adc, "remunSuc", "N", True)
+    por_mes: Dict[str, List[Dict[str, Any]]] = {}
+    for l in linhas:
+        por_mes.setdefault(str(l["per_ref"])[:7], []).append(l)
+    total = 0
+    for per in sorted(por_mes)[:180]:
+        ip = _grupo(adc, "idePeriodo")
+        _el(ip, "perRef", per, True)
+        est = _grupo(ip, "ideEstabLot")
+        _el(est, "tpInsc", "1", True)
+        _el(est, "nrInsc", digitos(company.get("cnpj")), True)
+        _el(est, "codLotacao", cod_lotacao(cfg), True)
+        rem = _grupo(est, "remunPerAnt")
+        _el(rem, "matricula", txt(d.get("matricula"))[:30] or None)
+        if str(cfg.get("class_trib") or "") == "03":
+            _el(rem, "indSimples", "3", True)
+        k = _itens(rem, "itensRemun", por_mes[per], cfg, per)
+        if not k:
+            adc.remove(ip)
+        total += k
+    if not total:
+        dm.remove(pant)
+    return total
+
+
 def s1200(company, cfg, amb: int, trab: Dict[str, Any], per_apur: str, dm_devs: List[Dict[str, Any]],
           ind_apuracao: str = "1", retif: Optional[Dict[str, str]] = None) -> Tuple[str, str]:
     """Remuneração do trabalhador no período: um evento por CPF, com um demonstrativo (dmDev) por origem
@@ -691,16 +734,26 @@ def s1200(company, cfg, amb: int, trab: Dict[str, Any], per_apur: str, dm_devs: 
         _el(dm, "ideDmDev", str(d["ide_dm_dev"])[:30], True)
         categ = digitos(d.get("cod_categ")) or "101"
         _el(dm, "codCateg", categ, True)
-        pa = _grupo(dm, "infoPerApur")
-        est = _grupo(pa, "ideEstabLot")
-        _el(est, "tpInsc", "1", True)
-        _el(est, "nrInsc", digitos(company.get("cnpj")), True)
-        _el(est, "codLotacao", cod_lotacao(cfg), True)
-        rem = _grupo(est, "remunPerApur")
-        _el(rem, "matricula", txt(d.get("matricula"))[:30] or None)
-        if str(cfg.get("class_trib") or "") == "03":
-            _el(rem, "indSimples", "3", True)
-        n = _itens(rem, "itensRemun", d.get("linhas") or [], cfg, per_apur)
+        linhas_d = d.get("linhas") or []
+        atuais = [l for l in linhas_d if not l.get("per_ref")]
+        anteriores = [l for l in linhas_d if l.get("per_ref")]
+        n = 0
+        if atuais:
+            pa = _grupo(dm, "infoPerApur")
+            est = _grupo(pa, "ideEstabLot")
+            _el(est, "tpInsc", "1", True)
+            _el(est, "nrInsc", digitos(company.get("cnpj")), True)
+            _el(est, "codLotacao", cod_lotacao(cfg), True)
+            rem = _grupo(est, "remunPerApur")
+            _el(rem, "matricula", txt(d.get("matricula"))[:30] or None)
+            if str(cfg.get("class_trib") or "") == "03":
+                _el(rem, "indSimples", "3", True)
+            k = _itens(rem, "itensRemun", atuais, cfg, per_apur)
+            if not k:
+                dm.remove(pa)
+            n += k
+        if anteriores and ind_apuracao == "1":
+            n += _info_per_ant(dm, company, cfg, d, anteriores, per_apur)
         if not n:
             evt.remove(dm)
             continue

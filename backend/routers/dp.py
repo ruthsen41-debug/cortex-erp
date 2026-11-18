@@ -20,7 +20,7 @@ try:
     from ..services.esocial_generator import (gerar_s2200, gerar_s1200, gerar_s2299, gerar_s2230, gerar_s2210,
         gerar_s1000, gerar_s1005, gerar_s1020, gerar_s1050, gerar_s1070, gerar_s3000, gerar_s5001, gerar_s5011,
         gerar_s2298, _build_det_verbas)
-    from ..services import payroll_engine, payroll_special
+    from ..services import payroll_engine, payroll_special, payroll_complementar, escalas
     from ..services.payroll_tables import default_seed, load_tables
     from ..services.formula_engine import FormulaError, FUNCOES as FORMULA_FUNCOES
     from ..services.ficha_registro import gerar_ficha_registro_html
@@ -34,7 +34,7 @@ except ImportError:
     from services.esocial_generator import (gerar_s2200, gerar_s1200, gerar_s2299, gerar_s2230, gerar_s2210,
         gerar_s1000, gerar_s1005, gerar_s1020, gerar_s1050, gerar_s1070, gerar_s3000, gerar_s5001, gerar_s5011,
         gerar_s2298, _build_det_verbas)
-    from services import payroll_engine, payroll_special
+    from services import payroll_engine, payroll_special, payroll_complementar, escalas
     from services.payroll_tables import default_seed, load_tables
     from services.formula_engine import FormulaError, FUNCOES as FORMULA_FUNCOES
     from services.ficha_registro import gerar_ficha_registro_html
@@ -362,7 +362,8 @@ def process_payroll(data: PayrollRunCreate, current_user: Dict[str, Any] = Depen
     company_id = current_user.get("company_id", 1)
 
     existing = conn.execute(
-        "SELECT id FROM payroll_runs WHERE competence = ? AND company_id = ? AND status != 'cancelado'",
+        "SELECT id FROM payroll_runs WHERE competence = ? AND company_id = ? AND status != 'cancelado' "
+        "AND COALESCE(tipo, 'mensal') = 'mensal'",
         (data.competence, company_id)
     ).fetchone()
     if existing:
@@ -380,38 +381,7 @@ def process_payroll(data: PayrollRunCreate, current_user: Dict[str, Any] = Depen
         if not results:
             raise HTTPException(status_code=400, detail="Nenhum funcionário ativo encontrado.")
 
-        tot = calc["totais"]
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO payroll_runs (company_id, competence, status, employee_count,
-                                      total_gross, total_discounts, total_net, total_fgts)
-            VALUES (?, ?, 'processado', ?, ?, ?, ?, ?)
-        """, (company_id, data.competence, len(results),
-              tot["proventos"], tot["descontos"], tot["liquido"], tot["fgts"]))
-        run_id = cur.lastrowid
-
-        for res in results:
-            h = _holerite_compat(res)
-            cur.execute("""
-                INSERT INTO payroll_items (
-                    run_id, employee_id, gross_salary, inss, irrf, fgts,
-                    vt_discount, other_discounts, net_salary,
-                    base_inss, base_irrf, base_fgts, avisos
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-            """, (
-                run_id, res["employee_id"],
-                h["gross_salary"], h["inss"], h["irrf"], h["fgts"],
-                h["vt_discount"], h["other_discounts"], h["net_salary"],
-                h["base_inss"], h["base_irrf"], h["base_fgts"], " | ".join(res["avisos"]),
-            ))
-            item_id = cur.lastrowid
-            for ln in res["lines"]:
-                cur.execute("""
-                    INSERT INTO payroll_item_lines
-                        (run_id, item_id, employee_id, codigo, nome, tipo, referencia, valor, origem)
-                    VALUES (?,?,?,?,?,?,?,?,?)
-                """, (run_id, item_id, res["employee_id"], ln["codigo"], ln["nome"], ln["tipo"],
-                      ln["referencia"], ln["valor"], ln["origem"]))
+        run_id = _gravar_folha(conn, company_id, data.competence, calc)
         conn.commit()
     except HTTPException:
         conn.rollback()
@@ -428,6 +398,46 @@ def process_payroll(data: PayrollRunCreate, current_user: Dict[str, Any] = Depen
     out["avisos"] = [{"employee_name": r["employee_name"], "avisos": r["avisos"]}
                      for r in results if r["avisos"]]
     return out
+
+
+def _gravar_folha(conn, company_id: int, competencia: str, calc: Dict[str, Any], tipo: str = "mensal",
+                  parent_run_id: Optional[int] = None, descricao: str = "", info: str = "") -> int:
+    """Grava a folha (mensal, complementar ou dissídio), os itens e as linhas de cada holerite."""
+    results = calc["results"]
+    tot = calc["totais"]
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO payroll_runs (company_id, competence, status, employee_count,
+                                  total_gross, total_discounts, total_net, total_fgts,
+                                  tipo, parent_run_id, descricao, info)
+        VALUES (?, ?, 'processado', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (company_id, competencia, len(results),
+          tot["proventos"], tot["descontos"], tot["liquido"], tot["fgts"],
+          tipo, parent_run_id, descricao, info))
+    run_id = cur.lastrowid
+    for res in results:
+        h = _holerite_compat(res)
+        cur.execute("""
+            INSERT INTO payroll_items (
+                run_id, employee_id, gross_salary, inss, irrf, fgts,
+                vt_discount, other_discounts, net_salary,
+                base_inss, base_irrf, base_fgts, avisos
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            run_id, res["employee_id"],
+            h["gross_salary"], h["inss"], h["irrf"], h["fgts"],
+            h["vt_discount"], h["other_discounts"], h["net_salary"],
+            h["base_inss"], h["base_irrf"], h["base_fgts"], " | ".join(res["avisos"]),
+        ))
+        item_id = cur.lastrowid
+        for ln in res["lines"]:
+            cur.execute("""
+                INSERT INTO payroll_item_lines
+                    (run_id, item_id, employee_id, codigo, nome, tipo, referencia, valor, origem, per_ref)
+                VALUES (?,?,?,?,?,?,?,?,?,?)
+            """, (run_id, item_id, res["employee_id"], ln["codigo"], ln["nome"], ln["tipo"],
+                  ln.get("referencia", ""), ln["valor"], ln.get("origem", "automatico"), ln.get("per_ref", "")))
+    return run_id
 
 
 def _load_payroll_run(conn, run_id: int, company_id: int) -> Optional[Dict[str, Any]]:
@@ -558,12 +568,145 @@ def delete_payroll_run(run_id: int, current_user: Dict[str, Any] = Depends(get_c
     if dict(run)["status"] == "fechado":
         conn.close()
         raise HTTPException(status_code=400, detail="Folha fechada não pode ser excluída.")
+    filhas = conn.execute("SELECT COUNT(*) AS n FROM payroll_runs WHERE parent_run_id = ? AND status != 'cancelado'",
+                          (run_id,)).fetchone()
+    if filhas and int(dict(filhas)["n"] or 0) > 0:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Esta folha tem folha complementar vinculada: exclua a "
+                                                    "complementar primeiro.")
     conn.execute("DELETE FROM payroll_item_lines WHERE run_id = ?", (run_id,))
     conn.execute("DELETE FROM payroll_items WHERE run_id = ?", (run_id,))
     conn.execute("DELETE FROM payroll_runs WHERE id = ?", (run_id,))
     conn.commit()
     conn.close()
     return {"ok": True}
+
+
+# ─── FOLHA COMPLEMENTAR E DISSÍDIO RETROATIVO ─────────────────────────────────
+
+def _comp_ok(c: Any) -> str:
+    c = str(c or "")[:7]
+    if not _re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", c):
+        raise HTTPException(status_code=400, detail="Competência inválida (use AAAA-MM).")
+    return c
+
+
+def _calc_complementar(conn, company_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
+    comp = _comp_ok(data.get("competence") or data.get("competencia"))
+    try:
+        return payroll_complementar.calcular_complementar(
+            conn, company_id, comp, data.get("lancamentos") or [], data.get("employee_ids") or [])
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/payroll/complementar/opcoes")
+def opcoes_complementar(competence: str, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Funcionários da folha mensal da competência e rubricas que não aceitam lançamento na complementar."""
+    comp = _comp_ok(competence)
+    conn = get_conn()
+    try:
+        return {"competencia": comp,
+                "funcionarios": payroll_complementar.funcionarios_da_folha(conn, current_user.get("company_id", 1), comp),
+                "rubricas_bloqueadas": sorted(payroll_complementar.RUBRICAS_BLOQUEADAS)}
+    finally:
+        conn.close()
+
+
+@router.post("/payroll/complementar/preview")
+def preview_complementar(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Simula a folha complementar: recalcula o mês com os lançamentos novos e mostra só as diferenças."""
+    conn = get_conn()
+    try:
+        return _calc_complementar(conn, current_user.get("company_id", 1), data)
+    finally:
+        conn.close()
+
+
+@router.post("/payroll/complementar", status_code=201)
+def processar_complementar(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Grava a folha complementar da competência (tipo 'complementar', ligada à folha mensal)."""
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    try:
+        payroll_engine.ensure_system_rubrics(conn, company_id)
+        calc = _calc_complementar(conn, company_id, data)
+        if not calc["results"]:
+            motivos = "; ".join(f"{g['employee_name']}: {g['motivo']}" for g in calc["ignorados"])
+            raise HTTPException(status_code=400, detail=("Nada a gravar. " + motivos) if motivos else
+                                "Não há diferença a pagar: os valores recalculados são iguais aos já pagos.")
+        mensal = conn.execute("""SELECT id FROM payroll_runs WHERE company_id=? AND competence=? AND status != 'cancelado'
+                                 AND COALESCE(tipo, 'mensal')='mensal'""", (company_id, calc["competencia"])).fetchone()
+        run_id = _gravar_folha(conn, company_id, calc["competencia"], calc, "complementar", mensal["id"],
+                               (data.get("descricao") or "Folha complementar")[:255])
+        conn.commit()
+        out = _load_payroll_run(conn, run_id, company_id)
+        out["avisos"] = [{"employee_name": r["employee_name"], "avisos": r["avisos"]}
+                         for r in calc["results"] if r["avisos"]]
+        out["ignorados"] = calc["ignorados"]
+        return out
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+@router.post("/payroll/dissidio/preview")
+def preview_dissidio(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Simula as diferenças retroativas de dissídio/acordo/convenção mês a mês."""
+    conn = get_conn()
+    try:
+        return payroll_complementar.calcular_dissidio(conn, current_user.get("company_id", 1), data)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+
+@router.post("/payroll/dissidio", status_code=201)
+def processar_dissidio(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Grava a folha de diferenças (tipo 'dissidio') na competência de pagamento e, se pedido,
+    reajusta o salário cadastrado com registro no histórico salarial."""
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    try:
+        payroll_engine.ensure_system_rubrics(conn, company_id)
+        try:
+            calc = payroll_complementar.calcular_dissidio(conn, company_id, data)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        if not calc["results"]:
+            raise HTTPException(status_code=400, detail="Nenhuma diferença encontrada: não há folhas processadas "
+                                                        "no período informado.")
+        info = calc["info"]
+        for r in conn.execute("""SELECT id, info FROM payroll_runs WHERE company_id=? AND competence=? AND tipo='dissidio'
+                                 AND status != 'cancelado'""", (company_id, calc["competencia"])).fetchall():
+            try:
+                ant = _json.loads(dict(r)["info"] or "{}")
+            except ValueError:
+                ant = {}
+            if (ant.get("dt_acordo"), ant.get("competencia_inicio")) == (info["dt_acordo"], info["competencia_inicio"]):
+                raise HTTPException(status_code=400, detail=f"Este dissídio já foi processado (folha id={dict(r)['id']}). "
+                                                            f"Exclua-a para reprocessar.")
+        run_id = _gravar_folha(conn, company_id, calc["competencia"], calc, "dissidio", None,
+                               info["descricao"], payroll_complementar.info_json(info))
+        reajustados = 0
+        if data.get("atualizar_salarios"):
+            reajustados = payroll_complementar.atualizar_salarios(conn, company_id, calc["results"],
+                                                                  calc["competencia"], info["descricao"])
+        conn.commit()
+        out = _load_payroll_run(conn, run_id, company_id)
+        out["avisos"] = [{"employee_name": r["employee_name"], "avisos": r["avisos"]}
+                         for r in calc["results"] if r["avisos"]]
+        out["ignorados"] = calc["ignorados"]
+        out["salarios_reajustados"] = reajustados
+        return out
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def _cnab_txt(val: Any, length: int) -> str:
@@ -942,6 +1085,17 @@ def _especial_view(res: Dict[str, Any], **extra: Any) -> Dict[str, Any]:
 
 # ── 13º salário ──────────────────────────────────────────────────────────────
 
+def _adiant13_ferias(conn, company_id: int, employee_id: int, ano: int) -> float:
+    """1ª parcela do 13º paga junto com as férias no ano (Lei 4.749/65 art. 2º §2º)."""
+    row = conn.execute(
+        """SELECT COALESCE(SUM(psl.valor),0) AS t FROM payroll_special_lines psl
+           JOIN payroll_special ps ON ps.id = psl.special_id
+           WHERE ps.company_id=? AND ps.employee_id=? AND ps.tipo='ferias' AND ps.status != 'cancelado'
+             AND psl.codigo='0020' AND substr(ps.data_inicio,1,4)=?""",
+        (company_id, employee_id, str(ano))).fetchone()
+    return float(dict(row)["t"] or 0)
+
+
 def _calc_decimo_emp(conn, company_id: int, emp: Dict[str, Any], ano: int, parcela: int,
                      rubrics: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if emp.get("is_prolabore"):
@@ -960,13 +1114,18 @@ def _calc_decimo_emp(conn, company_id: int, emp: Dict[str, Any], ano: int, parce
     media = payroll_special.media_variaveis(conn, company_id, emp["id"], comp_ini, comp_fim, "incide_13",
                                             payroll_special.meses_entre(comp_ini, comp_fim))
     adiant = 0.0
+    adiant_ferias = _adiant13_ferias(conn, company_id, emp["id"], ano)
+    if parcela == 1 and adiant_ferias > 0:
+        return None  # a 1ª parcela já foi paga com as férias
     if parcela == 2:
         row = conn.execute(
             """SELECT COALESCE(SUM(total_proventos),0) AS t FROM payroll_special
                WHERE company_id=? AND employee_id=? AND tipo='decimo_1' AND referencia=? AND status != 'cancelado'""",
             (company_id, emp["id"], str(ano))).fetchone()
-        adiant = float(dict(row)["t"] or 0)
+        adiant = float(dict(row)["t"] or 0) + adiant_ferias
     res = payroll_special.calc_decimo(ctx, tables, rubrics, parcela, avos, media, adiant)
+    if adiant_ferias and parcela == 2:
+        res["avisos"].append(f"Adiantamento de R$ {adiant_ferias:.2f} pago com as férias descontado.")
     return _especial_view(res, ano=ano, media_variaveis=media, competencia=comp_ref)
 
 
@@ -1055,7 +1214,8 @@ def _periodos_emp(conn, company_id: int, emp: Dict[str, Any], ate: date,
         raise HTTPException(status_code=400, detail="Funcionário sem data de admissão válida.")
     gozados, faltas = payroll_special.ferias_registradas(conn, company_id, emp["id"])
     faltas.update(faltas_extra or {})
-    return payroll_special.periodos_aquisitivos(adm, ate, gozados, faltas)
+    return payroll_special.periodos_aquisitivos(adm, ate, gozados, faltas,
+                                                payroll_special.dias_inss_fn(conn, company_id, emp["id"]))
 
 
 @router.get("/ferias/periodos/{emp_id}")
@@ -1119,8 +1279,24 @@ def _calc_ferias(conn, company_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
     competencia = inicio.strftime("%Y-%m")
     tables = load_tables(conn, company_id, competencia)
     ctx = payroll_special.contexto_funcionario(conn, company_id, emp, inicio)
+    adiant_13 = 0.0
+    avisos_13 = []
+    if data.get("adiantar_13") in (True, 1, "1", "true", "on"):
+        ja_1a = conn.execute(
+            "SELECT COUNT(*) FROM payroll_special WHERE company_id=? AND employee_id=? AND tipo IN ('decimo_1','decimo_2') "
+            "AND referencia=? AND status != 'cancelado'", (company_id, emp["id"], str(inicio.year))).fetchone()[0]
+        if ja_1a or _adiant13_ferias(conn, company_id, emp["id"], inicio.year):
+            avisos_13.append("A 1ª parcela do 13º deste ano já foi paga: adiantamento nas férias ignorado.")
+        elif inicio.month == 12:
+            avisos_13.append("Em dezembro não cabe adiantamento do 13º nas férias (pague a 2ª parcela).")
+        else:
+            adiant_13 = payroll_engine.r2(ctx.remuneracao(tables) / 2.0)
+            if not data.get("solicitado_janeiro", True):
+                avisos_13.append("O adiantamento do 13º nas férias depende de requerimento do empregado em janeiro "
+                                 "(Lei 4.749/65 art. 2º §2º).")
     res = payroll_special.calc_ferias(ctx, tables, payroll_engine.load_rubrics(conn, company_id),
-                                      dias_gozo, dias_abono, media, dias_dobro)
+                                      dias_gozo, dias_abono, media, dias_dobro, adiant_13)
+    res["avisos"].extend(avisos_13)
     if dias_gozo < 5:
         res["avisos"].append("Período de gozo inferior a 5 dias não é permitido pela CLT (art. 134 §1º).")
     return _especial_view(
@@ -1159,7 +1335,8 @@ def ferias_create(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any]
             data_pagamento=res["data_pagamento_limite"], data_inicio=res["data_inicio"], data_fim=res["data_fim"],
             dias_gozo=res["dias_gozo"], dias_abono=res["dias_abono"],
             params={"periodo_fim": res["periodo"]["fim"], "faltas_periodo": res["faltas_periodo"],
-                    "dias_dobro": res["dias_dobro"], "media_variaveis": res["media_variaveis"]})
+                    "dias_dobro": res["dias_dobro"], "media_variaveis": res["media_variaveis"],
+                    "adiantamento_13": res.get("adiantamento_13", 0)})
         conn.commit()
     except Exception:
         conn.rollback()
@@ -1231,7 +1408,7 @@ def _calc_rescisao(conn, company_id: int, data: Dict[str, Any]) -> Dict[str, Any
         row = conn.execute(
             "SELECT COALESCE(SUM(total_proventos),0) AS t FROM payroll_special WHERE company_id=? AND employee_id=? AND tipo='decimo_1' AND referencia=? AND status != 'cancelado'",
             (company_id, eid, str(deslig.year))).fetchone()
-        adiant_13 = float(dict(row)["t"] or 0)
+        adiant_13 = float(dict(row)["t"] or 0) + _adiant13_ferias(conn, company_id, eid, deslig.year)
 
     avisos_extra = []
     if tem_2a:
@@ -2159,43 +2336,128 @@ def list_work_schedules(current_user: Dict[str, Any] = Depends(get_current_user)
     return rows
 
 
+_SCHED_CAMPOS = ("nome", "tipo", "hora_entrada", "hora_saida", "hora_entrada_tarde", "hora_saida_tarde",
+                 "intervalo_min", "horas_diarias", "horas_semanais", "dias_trabalho", "ciclo", "data_inicio_ciclo",
+                 "intervalo_inicio", "prorrogacao_noturna", "feriados_compensados", "adicional_noturno_auto")
+
+
+def _sched_valores(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Normaliza o horário/escala; para escala cíclica valida o ciclo e calcula as horas do plantão."""
+    if not str(data.get("nome") or "").strip():
+        raise HTTPException(status_code=400, detail="Informe o nome do horário/escala.")
+    v = {
+        "nome": str(data["nome"]).strip(), "tipo": data.get("tipo") or "fixo",
+        "hora_entrada": data.get("hora_entrada") or "08:00", "hora_saida": data.get("hora_saida") or "17:00",
+        "hora_entrada_tarde": data.get("hora_entrada_tarde") or "", "hora_saida_tarde": data.get("hora_saida_tarde") or "",
+        "intervalo_min": int(data.get("intervalo_min") if data.get("intervalo_min") not in (None, "") else 60),
+        "horas_diarias": float(data.get("horas_diarias") or 0), "horas_semanais": float(data.get("horas_semanais") or 44),
+        "dias_trabalho": data.get("dias_trabalho") or "1,2,3,4,5", "ciclo": (data.get("ciclo") or "").strip(),
+        "data_inicio_ciclo": (data.get("data_inicio_ciclo") or "")[:10], "intervalo_inicio": data.get("intervalo_inicio") or "",
+        "prorrogacao_noturna": 1 if data.get("prorrogacao_noturna", 1) else 0,
+        "feriados_compensados": 1 if data.get("feriados_compensados", 1) else 0,
+        "adicional_noturno_auto": 1 if data.get("adicional_noturno_auto") else 0,
+    }
+    if v["tipo"] not in ("fixo", "ciclica"):
+        raise HTTPException(status_code=400, detail="Tipo deve ser 'fixo' ou 'ciclica'.")
+    if v["tipo"] == "ciclica":
+        try:
+            ciclo = escalas.parse_ciclo(v["ciclo"])
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        v["ciclo"] = ",".join("T" if t else "F" for t in ciclo)
+        if not escalas._parse_date(v["data_inicio_ciclo"]):
+            raise HTTPException(status_code=400, detail="Informe a data do primeiro dia de trabalho do ciclo.")
+    turno = escalas.turno_do_dia(v)
+    if not v["horas_diarias"]:
+        v["horas_diarias"] = turno["horas"]
+    return v
+
+
 @router.post("/work-schedules", status_code=201)
 def create_work_schedule(data: dict, current_user: Dict[str, Any] = Depends(get_current_user)):
     conn = get_conn()
     company_id = current_user.get("company_id", 1)
+    v = _sched_valores(data)
     cur = conn.execute(
-        """INSERT INTO work_schedules
-           (company_id, nome, tipo, hora_entrada, hora_saida, hora_entrada_tarde, hora_saida_tarde,
-            intervalo_min, horas_diarias, horas_semanais, dias_trabalho)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-        (company_id, data["nome"], data.get("tipo", "fixo"),
-         data.get("hora_entrada", "08:00"), data.get("hora_saida", "17:00"),
-         data.get("hora_entrada_tarde", ""), data.get("hora_saida_tarde", ""),
-         data.get("intervalo_min", 60), data.get("horas_diarias", 8.0),
-         data.get("horas_semanais", 44.0), data.get("dias_trabalho", "1,2,3,4,5"))
-    )
+        f"INSERT INTO work_schedules (company_id, {', '.join(_SCHED_CAMPOS)}) VALUES (?{', ?' * len(_SCHED_CAMPOS)})",
+        (company_id, *[v[c] for c in _SCHED_CAMPOS]))
     conn.commit()
     new_id = cur.lastrowid
     conn.close()
-    return {"id": new_id}
+    return {"id": new_id, "turno": escalas.turno_do_dia(v)}
 
 
 @router.put("/work-schedules/{sched_id}")
 def update_work_schedule(sched_id: int, data: dict, current_user: Dict[str, Any] = Depends(get_current_user)):
     conn = get_conn()
     company_id = current_user.get("company_id", 1)
+    v = _sched_valores(data)
     conn.execute(
-        """UPDATE work_schedules SET nome=?, tipo=?, hora_entrada=?, hora_saida=?,
-           hora_entrada_tarde=?, hora_saida_tarde=?, intervalo_min=?,
-           horas_diarias=?, horas_semanais=?, dias_trabalho=?
-           WHERE id=? AND company_id=?""",
-        (data.get("nome"), data.get("tipo", "fixo"),
-         data.get("hora_entrada", "08:00"), data.get("hora_saida", "17:00"),
-         data.get("hora_entrada_tarde", ""), data.get("hora_saida_tarde", ""),
-         data.get("intervalo_min", 60), data.get("horas_diarias", 8.0),
-         data.get("horas_semanais", 44.0), data.get("dias_trabalho", "1,2,3,4,5"),
-         sched_id, company_id)
-    )
+        f"UPDATE work_schedules SET {', '.join(c + '=?' for c in _SCHED_CAMPOS)} WHERE id=? AND company_id=?",
+        (*[v[c] for c in _SCHED_CAMPOS], sched_id, company_id))
+    conn.commit()
+    conn.close()
+    return {"ok": True, "turno": escalas.turno_do_dia(v)}
+
+
+@router.get("/escalas/presets")
+def escalas_presets(current_user: Dict[str, Any] = Depends(get_current_user)):
+    return escalas.PRESETS
+
+
+@router.get("/work-schedules/{sched_id}/calendario")
+def calendario_escala(sched_id: int, competencia: str = Query(...), employee_id: Optional[int] = Query(None),
+                      current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Calendário do mês da escala (ou do funcionário, com a data de início da turma dele)."""
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    comp = _comp_ok(competencia)
+    s = conn.execute("SELECT * FROM work_schedules WHERE id=? AND company_id=?", (sched_id, company_id)).fetchone()
+    if not s:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Horário/escala não encontrado.")
+    inicio = None
+    if employee_id:
+        e = conn.execute("SELECT escala_inicio FROM employees WHERE id=? AND company_id=?", (employee_id, company_id)).fetchone()
+        inicio = dict(e).get("escala_inicio") if e else None
+    feriados = payroll_engine.month_calendar(conn, company_id, comp)["feriados"]
+    conn.close()
+    try:
+        return escalas.calendario(dict(s), comp, feriados, inicio)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/work-schedules/{sched_id}/funcionarios")
+def funcionarios_da_escala(sched_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    rows = rows_to_dicts(conn.execute(
+        "SELECT id, name, matricula, role, escala_inicio FROM employees WHERE company_id=? AND work_schedule_id=? "
+        "AND active=1 ORDER BY name", (current_user.get("company_id", 1), sched_id)).fetchall())
+    conn.close()
+    return rows
+
+
+@router.put("/employees/{emp_id}/escala")
+def vincular_escala(emp_id: int, data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Vincula o funcionário a um horário/escala; escala_inicio = 1º dia de trabalho da turma dele."""
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    sid = data.get("work_schedule_id") or None
+    ini = (data.get("escala_inicio") or "")[:10]
+    if sid:
+        s = conn.execute("SELECT id, nome FROM work_schedules WHERE id=? AND company_id=?", (sid, company_id)).fetchone()
+        if not s:
+            conn.close()
+            raise HTTPException(status_code=404, detail="Horário/escala não encontrado.")
+    if ini and not escalas._parse_date(ini):
+        conn.close()
+        raise HTTPException(status_code=400, detail="Data de início da escala inválida.")
+    cur = conn.execute("UPDATE employees SET work_schedule_id=?, escala_inicio=? WHERE id=? AND company_id=?",
+                       (sid, ini, emp_id, company_id))
+    if not cur.rowcount:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Funcionário não encontrado.")
     conn.commit()
     conn.close()
     return {"ok": True}
@@ -2205,6 +2467,8 @@ def update_work_schedule(sched_id: int, data: dict, current_user: Dict[str, Any]
 def delete_work_schedule(sched_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
     conn = get_conn()
     company_id = current_user.get("company_id", 1)
+    conn.execute("UPDATE employees SET work_schedule_id=NULL WHERE work_schedule_id=? AND company_id=?",
+                 (sched_id, company_id))
     conn.execute("DELETE FROM work_schedules WHERE id=? AND company_id=?", (sched_id, company_id))
     conn.commit()
     conn.close()
@@ -2269,10 +2533,7 @@ def upsert_ponto(data: dict, current_user: Dict[str, Any] = Depends(get_current_
     horas_falt = 0.0
     if entrada and saida:
         horas_trab = _calc_horas(entrada, saida_alm, ret_alm, saida)
-        sched = conn.execute(
-            "SELECT horas_diarias FROM work_schedules WHERE company_id=? LIMIT 1", (company_id,)
-        ).fetchone()
-        horas_dia = float(sched["horas_diarias"]) if sched else 8.0
+        horas_dia, _sched, _escalado = escalas.jornada_prevista(conn, company_id, emp_id, dt)
         horas_extras = round(max(0, horas_trab - horas_dia), 2)
         if ocorrencia not in ("falta_justificada", "falta_injustificada", "feriado", "folga", "afastamento"):
             horas_falt = round(max(0, horas_dia - horas_trab), 2)
@@ -2313,6 +2574,39 @@ def delete_ponto(rec_id: int, current_user: Dict[str, Any] = Depends(get_current
     conn.commit()
     conn.close()
     return {"ok": True}
+
+
+def _agrupar_plantoes_noturnos(conn, company_id: int, punches: Dict[tuple, List[str]]) -> Dict[tuple, List[str]]:
+    """Plantão que vira a meia-noite (ex.: 19h às 7h) pertence ao dia em que começou: as batidas da
+    madrugada do dia seguinte (até 4h depois da saída prevista) voltam para o dia anterior, marcadas
+    com '+' para ficarem depois das batidas da noite."""
+    emps = {k[0] for k in punches}
+    noturnos: Dict[int, int] = {}
+    for eid in emps:
+        e = conn.execute("SELECT * FROM employees WHERE id=? AND company_id=?", (eid, company_id)).fetchone()
+        s = escalas.escala_do_funcionario(conn, company_id, dict(e)) if e else None
+        if not s:
+            continue
+        ent, sai = escalas._min(s.get("hora_entrada")), escalas._min(s.get("hora_saida"))
+        if ent is not None and sai is not None and sai < ent:
+            noturnos[eid] = sai + 240
+    if not noturnos:
+        return punches
+    out: Dict[tuple, List[str]] = {}
+    for (eid, dt_iso), horas in sorted(punches.items()):
+        corte = noturnos.get(eid)
+        for h in horas:
+            alvo = dt_iso
+            if corte is not None and (escalas._min(h) or 0) <= corte:
+                try:
+                    anterior = (date.fromisoformat(dt_iso) - timedelta(days=1)).isoformat()
+                except ValueError:
+                    anterior = None
+                if anterior and (eid, anterior) in punches:
+                    out.setdefault((eid, anterior), []).append("+" + h)
+                    continue
+            out.setdefault((eid, alvo), []).append(h)
+    return {k: v for k, v in out.items() if v}
 
 
 @router.post("/ponto/importar-afd", status_code=201)
@@ -2400,11 +2694,13 @@ def importar_afd_ponto(data: Dict[str, Any] = Body(...), current_user: Dict[str,
                 continue
             punches.setdefault((emp_id, dt_iso), []).append(hhmm)
 
+    punches = _agrupar_plantoes_noturnos(conn, company_id, punches)
+
     importados = 0
     he_total = 0.0
     funcs = set()
     for (emp_id, dt_iso), horas_list in sorted(punches.items()):
-        p = sorted(horas_list)
+        p = [h.lstrip("+") for h in sorted(horas_list, key=lambda h: (h.startswith("+"), h))]  # "+HH:MM" = dia seguinte
         if len(p) >= 4:
             entrada, saida_alm, ret_alm, saida = p[0], p[1], p[2], p[-1]
         elif len(p) >= 2:
@@ -2413,11 +2709,15 @@ def importar_afd_ponto(data: Dict[str, Any] = Body(...), current_user: Dict[str,
             entrada, saida_alm, ret_alm, saida = p[0], "", "", ""
 
         horas_trab = _calc_horas(entrada, saida_alm, ret_alm, saida) if (entrada and saida) else 0.0
-        try:
-            is_dsr = date.fromisoformat(dt_iso).weekday() == 6 or dt_iso in feriados
-        except ValueError:
-            is_dsr = False
-        meta = 0.0 if is_dsr else horas_dia
+        prevista, escala_emp, _esc = escalas.jornada_prevista(conn, company_id, emp_id, dt_iso)
+        if escala_emp:
+            meta = prevista
+        else:
+            try:
+                is_dsr = date.fromisoformat(dt_iso).weekday() == 6 or dt_iso in feriados
+            except ValueError:
+                is_dsr = False
+            meta = 0.0 if is_dsr else horas_dia
         horas_extras = round(max(0.0, horas_trab - meta), 2) if (entrada and saida) else 0.0
         horas_falt = round(max(0.0, meta - horas_trab), 2) if (meta > 0 and entrada and saida) else 0.0
 
@@ -3041,7 +3341,7 @@ def gerar_s1200_todos(competencia: str, current_user: Dict[str, Any] = Depends(g
         FROM payroll_items pi
         JOIN payroll_runs pr ON pr.id=pi.run_id
         JOIN employees e ON e.id=pi.employee_id
-        WHERE pr.company_id=? AND pr.competence=?
+        WHERE pr.company_id=? AND pr.competence=? AND COALESCE(pr.tipo, 'mensal')='mensal'
     """, (company_id, competencia)).fetchall())
     if not items:
         conn.close()
@@ -3049,7 +3349,7 @@ def gerar_s1200_todos(competencia: str, current_user: Dict[str, Any] = Depends(g
     all_lines = rows_to_dicts(conn.execute("""
         SELECT l.* FROM payroll_item_lines l
         JOIN payroll_runs pr ON pr.id = l.run_id
-        WHERE pr.company_id=? AND pr.competence=?
+        WHERE pr.company_id=? AND pr.competence=? AND COALESCE(pr.tipo, 'mensal')='mensal'
         ORDER BY l.item_id, l.tipo DESC, l.codigo, l.id
     """, (company_id, competencia)).fetchall())
     conn.close()
@@ -3093,7 +3393,7 @@ def gerar_s1200_emp(competencia: str, emp_id: int, current_user: Dict[str, Any] 
         FROM payroll_items pi
         JOIN payroll_runs pr ON pr.id=pi.run_id
         JOIN employees e ON e.id=pi.employee_id
-        WHERE pr.company_id=? AND pr.competence=? AND pi.employee_id=?
+        WHERE pr.company_id=? AND pr.competence=? AND COALESCE(pr.tipo, 'mensal')='mensal' AND pi.employee_id=?
     """, (company_id, competencia, emp_id)).fetchone()
     if not it:
         conn.close()
@@ -3190,7 +3490,7 @@ def calcular_sefip(competencia: str, current_user: Dict[str, Any] = Depends(get_
         FROM payroll_items pi
         JOIN payroll_runs pr ON pr.id=pi.run_id
         JOIN employees e ON e.id=pi.employee_id
-        WHERE pr.company_id=? AND pr.competence=?
+        WHERE pr.company_id=? AND pr.competence=? AND COALESCE(pr.tipo, 'mensal')='mensal'
     """, (company_id, competencia)).fetchall())
     conn.close()
     total_trab = len(items)
@@ -3227,7 +3527,7 @@ def sefip_arquivo(competencia: str, current_user: Dict[str, Any] = Depends(get_c
         FROM payroll_items pi
         JOIN payroll_runs pr ON pr.id=pi.run_id
         JOIN employees e ON e.id=pi.employee_id
-        WHERE pr.company_id=? AND pr.competence=?
+        WHERE pr.company_id=? AND pr.competence=? AND COALESCE(pr.tipo, 'mensal')='mensal'
     """, (company_id, competencia)).fetchall())
     conn.close()
     cnpj = (company.get("cnpj") or "").replace(".","").replace("/","").replace("-","")
@@ -5398,7 +5698,7 @@ def relatorio_folha_analitica(
         competencia = date.today().strftime("%Y-%m")
 
     run = conn.execute(
-        "SELECT * FROM payroll_runs WHERE company_id = ? AND competence = ? ORDER BY id DESC LIMIT 1",
+        "SELECT * FROM payroll_runs WHERE company_id = ? AND competence = ? AND COALESCE(tipo, 'mensal') = 'mensal' ORDER BY id DESC LIMIT 1",
         (company_id, competencia)
     ).fetchone()
 
@@ -5810,7 +6110,7 @@ def esocial_s5001(competencia: str, current_user: Dict[str, Any] = Depends(get_c
     company_id = current_user.get("company_id", 1)
     company = _get_company(conn, company_id)
     run = conn.execute(
-        "SELECT * FROM payroll_runs WHERE company_id=? AND competence=? ORDER BY id DESC LIMIT 1",
+        "SELECT * FROM payroll_runs WHERE company_id=? AND competence=? AND COALESCE(tipo, 'mensal')='mensal' ORDER BY id DESC LIMIT 1",
         (company_id, competencia)
     ).fetchone()
     if not run:
@@ -5831,7 +6131,7 @@ def esocial_s5011(competencia: str, current_user: Dict[str, Any] = Depends(get_c
     company_id = current_user.get("company_id", 1)
     company = _get_company(conn, company_id)
     run = conn.execute(
-        "SELECT * FROM payroll_runs WHERE company_id=? AND competence=? ORDER BY id DESC LIMIT 1",
+        "SELECT * FROM payroll_runs WHERE company_id=? AND competence=? AND COALESCE(tipo, 'mensal')='mensal' ORDER BY id DESC LIMIT 1",
         (company_id, competencia)
     ).fetchone()
     if not run:
@@ -5853,7 +6153,7 @@ def dctfweb_preview(competencia: str, current_user: Dict[str, Any] = Depends(get
     company_id = current_user.get("company_id", 1)
     company = _get_company(conn, company_id)
     run = conn.execute(
-        "SELECT * FROM payroll_runs WHERE company_id=? AND competence=? ORDER BY id DESC LIMIT 1",
+        "SELECT * FROM payroll_runs WHERE company_id=? AND competence=? AND COALESCE(tipo, 'mensal')='mensal' ORDER BY id DESC LIMIT 1",
         (company_id, competencia)
     ).fetchone()
 
@@ -7027,7 +7327,7 @@ def relatorio_custo_cc(competencia: str = Query(...), current_user: Dict[str, An
     conn = get_conn()
     company_id = current_user.get("company_id", 1)
     run = conn.execute(
-        "SELECT * FROM payroll_runs WHERE company_id=? AND competence=? ORDER BY id DESC LIMIT 1",
+        "SELECT * FROM payroll_runs WHERE company_id=? AND competence=? AND COALESCE(tipo, 'mensal')='mensal' ORDER BY id DESC LIMIT 1",
         (company_id, competencia)
     ).fetchone()
     if not run:
