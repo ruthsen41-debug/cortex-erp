@@ -190,9 +190,10 @@ Legenda: ✅ existe no Cortex · ⚠️ parcial · ❌ falta. O número entre pa
 | Menu Domínio | Cortex |
 |---|---|
 | Simuladores (férias e rescisão) | ✅ Simular nas telas. ❌ Falta relatório de simulações |
-| Excluir cálculos em grupo (férias, rescisões, RPA) | ❌ |
-| Alterar cadastros em grupo | ❌ |
-| Acerto de data de pagamento | ❌ |
+| Excluir cálculos em grupo (férias, rescisões, RPA) | ✅ DP › Utilitários (férias, 13º, rescisões e RPA; bloqueia competência fechada e S-2299 aceito) |
+| Alterar cadastros em grupo | ✅ DP › Utilitários (salário com histórico e piso, cargo, CBO, departamento, centro de custo, escala, CCT, horas) |
+| Acerto de data de pagamento | ✅ DP › Utilitários (folhas, recibos e RPA; avisa S-1210 já aceito e mudança do mês do IRRF) |
+| Rotinas automáticas e baixa de pagamentos | ✅ DP › Utilitários: folha e guias no contas a pagar (5º dia útil e dia 20), baixa em lote, rotinas agendadas (calcular folha, enviar holerites, lançar no financeiro) |
 | Controle > Parâmetros (224): sempre 30 dias × dias do mês, divisor de férias, arredondamento, % do adiantamento | ⚠️ Fixo no código. Falta tela de parâmetros da folha por empresa |
 | Avisos de vencimento: certificado, experiência, férias, ASO | ⚠️ Há alertas espalhados. Falta painel único |
 
@@ -201,5 +202,5 @@ Legenda: ✅ existe no Cortex · ⚠️ parcial · ❌ falta. O número entre pa
 2. ✅ **Documentos (concluído em 2026-11-18):** pacote de modelos (contratos, aviso e abono de férias, salário-família, VT, termos), personalizável por empresa.
 3. ✅ **Regras de CCT e categorias (concluído em 2026-11-18):** adicional por tempo de serviço, médias por CCT, indenização da data-base, comissionados com garantia mínima, horista e professor. Também: médias de HE e adicional noturno pela quantidade de horas × salário-hora atual (Súmula 347) e HE do comissionista só com o adicional sobre as comissões (Súmula 340 e OJ 397).
 4. ✅ **Benefícios (concluído em 2026-11-18):** VT automático e compra, plano de saúde por faixa etária e coparticipação, consignado.
-5. **Automação e utilitários:** rotinas automáticas, alterações e exclusões em grupo, acerto de data de pagamento, baixa de pagamentos.
+5. ✅ **Automação e utilitários (concluído em 2026-11-18):** rotinas automáticas, alterações e exclusões em grupo, acerto de data de pagamento, baixa de pagamentos.
 6. **Menor uso:** PLR, intermitente, trabalho temporário e tomador, transparência salarial, demonstrativos folha × eSocial.

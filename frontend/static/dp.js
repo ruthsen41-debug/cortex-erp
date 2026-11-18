@@ -69,6 +69,7 @@ function dpTabs() {
     { id: 'documentos',        icon: 'file-text',     label: 'Documentos' },
     { id: 'dctfweb',           icon: 'landmark',      label: 'DCTFWeb' },
     { id: 'compliance',        icon: 'shield-check',  label: 'Compliance' },
+    { id: 'utilitarios',       icon: 'wrench',        label: 'Utilitários' },
     { id: 'rel_folha',         icon: 'clipboard-list', label: 'Relatórios da Folha' },
     { id: 'rel_custo',         icon: 'calculator',    label: 'Custo CLT' },
     { id: 'rel_provisoes',     icon: 'piggy-bank',    label: 'Provisões' },
@@ -159,6 +160,7 @@ async function switchDpTab(tab, noRebuildTabs = false) {
     case 'esocial_tabelas':    await renderEsocialTabelas(body); break;
     case 'dctfweb':            await renderDctfweb(body); break;
     case 'compliance':         await renderCompliance(body); break;
+    case 'utilitarios':        await renderDpUtilitarios(body); break;
     case 'rel_folha':          await renderRelatoriosFolha(body); break;
     case 'rel_custo':          await renderRelCusto(body); break;
     case 'rel_provisoes':      await renderRelProvisoes(body); break;

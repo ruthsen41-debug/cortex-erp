@@ -35,6 +35,7 @@ from .bb import router as bb_router
 from .accounting import router as accounting_router
 from .dp import router as dp_router
 from .beneficios import router as beneficios_router
+from .dp_utilitarios import router as dp_utilitarios_router
 from .esocial import router as esocial_router
 from .patrimony import router as patrimony_router
 from .simples import router as simples_router
@@ -87,6 +88,7 @@ all_routers = [
     accounting_router,
     dp_router,
     beneficios_router,
+    dp_utilitarios_router,
     esocial_router,
     patrimony_router,
     simples_router,

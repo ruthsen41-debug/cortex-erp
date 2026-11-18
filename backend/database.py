@@ -2810,6 +2810,8 @@ def migrate_db(conn: sqlite3.Connection) -> None:
     _migrate_complementar_escalas(cur)
     _migrate_dp_rotinas(cur)
     _migrate_beneficios(cur)
+    _migrate_naturezas_seed(cur)
+    _migrate_dp_utilitarios(cur)
     conn.commit()
 
 
@@ -3112,6 +3114,62 @@ def _migrate_dp_rotinas(cur) -> None:
     )""")
 
 
+def _migrate_dp_utilitarios(cur) -> None:
+    """Bloco 5 da paridade DP: rotinas automáticas e o registro de cada execução."""
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS dp_rotinas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL,
+        tipo TEXT NOT NULL,
+        dia INTEGER NOT NULL,
+        hora TEXT DEFAULT '08:00',
+        competencia TEXT DEFAULT 'atual',
+        ativo INTEGER DEFAULT 1,
+        proxima_execucao TEXT DEFAULT '',
+        ultima_execucao TEXT DEFAULT '',
+        ultimo_status TEXT DEFAULT '',
+        ultima_mensagem TEXT DEFAULT '',
+        criado_por TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS dp_rotinas_execucoes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL,
+        rotina_id INTEGER NOT NULL,
+        tipo TEXT NOT NULL,
+        competencia TEXT DEFAULT '',
+        inicio TEXT DEFAULT '',
+        fim TEXT DEFAULT '',
+        status TEXT DEFAULT '',
+        mensagem TEXT DEFAULT '',
+        origem TEXT DEFAULT 'agendada'
+    )""")
+
+
+def _migrate_naturezas_seed(cur) -> None:
+    """O seed antigo de rubricas gravava naturezas que não existem na Tabela 03 do eSocial (1010, 2000,
+    3000, 9999...), e o S-1010 seria rejeitado. Corrige só o par (código, natureza errada) do seed."""
+    for codigo, errada, certa in (
+        ("0002", "1010", "1003"),
+        ("0003", "1010", "1003"),
+        ("0004", "1020", "1205"),
+        ("0005", "1070", "1202"),
+        ("0006", "1080", "1203"),
+        ("0008", "2000", "1020"),
+        ("0009", "2010", "1020"),
+        ("0010", "3000", "5001"),
+        ("0100", "9220", "9201"),
+        ("0101", "9230", "9203"),
+        ("0102", "9999", "9216"),
+        ("0103", "9999", "9299"),
+        ("0104", "9999", "9213"),
+        ("0105", "9999", "9200"),
+    ):
+        cur.execute("UPDATE payroll_rubrics SET esocial_nat_rubrica=? WHERE codigo=? AND esocial_nat_rubrica=?",
+                    (certa, codigo, errada))
+
+
 def _migrate_beneficios(cur) -> None:
     """Bloco 4 da paridade DP: plano de saúde por faixa etária e coparticipação, consignado."""
     cur.execute("""
@@ -3328,21 +3386,21 @@ def _seed_tax_tables_2025(cur) -> None:
 def _seed_default_rubrics(cur, company_id: int) -> None:
     rubrics = [
         ("0001","Salário Base","provento",1,1,1,1,1,"1000"),
-        ("0002","Hora Extra 50%","provento",1,1,1,1,1,"1010"),
-        ("0003","Hora Extra 100%","provento",1,1,1,1,1,"1010"),
-        ("0004","Adicional Noturno","provento",1,1,1,1,1,"1020"),
-        ("0005","Adicional de Insalubridade","provento",1,1,1,1,1,"1070"),
-        ("0006","Adicional de Periculosidade","provento",1,1,1,1,1,"1080"),
+        ("0002","Hora Extra 50%","provento",1,1,1,1,1,"1003"),
+        ("0003","Hora Extra 100%","provento",1,1,1,1,1,"1003"),
+        ("0004","Adicional Noturno","provento",1,1,1,1,1,"1205"),
+        ("0005","Adicional de Insalubridade","provento",1,1,1,1,1,"1202"),
+        ("0006","Adicional de Periculosidade","provento",1,1,1,1,1,"1203"),
         ("0007","Comissão","provento",1,1,1,1,1,"1030"),
-        ("0008","Férias Gozadas","provento",1,1,1,0,0,"2000"),
-        ("0009","1/3 Constitucional Férias","provento",1,1,1,0,0,"2010"),
-        ("0010","13º Salário","provento",1,1,1,0,0,"3000"),
-        ("0100","INSS Empregado","desconto",0,0,0,0,0,"9220"),
-        ("0101","IRRF","desconto",0,0,0,0,0,"9230"),
-        ("0102","Vale Transporte","desconto",0,0,0,0,0,"9999"),
-        ("0103","Vale Alimentação","desconto",0,0,0,0,0,"9999"),
-        ("0104","Pensão Alimentícia","desconto",0,0,0,0,0,"9999"),
-        ("0105","Adiantamento de Salário","desconto",0,0,0,0,0,"9999"),
+        ("0008","Férias Gozadas","provento",1,1,1,0,0,"1020"),
+        ("0009","1/3 Constitucional Férias","provento",1,1,1,0,0,"1020"),
+        ("0010","13º Salário","provento",1,1,1,0,0,"5001"),
+        ("0100","INSS Empregado","desconto",0,0,0,0,0,"9201"),
+        ("0101","IRRF","desconto",0,0,0,0,0,"9203"),
+        ("0102","Vale Transporte","desconto",0,0,0,0,0,"9216"),
+        ("0103","Vale Alimentação","desconto",0,0,0,0,0,"9299"),
+        ("0104","Pensão Alimentícia","desconto",0,0,0,0,0,"9213"),
+        ("0105","Adiantamento de Salário","desconto",0,0,0,0,0,"9200"),
         ("0200","FGTS (informativo)","informativo",0,0,0,0,0,"9000"),
         ("0201","Base de Cálculo INSS","informativo",0,0,0,0,0,"9100"),
         ("0202","Base de Cálculo IRRF","informativo",0,0,0,0,0,"9110"),

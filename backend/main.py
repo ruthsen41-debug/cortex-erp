@@ -21,6 +21,12 @@ except ImportError:
 async def lifespan(app: FastAPI):
     # Inicialização do banco de dados e dados padrão
     init_db()
+    # Rotinas automáticas do DP (calcular folha, enviar holerites, lançar no financeiro)
+    try:
+        from .routers.dp_utilitarios import iniciar_agendador
+    except ImportError:
+        from routers.dp_utilitarios import iniciar_agendador
+    iniciar_agendador()
     yield
 
 
