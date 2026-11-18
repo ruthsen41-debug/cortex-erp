@@ -8,7 +8,7 @@ import uuid
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 import calendar as _calendar
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse
 
 try:
@@ -25,7 +25,7 @@ try:
     from ..services.formula_engine import FormulaError, FUNCOES as FORMULA_FUNCOES
     from ..services.ficha_registro import gerar_ficha_registro_html
     from ..services.folha_impressao import gerar_folha_html, gerar_recibos_html, gerar_holerite_unico_html, competencia_extenso
-    from ..services import holerite_email, relatorios_folha
+    from ..services import holerite_email, relatorios_folha, modelos_documentos
 except ImportError:
     from database import get_conn
     from auth import get_current_user, log_audit
@@ -40,7 +40,7 @@ except ImportError:
     from services.formula_engine import FormulaError, FUNCOES as FORMULA_FUNCOES
     from services.ficha_registro import gerar_ficha_registro_html
     from services.folha_impressao import gerar_folha_html, gerar_recibos_html, gerar_holerite_unico_html, competencia_extenso
-    from services import holerite_email, relatorios_folha
+    from services import holerite_email, relatorios_folha, modelos_documentos
 
 router = APIRouter(prefix="/api/dp", tags=["Departamento Pessoal"])
 
@@ -6378,6 +6378,130 @@ def gerar_quitacao_anual(
 </div>
 </body></html>"""
     return Response(content=html, media_type="text/html")
+
+
+# ── Modelos de documentos (pacote do DP, personalizáveis por empresa) ─────────
+
+def _pode_editar_modelos(user: Dict[str, Any]) -> None:
+    if not user.get("is_superadmin") and (user.get("role") or "") not in ("admin", "dp"):
+        raise HTTPException(status_code=403, detail="Apenas administrador ou Depto. Pessoal podem alterar modelos de documentos.")
+
+
+@router.get("/modelos-documentos")
+def modelos_documentos_listar(current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    try:
+        return {"modelos": modelos_documentos.listar(conn, current_user.get("company_id", 1)),
+                "grupos": modelos_documentos.GRUPOS}
+    finally:
+        conn.close()
+
+
+@router.get("/modelos-documentos/{codigo}")
+def modelos_documentos_obter(codigo: str, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    try:
+        return modelos_documentos.obter(conn, current_user.get("company_id", 1), codigo)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Modelo não encontrado")
+    finally:
+        conn.close()
+
+
+@router.post("/modelos-documentos", status_code=201)
+def modelos_documentos_criar(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Cria um modelo próprio da empresa (só com as variáveis gerais do cadastro)."""
+    _pode_editar_modelos(current_user)
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    try:
+        codigo = modelos_documentos.novo_codigo(conn, cid)
+        modelos_documentos.salvar(conn, cid, codigo, data.get("titulo", ""), data.get("texto", ""), current_user.get("email", ""))
+        log_audit(conn, action="create", entity="dp_doc_modelos", entity_id=cid, new_data={"codigo": codigo},
+                  user_id=current_user.get("id"), company_id=cid)
+        conn.commit()
+        return modelos_documentos.obter(conn, cid, codigo)
+    except modelos_documentos.ModeloErro as e:
+        conn.rollback()
+        raise HTTPException(status_code=422, detail=str(e))
+    finally:
+        conn.close()
+
+
+@router.put("/modelos-documentos/{codigo}")
+def modelos_documentos_salvar(codigo: str, data: Dict[str, Any] = Body(...),
+                              current_user: Dict[str, Any] = Depends(get_current_user)):
+    _pode_editar_modelos(current_user)
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    try:
+        modelos_documentos.obter(conn, cid, codigo)          # 404 se não existe
+        modelos_documentos.salvar(conn, cid, codigo, data.get("titulo", ""), data.get("texto", ""), current_user.get("email", ""))
+        log_audit(conn, action="update", entity="dp_doc_modelos", entity_id=cid, new_data={"codigo": codigo},
+                  user_id=current_user.get("id"), company_id=cid)
+        conn.commit()
+        return modelos_documentos.obter(conn, cid, codigo)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Modelo não encontrado")
+    except modelos_documentos.ModeloErro as e:
+        conn.rollback()
+        raise HTTPException(status_code=422, detail=str(e))
+    finally:
+        conn.close()
+
+
+@router.delete("/modelos-documentos/{codigo}")
+def modelos_documentos_restaurar(codigo: str, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Modelo-padrão: volta ao texto original. Modelo próprio: é excluído."""
+    _pode_editar_modelos(current_user)
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    try:
+        if not modelos_documentos.excluir(conn, cid, codigo):
+            raise HTTPException(status_code=404, detail="Este modelo não tem personalização para restaurar.")
+        log_audit(conn, action="delete", entity="dp_doc_modelos", entity_id=cid, new_data={"codigo": codigo},
+                  user_id=current_user.get("id"), company_id=cid)
+        conn.commit()
+        return {"ok": True, "restaurado": codigo in modelos_documentos.MODELOS}
+    finally:
+        conn.close()
+
+
+def _gerar_modelo(codigo: str, emp_id: int, campos: Dict[str, Any], current_user: Dict[str, Any],
+                  texto: Optional[str] = None, titulo: Optional[str] = None) -> HTMLResponse:
+    cid = current_user.get("company_id", 1)
+    conn = get_conn()
+    try:
+        emp, co = _get_emp_company(emp_id, cid, conn)
+        html = modelos_documentos.gerar(conn, cid, codigo, emp, co, campos, texto=texto, titulo=titulo)
+        return HTMLResponse(html)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Modelo não encontrado")
+    except modelos_documentos.ModeloErro as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+@router.get("/employees/{emp_id}/modelo/{codigo}", response_class=HTMLResponse)
+def modelos_documentos_gerar(emp_id: int, codigo: str, request: Request,
+                             current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Gera o documento do modelo para o funcionário; os campos do modelo vêm na query string."""
+    return _gerar_modelo(codigo, emp_id, dict(request.query_params), current_user)
+
+
+@router.post("/modelos-documentos/{codigo}/previa", response_class=HTMLResponse)
+def modelos_documentos_previa(codigo: str, data: Dict[str, Any] = Body(...),
+                              current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Pré-visualiza um texto ainda não salvo com os dados de um funcionário."""
+    emp_id = data.get("employee_id")
+    if not emp_id:
+        raise HTTPException(status_code=422, detail="Escolha um funcionário para a prévia.")
+    return _gerar_modelo(codigo, int(emp_id), data.get("campos") or {}, current_user,
+                         texto=data.get("texto"), titulo=data.get("titulo"))
 
 
 @router.get("/documento/ferias-coletivas")

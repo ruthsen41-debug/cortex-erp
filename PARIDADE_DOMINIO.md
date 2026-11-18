@@ -180,8 +180,8 @@ Legenda: ✅ existe no Cortex · ⚠️ parcial · ❌ falta. O número entre pa
 | Folha (14) | ✅ Folha analítica com resumo, CNAB. ✅ (2026-11-18) Relação de líquidos, ficha financeira anual (folha por empregado), lançamentos por rubrica, resumo de férias e relação de rescisões, em HTML para imprimir ou CSV. ❌ Faltam: extrato mensal consolidado |
 | Encargos e Guias (24) | ✅ GPS, DARF, DCTFWeb, FGTS Digital, SEFIP. ⚠️ Faltam: relatório de IRRF, analítico de GPS, encargos da empresa consolidado |
 | eSocial (57) | ✅ Central do eSocial e totalizadores. ⚠️ Faltam: demonstrativos de conferência folha × eSocial (INSS, IRRF, FGTS, PIS) e análise de fechamento |
-| Cadastrais e Gerenciador (72) | ⚠️ Há ficha de registro, contrato, advertência e quitação. ❌ Faltam modelos: contrato de experiência, determinado e intermitente, acordo de compensação e de prorrogação de horas, ficha e termo de salário-família, declaração de dependentes para IR, declaração e renúncia de VT, autorização de desconto, termo LGPD, carta de recomendação, comunicado de abandono de emprego, término de experiência |
-| Aviso Prévio (12) | ✅ Carta de aviso do empregador (trabalhado/indenizado, acordo) e pedido de demissão. ❌ Faltam: aviso e solicitação de abono de férias |
+| Cadastrais e Gerenciador (72) | ✅ Ficha de registro, contrato, advertência e quitação. ✅ (2026-11-18) **Pacote de 17 modelos** em DP › Documentos: contratos de experiência, determinado e intermitente, prorrogação e término da experiência, acordos de compensação e de prorrogação de horas, termo de salário-família, dependentes para IR, opção/renúncia de VT, autorização de desconto, termo LGPD, carta de recomendação e convocação por abandono. Textos editáveis por empresa (variáveis do cadastro, prévia, voltar ao padrão) e modelos próprios — o equivalente ao Gerenciador |
+| Aviso Prévio (12) | ✅ Carta de aviso do empregador (trabalhado/indenizado, acordo) e pedido de demissão. ✅ (2026-11-18) Aviso de férias (usa a programação), requerimento de abono pecuniário e pedido da 1ª parcela do 13º nas férias |
 | Outros (29) | ✅ Vencimento de experiência e de férias. ❌ Faltam: faltas, histórico do empregado, alterações salariais, quantidade de colaboradores, quadro de horário, cálculo de médias |
 | Informativos | ❌ Relatório de Transparência Salarial (Lei 14.611/2023) |
 | Programação de Férias | ❌ |
@@ -198,7 +198,7 @@ Legenda: ✅ existe no Cortex · ⚠️ parcial · ❌ falta. O número entre pa
 
 ### Prioridade sugerida para as lacunas
 1. **Uso diário:** parâmetros da folha por empresa · programação de férias, férias em grupo e coletivas · rescisão complementar e em grupo, aviso prévio como processo · holerite por e-mail · relação de líquidos e relatórios de folha.
-2. **Documentos:** pacote de modelos (contratos, avisos prévios, aviso e abono de férias, salário-família, VT, termos).
+2. ✅ **Documentos (concluído em 2026-11-18):** pacote de modelos (contratos, aviso e abono de férias, salário-família, VT, termos), personalizável por empresa.
 3. **Regras de CCT e categorias:** adicional por tempo de serviço, médias por CCT, multa da data-base, comissionados com garantia mínima, horista e professor.
 4. **Benefícios:** VT automático e compra, plano de saúde por faixa etária e coparticipação, consignado.
 5. **Automação e utilitários:** rotinas automáticas, alterações e exclusões em grupo, acerto de data de pagamento, baixa de pagamentos.

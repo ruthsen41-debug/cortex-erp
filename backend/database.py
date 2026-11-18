@@ -3090,6 +3090,17 @@ def _migrate_dp_rotinas(cur) -> None:
         observacao TEXT DEFAULT '',
         created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )""")
+    # Modelos de documentos do DP personalizados pela empresa (ou criados por ela: codigo pers_N)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS dp_doc_modelos (
+        company_id INTEGER NOT NULL,
+        codigo TEXT NOT NULL,
+        titulo TEXT DEFAULT '',
+        texto TEXT DEFAULT '',
+        atualizado_em TEXT DEFAULT '',
+        atualizado_por TEXT DEFAULT '',
+        PRIMARY KEY (company_id, codigo)
+    )""")
 
 
 def _migrate_esocial_complementos(cur) -> None:

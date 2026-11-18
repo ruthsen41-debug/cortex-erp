@@ -5261,9 +5261,11 @@ function renderDocumentos(el) {
         <p class="text-xs text-slate-400">Gera um recibo único para todos os funcionários ativos (ou do departamento selecionado) com campo de assinatura.</p>`,
         'btn-fc','Gerar Recibo Coletivo','window._docFeriasColetivas()')}
 
-    </div>`;
+    </div>
+    <div id="dp-modelos-box"></div>`;
 
   if (window.lucide) lucide.createIcons();
+  if (typeof renderModelosDocumentos === 'function') renderModelosDocumentos(document.getElementById('dp-modelos-box'));
 
   window._docFicha = () => {
     const emp = document.getElementById('doc-ficha-emp')?.value;
