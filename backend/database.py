@@ -3045,6 +3045,14 @@ def _migrate_dp_rotinas(cur) -> None:
         erro TEXT DEFAULT '',
         enviado_em TEXT DEFAULT CURRENT_TIMESTAMP
     )""")
+    # Parâmetros da folha por empresa (JSON; ver backend/services/dp_parametros.py)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS payroll_parametros (
+        company_id INTEGER PRIMARY KEY,
+        dados TEXT DEFAULT '{}',
+        atualizado_em TEXT DEFAULT '',
+        atualizado_por TEXT DEFAULT ''
+    )""")
 
 
 def _migrate_esocial_complementos(cur) -> None:

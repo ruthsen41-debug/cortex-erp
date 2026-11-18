@@ -475,3 +475,226 @@ async function _dpxVincular(empId, schedId, inicio) {
   if (!r.ok) { const j = await r.json().catch(() => ({})); alert(j.detail || 'Erro ao vincular.'); return; }
   _dpxVerEscala(_dpxEscalaSel, document.getElementById('dpx-cal-comp')?.value);
 }
+
+// ── PARÂMETROS DA FOLHA (por empresa) ────────────────────────
+async function renderParametrosFolha(el) {
+  el.innerHTML = '<div class="text-xs text-slate-400">Carregando...</div>';
+  let d;
+  try {
+    d = await fetch('/api/dp/parametros', { headers: authHeaders() }).then(r => r.json());
+  } catch { el.innerHTML = '<div class="text-xs text-rose-500">Erro ao carregar os parâmetros.</div>'; return; }
+  const p = d.parametros || {};
+  const linha = (rot, ajuda, campo) => `
+    <div class="grid md:grid-cols-3 gap-3 items-start py-3 border-b border-slate-100 dark:border-slate-800">
+      <div class="md:col-span-1"><div class="text-sm font-semibold text-slate-700 dark:text-slate-200">${rot}</div>
+        <div class="text-[11px] text-slate-400 mt-0.5">${ajuda}</div></div>
+      <div class="md:col-span-2">${campo}</div>
+    </div>`;
+  el.innerHTML = `
+    <div class="flex items-center justify-between mb-4">
+      <div><h2 class="text-lg font-bold text-slate-800 dark:text-slate-100">Parâmetros da folha</h2>
+        <p class="text-xs text-slate-400">Regras da empresa usadas no cálculo da folha, no adiantamento, nas férias e nos holerites.</p></div>
+      <button onclick="_dpxSalvarParametros()" class="bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold px-4 py-2 rounded-xl flex items-center gap-2">
+        <i data-lucide="save" class="w-3.5 h-3.5"></i> Salvar parâmetros</button>
+    </div>
+    ${card2(`<div class="px-5 py-2">
+      <div class="text-[11px] font-bold uppercase tracking-wide text-violet-600 mt-3">Cálculo da folha</div>
+      ${linha('Cálculo proporcional do salário',
+        'Como dividir o salário em admissões, afastamentos e férias no meio do mês. O mês comercial (30 dias) é o padrão de mercado; "dias do mês" divide pelos dias corridos (28 a 31).',
+        `<select id="par-base_dias" class="${inputCls()}">
+           <option value="30" ${p.base_dias === '30' ? 'selected' : ''}>Sempre 30 dias (mês comercial)</option>
+           <option value="mes" ${p.base_dias === 'mes' ? 'selected' : ''}>Dias do mês (28 a 31)</option></select>`)}
+      ${linha('Descontar DSR por falta',
+        'Falta injustificada na semana faz perder o descanso semanal remunerado (Lei 605/49, art. 6º). Desmarque se a convenção dispensar.',
+        `<label class="flex items-center gap-2 text-sm"><input id="par-descontar_dsr_faltas" type="checkbox" ${p.descontar_dsr_faltas ? 'checked' : ''}> Descontar o DSR da semana com falta</label>`)}
+      <div class="text-[11px] font-bold uppercase tracking-wide text-violet-600 mt-5">Adiantamento salarial</div>
+      ${linha('Percentual sugerido', 'Preenchido automaticamente ao lançar um adiantamento.',
+        `<input id="par-adiantamento_percentual" type="number" step="0.01" min="1" max="100" value="${p.adiantamento_percentual}" class="${inputCls()} max-w-[140px]">`)}
+      ${linha('Percentual máximo', 'Lançamentos acima deste limite são recusados.',
+        `<input id="par-adiantamento_limite" type="number" step="0.01" min="1" max="100" value="${p.adiantamento_limite}" class="${inputCls()} max-w-[140px]">`)}
+      ${linha('Dia de pagamento', 'Data sugerida para o pagamento do adiantamento.',
+        `<input id="par-adiantamento_dia_pagamento" type="number" min="1" max="28" value="${p.adiantamento_dia_pagamento}" class="${inputCls()} max-w-[140px]">`)}
+      <div class="text-[11px] font-bold uppercase tracking-wide text-violet-600 mt-5">Férias</div>
+      ${linha('Aviso de férias a vencer', 'Quantos dias antes do fim do período concessivo as férias aparecem como "vence em breve".',
+        `<div class="flex items-center gap-2"><input id="par-ferias_alerta_dias" type="number" min="0" max="365" value="${p.ferias_alerta_dias}" class="${inputCls()} max-w-[140px]"><span class="text-xs text-slate-500">dias</span></div>`)}
+      <div class="text-[11px] font-bold uppercase tracking-wide text-violet-600 mt-5">Holerite</div>
+      ${linha('Mensagem no holerite', 'Texto impresso em todos os recibos de pagamento (até 300 caracteres).',
+        `<textarea id="par-mensagem_recibo" rows="2" maxlength="300" class="${inputCls()}" placeholder="ex.: Feliz aniversário aos colaboradores do mês!">${_dpEsc(p.mensagem_recibo || '')}</textarea>`)}
+      <div id="par-msg" class="text-xs my-3"></div>
+    </div>`)}`;
+  if (window.lucide) lucide.createIcons();
+}
+
+async function _dpxSalvarParametros() {
+  const v = id => document.getElementById('par-' + id);
+  const body = {
+    base_dias: v('base_dias').value,
+    descontar_dsr_faltas: v('descontar_dsr_faltas').checked,
+    adiantamento_percentual: v('adiantamento_percentual').value,
+    adiantamento_limite: v('adiantamento_limite').value,
+    adiantamento_dia_pagamento: v('adiantamento_dia_pagamento').value,
+    ferias_alerta_dias: v('ferias_alerta_dias').value,
+    mensagem_recibo: v('mensagem_recibo').value,
+  };
+  const msg = document.getElementById('par-msg');
+  try {
+    const r = await fetch('/api/dp/parametros', { method: 'PUT', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                                                  body: JSON.stringify(body) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(typeof j.detail === 'string' ? j.detail : 'Erro ao salvar.');
+    msg.innerHTML = '<span class="text-emerald-600 font-semibold">Parâmetros salvos. Valem para os próximos cálculos.</span>';
+    if (typeof showToast === 'function') showToast('Parâmetros da folha salvos.', 'success');
+  } catch (e) { msg.innerHTML = `<span class="text-rose-500">${_dpEsc(e.message)}</span>`; }
+}
+
+// ── FÉRIAS: PROGRAMAÇÃO ANUAL ────────────────────────────────
+async function abrirProgramacaoFerias(ano) {
+  ano = ano || new Date().getFullYear();
+  const lista = await fetch(`/api/dp/ferias/programacao?ano=${ano}`, { headers: authHeaders() }).then(r => r.json()).catch(() => []);
+  const sit = { programada: ['Programada', 'bg-sky-100 text-sky-700'], calculada: ['Calculada', 'bg-emerald-100 text-emerald-700'] };
+  const linhas = (Array.isArray(lista) ? lista : []).map(p => {
+    const [rot, cls] = sit[p.status] || [p.status, 'bg-slate-100 text-slate-600'];
+    return `<tr class="border-b border-slate-100 dark:border-slate-800 text-xs">
+      <td class="px-2 py-2 font-medium">${_dpEsc(p.employee_name)}</td>
+      <td class="px-2 py-2">${fDate2(p.periodo_inicio)}</td>
+      <td class="px-2 py-2">${fDate2(p.data_inicio)} a ${fDate2(p.data_fim)}</td>
+      <td class="px-2 py-2 text-right">${p.dias_gozo}d${p.dias_abono ? ` + ${p.dias_abono} abono` : ''}${p.adiantar_13 ? ' · 13º' : ''}</td>
+      <td class="px-2 py-2">${fDate2(p.limite_concessivo)}</td>
+      <td class="px-2 py-2"><span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${cls}">${rot}</span>
+        ${p.alertas.length ? `<div class="text-[10px] text-amber-600 mt-0.5">⚠ ${_dpEsc(p.alertas.join(' · '))}</div>` : ''}</td>
+      <td class="px-2 py-2 text-right whitespace-nowrap">${p.status === 'programada' ? `
+        <button onclick="_dpxProgCalcular(${p.id}, ${ano})" class="text-violet-600 hover:underline mr-2">Calcular</button>
+        <button onclick="_dpxProgExcluir(${p.id}, ${ano})" class="text-rose-500 hover:underline">Excluir</button>` : ''}</td></tr>`;
+  }).join('');
+  const emps = dpEmployees.filter(e => e.active !== 0 && e.active !== false && !e.is_prolabore)
+    .map(e => `<option value="${e.id}">${_dpEsc(e.name)}</option>`).join('');
+  _dpxModal('dpx-prog', `Programação de férias — ${ano}`, `
+    <div class="flex items-center justify-between mb-3 gap-2">
+      <div class="flex items-center gap-2 text-xs">
+        <button onclick="abrirProgramacaoFerias(${ano - 1})" class="px-2 py-1 rounded-lg border">‹ ${ano - 1}</button>
+        <button onclick="abrirProgramacaoFerias(${ano + 1})" class="px-2 py-1 rounded-lg border">${ano + 1} ›</button>
+      </div>
+      <a href="#" onclick="_dpxProgRelatorio(${ano});return false" class="text-xs text-violet-600 hover:underline">Imprimir relatório do ano</a>
+    </div>
+    <div class="grid grid-cols-12 gap-2 items-end mb-4 bg-slate-50 dark:bg-slate-800/40 rounded-xl p-3">
+      <div class="col-span-4">${labelCls('Funcionário')}<select id="dpx-p-emp" class="${inputCls()}">${emps}</select></div>
+      <div class="col-span-3">${labelCls('Início previsto')}<input id="dpx-p-ini" type="date" value="${ano}-01-01" class="${inputCls()}"></div>
+      <div class="col-span-1">${labelCls('Dias')}<input id="dpx-p-dias" type="number" min="5" max="30" value="30" class="${inputCls()}"></div>
+      <div class="col-span-1">${labelCls('Abono')}<input id="dpx-p-abono" type="number" min="0" max="10" value="0" class="${inputCls()}"></div>
+      <label class="col-span-1 text-[11px] flex items-center gap-1 pb-2"><input id="dpx-p-13" type="checkbox"> 13º</label>
+      <div class="col-span-2"><button onclick="_dpxProgSalvar(${ano})" class="w-full text-xs bg-violet-600 hover:bg-violet-700 text-white font-semibold px-3 py-2 rounded-xl">Programar</button></div>
+    </div>
+    <div id="dpx-p-msg" class="text-xs mb-2"></div>
+    <div class="overflow-x-auto"><table class="w-full text-sm">
+      <thead><tr class="text-[10px] text-slate-400 uppercase border-b"><th class="px-2 py-1 text-left">Funcionário</th>
+        <th class="px-2 py-1 text-left">Per. aquisitivo</th><th class="px-2 py-1 text-left">Gozo</th><th class="px-2 py-1 text-right">Dias</th>
+        <th class="px-2 py-1 text-left">Limite</th><th class="px-2 py-1 text-left">Situação</th><th></th></tr></thead>
+      <tbody>${linhas || '<tr><td colspan="7" class="text-center text-xs text-slate-400 py-6">Nenhuma férias programada para o ano.</td></tr>'}</tbody>
+    </table></div>`, 'max-w-5xl');
+}
+
+async function _dpxProgSalvar(ano) {
+  const msg = document.getElementById('dpx-p-msg');
+  try {
+    await _dpxPost('/api/dp/ferias/programacao', {
+      employee_id: Number(document.getElementById('dpx-p-emp').value),
+      data_inicio: document.getElementById('dpx-p-ini').value,
+      dias_gozo: Number(document.getElementById('dpx-p-dias').value),
+      dias_abono: Number(document.getElementById('dpx-p-abono').value || 0),
+      adiantar_13: document.getElementById('dpx-p-13').checked });
+    await abrirProgramacaoFerias(ano);
+  } catch (e) { msg.innerHTML = `<span class="text-rose-500">${_dpEsc(e.message)}</span>`; }
+}
+
+async function _dpxProgCalcular(id, ano) {
+  if (!confirm('Calcular e gravar o recibo de férias desta programação?')) return;
+  try {
+    await _dpxPost(`/api/dp/ferias/programacao/${id}/calcular`, {});
+    await abrirProgramacaoFerias(ano);
+    const body = document.getElementById('dp-body');
+    if (body && typeof renderFerias === 'function') { await renderFerias(body); if (window.lucide) lucide.createIcons(); }
+  } catch (e) { document.getElementById('dpx-p-msg').innerHTML = `<span class="text-rose-500">${_dpEsc(e.message)}</span>`; }
+}
+
+async function _dpxProgExcluir(id, ano) {
+  if (!confirm('Excluir esta programação?')) return;
+  const r = await fetch(`/api/dp/ferias/programacao/${id}`, { method: 'DELETE', headers: authHeaders() });
+  if (!r.ok) { const j = await r.json().catch(() => ({})); alert(j.detail || 'Erro ao excluir.'); return; }
+  await abrirProgramacaoFerias(ano);
+}
+
+async function _dpxProgRelatorio(ano) {
+  const r = await fetch(`/api/dp/ferias/programacao/relatorio?ano=${ano}`, { headers: authHeaders() });
+  const w = window.open('', '_blank');
+  if (w) { w.document.write(await r.text()); w.document.close(); }
+}
+
+// ── FÉRIAS EM GRUPO / COLETIVAS ──────────────────────────────
+function abrirFeriasGrupo() {
+  const ativos = dpEmployees.filter(e => e.active !== 0 && e.active !== false);
+  const deptos = [...new Set(ativos.map(e => (e.department || '').trim()).filter(Boolean))].sort();
+  const emps = ativos.filter(e => !e.is_prolabore)
+    .map(e => `<label class="flex items-center gap-2 text-xs py-0.5"><input type="checkbox" class="dpx-g-emp" value="${e.id}"> ${_dpEsc(e.name)}
+      <span class="text-slate-400">${_dpEsc(e.department || '')}</span></label>`).join('');
+  const optDeptos = deptos.map(d => `<option>${_dpEsc(d)}</option>`).join('') || '<option value="">(nenhum cadastrado)</option>';
+  _dpxModal('dpx-grupo', 'Férias em grupo / coletivas', `
+    <p class="text-xs text-slate-500 mb-4">Calcula as férias de vários funcionários com o mesmo início. Nas <b>coletivas</b>
+      (CLT arts. 139 a 141) o mínimo é 10 dias e é preciso comunicar o Ministério do Trabalho e o sindicato com 15 dias de antecedência.</p>
+    <div class="grid grid-cols-4 gap-3 mb-3">
+      <div>${labelCls('Início')}<input id="dpx-g-ini" type="date" class="${inputCls()}"></div>
+      <div>${labelCls('Dias de gozo')}<input id="dpx-g-dias" type="number" min="1" max="30" value="30" class="${inputCls()}"></div>
+      <div class="col-span-2 flex items-end pb-2"><label class="text-xs flex items-center gap-2"><input id="dpx-g-col" type="checkbox" checked> Férias coletivas</label></div>
+    </div>
+    <div class="grid grid-cols-3 gap-3 mb-3">
+      <div>${labelCls('Quem')}<select id="dpx-g-modo" onchange="_dpxGrupoModo()" class="${inputCls()}">
+        <option value="todos">Todos os funcionários</option><option value="depto">Um departamento</option><option value="lista">Escolher na lista</option></select></div>
+      <div id="dpx-g-depto-box" class="hidden">${labelCls('Departamento')}<select id="dpx-g-depto" class="${inputCls()}">${optDeptos}</select></div>
+    </div>
+    <div id="dpx-g-lista" class="hidden max-h-48 overflow-y-auto border rounded-xl p-2 mb-3">${emps}</div>
+    <div class="flex justify-end gap-2">
+      <button onclick="_dpxGrupoRodar(false)" class="text-xs px-4 py-2 rounded-xl border border-violet-200 text-violet-700 bg-violet-50 hover:bg-violet-100">Simular</button>
+      <button onclick="_dpxGrupoRodar(true)" class="text-xs px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-semibold">Gravar férias</button>
+    </div>
+    <div id="dpx-g-res" class="mt-5"></div>`, 'max-w-4xl');
+}
+
+function _dpxGrupoModo() {
+  const m = document.getElementById('dpx-g-modo').value;
+  document.getElementById('dpx-g-depto-box').classList.toggle('hidden', m !== 'depto');
+  document.getElementById('dpx-g-lista').classList.toggle('hidden', m !== 'lista');
+}
+
+async function _dpxGrupoRodar(gravar) {
+  const modo = document.getElementById('dpx-g-modo').value;
+  const body = { data_inicio: document.getElementById('dpx-g-ini').value,
+                 dias_gozo: Number(document.getElementById('dpx-g-dias').value),
+                 coletivas: document.getElementById('dpx-g-col').checked };
+  if (modo === 'todos') body.todos = true;
+  if (modo === 'depto') body.departamento = document.getElementById('dpx-g-depto').value;
+  if (modo === 'lista') body.employee_ids = [...document.querySelectorAll('.dpx-g-emp:checked')].map(i => Number(i.value));
+  const res = document.getElementById('dpx-g-res');
+  if (!body.data_inicio) { res.innerHTML = '<div class="text-xs text-rose-500">Informe a data de início.</div>'; return; }
+  if (gravar && !confirm('Gravar as férias de todos os funcionários aptos?')) return;
+  res.innerHTML = '<div class="text-xs text-slate-400">Calculando...</div>';
+  try {
+    const d = await _dpxPost(gravar ? '/api/dp/ferias/grupo' : '/api/dp/ferias/grupo/preview', body);
+    const linhas = d.funcionarios.map(f => `<tr class="border-b border-slate-100 dark:border-slate-800 text-xs">
+      <td class="px-2 py-1.5">${_dpEsc(f.employee_name)}</td><td class="px-2 py-1.5">${fDate2(f.data_inicio)} a ${fDate2(f.data_fim)}</td>
+      <td class="px-2 py-1.5 text-right">${f.dias_gozo}d${f.dias_dobro ? ` <span class="text-rose-600">(${f.dias_dobro} em dobro)</span>` : ''}</td>
+      <td class="px-2 py-1.5 text-right">${fBRL2(f.bruto)}</td><td class="px-2 py-1.5 text-right font-semibold">${fBRL2(f.liquido)}</td></tr>`).join('');
+    const ign = d.ignorados.map(g => `<li>${_dpEsc(g.employee_name)}: ${_dpEsc(g.motivo)}</li>`).join('');
+    const ok = gravar ? `<div class="text-xs text-emerald-700 bg-emerald-50 rounded-xl px-3 py-2 mb-2">${d.funcionarios.length} recibo(s) de férias gravado(s).</div>` : '';
+    const avisos = d.avisos.map(a => `<div class="text-xs text-amber-700 bg-amber-50 rounded-xl px-3 py-2 mb-2">${_dpEsc(a)}</div>`).join('');
+    res.innerHTML = `${ok}${avisos}
+      <table class="w-full"><thead><tr class="text-[10px] text-slate-400 uppercase border-b"><th class="px-2 py-1 text-left">Funcionário</th>
+        <th class="px-2 py-1 text-left">Gozo</th><th class="px-2 py-1 text-right">Dias</th><th class="px-2 py-1 text-right">Bruto</th><th class="px-2 py-1 text-right">Líquido</th></tr></thead>
+        <tbody>${linhas || '<tr><td colspan="5" class="text-center text-xs text-slate-400 py-4">Nenhum funcionário apto.</td></tr>'}
+        <tr class="text-xs font-bold"><td colspan="3" class="px-2 py-1.5">Total</td><td class="px-2 py-1.5 text-right">${fBRL2(d.total_bruto)}</td>
+        <td class="px-2 py-1.5 text-right">${fBRL2(d.total_liquido)}</td></tr></tbody></table>
+      ${ign ? `<div class="text-xs text-slate-600 mt-3"><b>Não incluídos:</b><ul class="list-disc ml-5 mt-1">${ign}</ul></div>` : ''}`;
+    if (gravar) {
+      const b = document.getElementById('dp-body');
+      if (b && typeof renderFerias === 'function') { await renderFerias(b); if (window.lucide) lucide.createIcons(); }
+    }
+  } catch (e) { res.innerHTML = `<div class="text-xs text-rose-500">${_dpEsc(e.message)}</div>`; }
+}

@@ -134,3 +134,72 @@ Documento gerado em `2026-11-16` com o mapeamento módulo a módulo do que **já
   - [x] Domínio Processos (agenda automática de obrigações por regime, SLA e Protocolo Digital) + Monitoramento de CNDs (`office_processes`, `company_cnds`, `backend/routers/accountant.py`, `frontend/static/obligations.js`)
   - [x] Domínio Auditoria Fiscal Cruzada (`GET /api/audit/cruzamento-fiscal`: NF-e × Escrita Fiscal × Contábil × Folha × Diário)
   - [x] Patrimônio Avançado (`POST /api/patrimony/{id}/baixa` com ganho/perda de capital e `GET /api/patrimony/depreciacao-paralela` CPC 27 vs. fiscal IN 1.700 integrada ao LALUR) e Honorários (`POST /api/honorarios/reajustar-anual` e cobrança por eventos em `POST /api/honorarios/faturar-mes`, `tests/test_office_and_parity.py`)
+
+---
+
+## Mapa do módulo Folha da Domínio × Cortex (levantamento de 2026-11-18)
+
+**Fonte:** títulos e caminhos de menu dos artigos públicos da Central de Soluções da Domínio, módulo Folha. Foram lidos 1.312 artigos de três tópicos: Cálculos e Lançamentos, Configurações e Cadastros, e Relatórios e Guias. O levantamento serve só para identificar *quais funções existem*. Regras de cálculo e leiautes seguem a CLT e a documentação oficial do gov.br. Nenhum texto da Domínio foi copiado.
+
+Legenda: ✅ existe no Cortex · ⚠️ parcial · ❌ falta. O número entre parênteses é a quantidade de artigos da Domínio sobre o menu, um indicativo de uso.
+
+### Arquivo (cadastros)
+| Menu Domínio | Cortex |
+|---|---|
+| Empregados (139) | ✅ Ficha completa de 8 abas, S-2200, histórico salarial. ⚠️ Faltam: nome social, campos livres, copiar cadastro, alteração em grupo |
+| Rubricas (160) e Bases de Cálculo (16) | ✅ Rubricas com incidências e fórmulas, rubricas fixas por funcionário. ⚠️ Faltam: base de cálculo nomeada e reutilizável; rubricas-padrão de mercado como anuênio, triênio, quinquênio, quebra de caixa, sobreaviso, gratificação e dupla função |
+| Sindicatos (106) | ✅ CCT, contribuição assistencial e oposição, repasse, piso. ⚠️ Faltam parâmetros por CCT: adicional por tempo de serviço, médias de férias, 13º e rescisão, indenização especial, multa da data-base (art. 9º da Lei 7.238), dias para pagamento da rescisão, estabilidades da convenção |
+| Contribuintes, Estagiários (76) | ✅ Autônomos/RPA (S-2300), estágio, pró-labore. ⚠️ Faltam: MEI prestador, cooperado, dirigente sindical |
+| Serviços (51) | ⚠️ S-1005 e S-1020 existem. Faltam: tomador de serviço, empreitada, obra própria (CNO), alocação de empregado por serviço, trabalho temporário |
+| Tabelas (14) | ✅ Tabelas fiscais por ano editáveis (INSS, IRRF, salário mínimo, salário-família). ⚠️ Faltam: IRRF exclusivo de PLR, salário mínimo estadual |
+| Jornadas e Horários (25) | ✅ Escalas fixas e cíclicas (12x36 e outras) |
+| Plano de Saúde, VT, VA (11) | ⚠️ Há benefícios genéricos. Faltam: plano por faixa etária e por dependente, coparticipação, VT automático com teto de 6%, compra e recibo de VT |
+| Cargos, Funções, Departamentos, Centros de Custo | ✅ |
+
+### Processos
+| Menu Domínio | Cortex |
+|---|---|
+| Cálculo (39): mensal, adiantamento, complementar | ✅ Mensal, adiantamento, complementar, dissídio. ❌ Faltam: folha de PLR, semanalista, mais de um adiantamento no mês |
+| Lançamentos (102) | ✅ Lançamento por rubrica, por funcionário e em lote, horas do ponto. ⚠️ Faltam: lançamento fixo com data-fim, DSR sobre comissão, faltas parciais em horas com DSR na semana |
+| Férias (54) | ✅ Individual com períodos, abono, dobro, médias, 13º nas férias e perda por afastamento ou faltas. ❌ Faltam: **programação de férias**, **férias em grupo e coletivas calculadas**, fracionamento em até 3 períodos (art. 134 §1º), antecipação da Lei 14.457 |
+| Rescisões (69) | ✅ Individual com TRCT, aviso, multa FGTS e 13º/férias. ❌ Faltam: **rescisão complementar** (dissídio, CCT, multa do art. 477, comissões), **rescisão em grupo**, aviso prévio como processo (gerar, cancelar, reduzir 2h/dia ou 7 dias), transferência entre empresas e filiais, morte, força maior |
+| Afastamentos (46) | ✅ Afastamentos com S-2230, atestados, CAT. ⚠️ Faltam: prorrogação de licença-maternidade, limbo previdenciário, declaração de último dia trabalhado |
+| Alteração Salarial (14) | ⚠️ Histórico salarial e dissídio existem. Faltam: alteração em grupo, troca de categoria (mensalista, horista, comissionado) |
+| Rotinas Automáticas (25) | ❌ Agendar cálculo da folha, recibos, guias e envios ao eSocial |
+| RPA (8), Pró-labore | ✅ |
+| Intermitente: convocações (3) | ❌ |
+| Empréstimo consignado (2) | ❌ Limite de 35%, desconto na folha e na rescisão |
+| Aposentadoria, Advertência e Suspensão, Estabilidades | ✅ Advertência, suspensão e estabilidades. ⚠️ Aposentadoria só como motivo de desligamento |
+| Pagamentos (4): baixa da folha e dos encargos | ❌ |
+| Informações: desoneração e multivínculo | ✅ Multivínculo. ⚠️ Desoneração / INSS sobre receita bruta |
+
+### Relatórios
+| Menu Domínio | Cortex |
+|---|---|
+| Recibos (20) | ✅ Holerite em 2 vias, TRCT, recibo de férias. ❌ Faltam: **holerite por e-mail**, mensagem no recibo, termos de quitação e homologação, carta de preposto |
+| Folha (14) | ✅ Folha analítica com resumo, CNAB. ❌ Faltam: relação de líquidos, folha por empregado, extrato mensal, relatório de lançamentos, resumo de férias, relatório de rescisões |
+| Encargos e Guias (24) | ✅ GPS, DARF, DCTFWeb, FGTS Digital, SEFIP. ⚠️ Faltam: relatório de IRRF, analítico de GPS, encargos da empresa consolidado |
+| eSocial (57) | ✅ Central do eSocial e totalizadores. ⚠️ Faltam: demonstrativos de conferência folha × eSocial (INSS, IRRF, FGTS, PIS) e análise de fechamento |
+| Cadastrais e Gerenciador (72) | ⚠️ Há ficha de registro, contrato, advertência e quitação. ❌ Faltam modelos: contrato de experiência, determinado e intermitente, acordo de compensação e de prorrogação de horas, ficha e termo de salário-família, declaração de dependentes para IR, declaração e renúncia de VT, autorização de desconto, termo LGPD, carta de recomendação, comunicado de abandono de emprego, término de experiência |
+| Aviso Prévio (12) | ❌ Avisos prévios (empregador trabalhado e indenizado, pedido de demissão, acordo), aviso e solicitação de abono de férias |
+| Outros (29) | ✅ Vencimento de experiência e de férias. ❌ Faltam: faltas, histórico do empregado, alterações salariais, quantidade de colaboradores, quadro de horário, cálculo de médias |
+| Informativos | ❌ Relatório de Transparência Salarial (Lei 14.611/2023) |
+| Programação de Férias | ❌ |
+
+### Utilitários e Controle
+| Menu Domínio | Cortex |
+|---|---|
+| Simuladores (férias e rescisão) | ✅ Simular nas telas. ❌ Falta relatório de simulações |
+| Excluir cálculos em grupo (férias, rescisões, RPA) | ❌ |
+| Alterar cadastros em grupo | ❌ |
+| Acerto de data de pagamento | ❌ |
+| Controle > Parâmetros (224): sempre 30 dias × dias do mês, divisor de férias, arredondamento, % do adiantamento | ⚠️ Fixo no código. Falta tela de parâmetros da folha por empresa |
+| Avisos de vencimento: certificado, experiência, férias, ASO | ⚠️ Há alertas espalhados. Falta painel único |
+
+### Prioridade sugerida para as lacunas
+1. **Uso diário:** parâmetros da folha por empresa · programação de férias, férias em grupo e coletivas · rescisão complementar e em grupo, aviso prévio como processo · holerite por e-mail · relação de líquidos e relatórios de folha.
+2. **Documentos:** pacote de modelos (contratos, avisos prévios, aviso e abono de férias, salário-família, VT, termos).
+3. **Regras de CCT e categorias:** adicional por tempo de serviço, médias por CCT, multa da data-base, comissionados com garantia mínima, horista e professor.
+4. **Benefícios:** VT automático e compra, plano de saúde por faixa etária e coparticipação, consignado.
+5. **Automação e utilitários:** rotinas automáticas, alterações e exclusões em grupo, acerto de data de pagamento, baixa de pagamentos.
+6. **Menor uso:** PLR, intermitente, trabalho temporário e tomador, transparência salarial, demonstrativos folha × eSocial.

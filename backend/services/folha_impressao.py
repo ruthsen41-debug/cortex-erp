@@ -89,7 +89,7 @@ def _cabecalho_empresa(co: Dict[str, Any]) -> str:
 
 # ─── Recibo de pagamento (holerite) ───────────────────────────────────────────
 
-RECIBO_CSS = """*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;color:#000;background:#e5e7eb;margin:0;font-size:10px}
+RECIBO_CSS = """*{box-sizing:border-box}.msg{border:1px solid #000;border-top:none;padding:3px 6px;font-size:9px}body{font-family:Arial,Helvetica,sans-serif;color:#000;background:#e5e7eb;margin:0;font-size:10px}
 .no-print{max-width:780px;margin:16px auto 8px;display:flex;justify-content:space-between;align-items:center;font-size:12px;color:#333}
 .no-print button{padding:8px 16px;cursor:pointer;font-weight:bold;border:1px solid #555;background:#fff;border-radius:4px}
 .folha{width:780px;margin:0 auto 18px;background:#fff;padding:14px 16px;box-shadow:0 1px 4px rgba(0,0,0,.15)}
@@ -123,7 +123,7 @@ td,th{border:1px solid #000;padding:2px 5px}
 LINHAS_MIN_RECIBO = 12
 
 
-def _recibo_via(co, run, it, via: str) -> str:
+def _recibo_via(co, run, it, via: str, mensagem: str = "") -> str:
     lines = linhas_do_item(it)
     mov = [ln for ln in lines if ln.get("tipo") in ("provento", "desconto")]
     prov, desc = _totais(it, lines)
@@ -174,6 +174,7 @@ def _recibo_via(co, run, it, via: str) -> str:
     <td><span class="rot">Base cálc. IRRF</span>{_brl(base_irrf)}</td>
     <td><span class="rot">Dep. IRRF</span>{_esc(str(it.get("dependents") or 0))}</td>
   </tr></table>
+  {f'<div class="msg">{_esc(mensagem)}</div>' if mensagem else ''}
 </div>
 <div class="lateral"><div>Declaro ter recebido a importância líquida discriminada neste recibo.<br>
   ____/____/______ &nbsp;&nbsp; ______________________________________<br>
@@ -182,12 +183,13 @@ def _recibo_via(co, run, it, via: str) -> str:
 <div class="via-nome">{_esc(via)}</div>"""
 
 
-def gerar_recibos_html(co: Dict[str, Any], run: Dict[str, Any], items: List[Dict[str, Any]]) -> str:
+def gerar_recibos_html(co: Dict[str, Any], run: Dict[str, Any], items: List[Dict[str, Any]],
+                       mensagem: str = "") -> str:
     comp = competencia_extenso(_txt(run.get("competence")))
     folhas = "".join(
-        f'<div class="folha">{_recibo_via(co, run, it, "1ª via — Empregador")}'
+        f'<div class="folha">{_recibo_via(co, run, it, "1ª via — Empregador", mensagem)}'
         f'<div class="corte"><span>✂ recortar</span></div>'
-        f'{_recibo_via(co, run, it, "2ª via — Empregado")}</div>'
+        f'{_recibo_via(co, run, it, "2ª via — Empregado", mensagem)}</div>'
         for it in items)
     titulo = (f"Holerite {items[0].get('employee_name', '')} - {comp}" if len(items) == 1
               else f"Holerites - {comp}")

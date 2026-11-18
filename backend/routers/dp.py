@@ -13,28 +13,28 @@ from fastapi.responses import HTMLResponse
 
 try:
     from ..database import get_conn
-    from ..auth import get_current_user
+    from ..auth import get_current_user, log_audit
     from ..utils import rows_to_dicts
     from ..schemas.dp import EmployeeCreate, EmployeeUpdate, EmployeeFicha, EmployeeDependent, PayrollRunCreate, TerminationRequest
     from ..services.payroll_calculator import calculate_payroll, calc_thirteenth, calc_vacation, calc_termination
     from ..services.esocial_generator import (gerar_s2200, gerar_s1200, gerar_s2299, gerar_s2230, gerar_s2210,
         gerar_s1000, gerar_s1005, gerar_s1020, gerar_s1050, gerar_s1070, gerar_s3000, gerar_s5001, gerar_s5011,
         gerar_s2298, _build_det_verbas)
-    from ..services import payroll_engine, payroll_special, payroll_complementar, escalas
+    from ..services import payroll_engine, payroll_special, payroll_complementar, escalas, dp_parametros
     from ..services.payroll_tables import default_seed, load_tables
     from ..services.formula_engine import FormulaError, FUNCOES as FORMULA_FUNCOES
     from ..services.ficha_registro import gerar_ficha_registro_html
     from ..services.folha_impressao import gerar_folha_html, gerar_recibos_html
 except ImportError:
     from database import get_conn
-    from auth import get_current_user
+    from auth import get_current_user, log_audit
     from utils import rows_to_dicts
     from schemas.dp import EmployeeCreate, EmployeeUpdate, EmployeeFicha, EmployeeDependent, PayrollRunCreate, TerminationRequest
     from services.payroll_calculator import calculate_payroll, calc_thirteenth, calc_vacation, calc_termination
     from services.esocial_generator import (gerar_s2200, gerar_s1200, gerar_s2299, gerar_s2230, gerar_s2210,
         gerar_s1000, gerar_s1005, gerar_s1020, gerar_s1050, gerar_s1070, gerar_s3000, gerar_s5001, gerar_s5011,
         gerar_s2298, _build_det_verbas)
-    from services import payroll_engine, payroll_special, payroll_complementar, escalas
+    from services import payroll_engine, payroll_special, payroll_complementar, escalas, dp_parametros
     from services.payroll_tables import default_seed, load_tables
     from services.formula_engine import FormulaError, FUNCOES as FORMULA_FUNCOES
     from services.ficha_registro import gerar_ficha_registro_html
@@ -524,7 +524,10 @@ def imprimir_recibos(run_id: int, employee_id: Optional[int] = Query(default=Non
         raise HTTPException(status_code=404, detail="Folha não encontrada.")
     if not items:
         raise HTTPException(status_code=404, detail="Nenhum holerite encontrado nesta folha.")
-    return Response(content=gerar_recibos_html(company, run, items), media_type="text/html")
+    conn = get_conn()
+    mensagem = dp_parametros.carregar(conn, current_user.get("company_id", 1))["mensagem_recibo"]
+    conn.close()
+    return Response(content=gerar_recibos_html(company, run, items, mensagem), media_type="text/html")
 
 
 @router.get("/payroll/{run_id:int}/folha-impressa")
@@ -1214,8 +1217,10 @@ def _periodos_emp(conn, company_id: int, emp: Dict[str, Any], ate: date,
         raise HTTPException(status_code=400, detail="Funcionário sem data de admissão válida.")
     gozados, faltas = payroll_special.ferias_registradas(conn, company_id, emp["id"])
     faltas.update(faltas_extra or {})
+    alerta = int(dp_parametros.carregar(conn, company_id)["ferias_alerta_dias"])
     return payroll_special.periodos_aquisitivos(adm, ate, gozados, faltas,
-                                                payroll_special.dias_inss_fn(conn, company_id, emp["id"]))
+                                                payroll_special.dias_inss_fn(conn, company_id, emp["id"]),
+                                                alerta_dias=alerta)
 
 
 @router.get("/ferias/periodos/{emp_id}")
@@ -1233,6 +1238,29 @@ def ferias_periodos(emp_id: int, current_user: Dict[str, Any] = Depends(get_curr
             "periodos": periodos, "registros": registros,
             "saldo_total": sum(p["saldo"] for p in periodos),
             "alertas": [p for p in periodos if p["status"] in ("vencido_dobro", "vence_em_breve")]}
+
+
+def _validar_fracionamento(conn, company_id: int, employee_id: int, periodo: Dict[str, Any],
+                           dias_gozo: int, dias_abono: int, ignorar_id: Optional[int] = None) -> None:
+    """CLT art. 134 §1º: até 3 períodos de gozo, um com pelo menos 14 dias e os demais com pelo menos 5."""
+    fracoes = [int(r["dias_gozo"] or 0) for r in rows_to_dicts(conn.execute(
+        """SELECT id, dias_gozo FROM payroll_special WHERE company_id=? AND employee_id=? AND tipo='ferias'
+           AND status != 'cancelado' AND referencia=?""", (company_id, employee_id, periodo["inicio"])).fetchall())
+        if not ignorar_id or r["id"] != ignorar_id]
+    if dias_gozo < 5:
+        raise HTTPException(status_code=400, detail="Cada período de férias deve ter pelo menos 5 dias corridos "
+                                                    "(CLT art. 134 §1º).")
+    if len(fracoes) >= 3:
+        raise HTTPException(status_code=400, detail="As férias deste período aquisitivo já foram divididas em 3 partes, "
+                                                    "o máximo permitido (CLT art. 134 §1º).")
+    restante = int(periodo["saldo"]) - dias_gozo - dias_abono
+    if 0 < restante < 5:
+        raise HTTPException(status_code=400, detail=f"Sobrariam {restante} dia(s) de férias, e nenhum período pode ter "
+                                                    "menos de 5 dias. Ajuste os dias de gozo.")
+    if not any(f >= 14 for f in fracoes + [dias_gozo]):
+        if len(fracoes) == 2 or restante < 14:
+            raise HTTPException(status_code=400, detail="Um dos períodos de férias precisa ter pelo menos 14 dias "
+                                                        "corridos (CLT art. 134 §1º).")
 
 
 def _calc_ferias(conn, company_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -1270,6 +1298,7 @@ def _calc_ferias(conn, company_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
     if dias_gozo + dias_abono > periodo["saldo"]:
         raise HTTPException(status_code=400,
                             detail=f"O período tem saldo de {periodo['saldo']:g} dia(s); foram pedidos {dias_gozo + dias_abono}.")
+    _validar_fracionamento(conn, company_id, emp["id"], periodo, dias_gozo, dias_abono, data.get("_ignorar_id"))
 
     fim = inicio + timedelta(days=dias_gozo - 1)
     limite = date.fromisoformat(periodo["limite_concessivo"])
@@ -1297,8 +1326,6 @@ def _calc_ferias(conn, company_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
     res = payroll_special.calc_ferias(ctx, tables, payroll_engine.load_rubrics(conn, company_id),
                                       dias_gozo, dias_abono, media, dias_dobro, adiant_13)
     res["avisos"].extend(avisos_13)
-    if dias_gozo < 5:
-        res["avisos"].append("Período de gozo inferior a 5 dias não é permitido pela CLT (art. 134 §1º).")
     return _especial_view(
         res, periodo=periodo, data_inicio=inicio.isoformat(), data_fim=fim.isoformat(),
         data_retorno=(fim + timedelta(days=1)).isoformat(),
@@ -1323,20 +1350,7 @@ def ferias_create(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any]
     company_id = current_user.get("company_id", 1)
     try:
         payroll_engine.ensure_system_rubrics(conn, company_id)
-        res = _calc_ferias(conn, company_id, data)
-        sobrepostas = conn.execute(
-            """SELECT COUNT(*) FROM payroll_special WHERE company_id=? AND employee_id=? AND tipo='ferias'
-               AND status != 'cancelado' AND data_inicio <= ? AND data_fim >= ?""",
-            (company_id, res["employee_id"], res["data_fim"], res["data_inicio"])).fetchone()[0]
-        if sobrepostas:
-            raise HTTPException(status_code=400, detail="Já existem férias gravadas que se sobrepõem a essas datas.")
-        new_id = _save_special(
-            conn, company_id, "ferias", res, referencia=res["periodo"]["inicio"], competencia=res["competencia"],
-            data_pagamento=res["data_pagamento_limite"], data_inicio=res["data_inicio"], data_fim=res["data_fim"],
-            dias_gozo=res["dias_gozo"], dias_abono=res["dias_abono"],
-            params={"periodo_fim": res["periodo"]["fim"], "faltas_periodo": res["faltas_periodo"],
-                    "dias_dobro": res["dias_dobro"], "media_variaveis": res["media_variaveis"],
-                    "adiantamento_13": res.get("adiantamento_13", 0)})
+        new_id, res = _gravar_ferias(conn, company_id, data)
         conn.commit()
     except Exception:
         conn.rollback()
@@ -1344,6 +1358,317 @@ def ferias_create(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any]
         raise
     conn.close()
     return {"id": new_id, "ok": True, **res}
+
+
+def _gravar_ferias(conn, company_id: int, data: Dict[str, Any]):
+    """Calcula e grava um recibo de férias (sem commit). Devolve (id, cálculo)."""
+    res = _calc_ferias(conn, company_id, data)
+    sobrepostas = conn.execute(
+        """SELECT COUNT(*) FROM payroll_special WHERE company_id=? AND employee_id=? AND tipo='ferias'
+           AND status != 'cancelado' AND data_inicio <= ? AND data_fim >= ?""",
+        (company_id, res["employee_id"], res["data_fim"], res["data_inicio"])).fetchone()[0]
+    if sobrepostas:
+        raise HTTPException(status_code=400, detail="Já existem férias gravadas que se sobrepõem a essas datas.")
+    new_id = _save_special(
+        conn, company_id, "ferias", res, referencia=res["periodo"]["inicio"], competencia=res["competencia"],
+        data_pagamento=res["data_pagamento_limite"], data_inicio=res["data_inicio"], data_fim=res["data_fim"],
+        dias_gozo=res["dias_gozo"], dias_abono=res["dias_abono"],
+        params={"periodo_fim": res["periodo"]["fim"], "faltas_periodo": res["faltas_periodo"],
+                "dias_dobro": res["dias_dobro"], "media_variaveis": res["media_variaveis"],
+                "adiantamento_13": res.get("adiantamento_13", 0),
+                "coletivas": bool(data.get("coletivas"))})
+    return new_id, res
+
+
+# ── Férias em grupo / coletivas ──────────────────────────────────────────────
+
+def _funcionarios_selecionados(conn, company_id: int, data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    emps = rows_to_dicts(conn.execute(
+        "SELECT * FROM employees WHERE company_id=? AND active=1 AND COALESCE(is_prolabore, 0)=0 ORDER BY name",
+        (company_id,)).fetchall())
+    ids = {int(i) for i in (data.get("employee_ids") or []) if str(i).strip()}
+    depto = str(data.get("departamento") or "").strip()
+    if ids:
+        emps = [e for e in emps if e["id"] in ids]
+    elif depto:
+        emps = [e for e in emps if (e.get("department") or "").strip().lower() == depto.lower()]
+    elif not data.get("todos"):
+        raise HTTPException(status_code=400, detail="Escolha os funcionários, um departamento ou 'todos'.")
+    if not emps:
+        raise HTTPException(status_code=400, detail="Nenhum funcionário ativo encontrado para a seleção.")
+    return emps
+
+
+def _ferias_grupo(conn, company_id: int, data: Dict[str, Any], gravar: bool) -> Dict[str, Any]:
+    coletivas = bool(data.get("coletivas"))
+    inicio = _data_iso(data.get("data_inicio"), "Início das férias")
+    dias_gozo = _inteiro(data.get("dias_gozo") or 30, "Dias de gozo", 1, 30)
+    if coletivas and dias_gozo < 10:
+        raise HTTPException(status_code=400, detail="Férias coletivas não podem ter menos de 10 dias (CLT art. 139 §1º).")
+    ok, ignorados = [], []
+    for emp in _funcionarios_selecionados(conn, company_id, data):
+        item = {"employee_id": emp["id"], "data_inicio": inicio.isoformat(), "dias_gozo": dias_gozo,
+                "dias_abono": 0, "coletivas": coletivas}
+        try:
+            if gravar:
+                conn.execute("SAVEPOINT ferias_grupo")
+                new_id, res = _gravar_ferias(conn, company_id, item)
+                conn.execute("RELEASE SAVEPOINT ferias_grupo")
+            else:
+                new_id, res = None, _calc_ferias(conn, company_id, item)
+        except HTTPException as e:
+            if gravar:
+                conn.execute("ROLLBACK TO SAVEPOINT ferias_grupo")
+                conn.execute("RELEASE SAVEPOINT ferias_grupo")
+            motivo = str(e.detail)
+            if coletivas and "período aquisitivo completo" in motivo:
+                motivo = ("Sem período aquisitivo completo: nas coletivas recebe férias proporcionais e inicia novo "
+                          "período (CLT art. 140), ainda não automatizado. Lance os dias como licença remunerada.")
+            ignorados.append({"employee_id": emp["id"], "employee_name": emp["name"], "motivo": motivo})
+            continue
+        ok.append({"id": new_id, "employee_id": emp["id"], "employee_name": emp["name"],
+                   "periodo": res["periodo"]["inicio"] + " a " + res["periodo"]["fim"],
+                   "data_inicio": res["data_inicio"], "data_fim": res["data_fim"], "dias_gozo": res["dias_gozo"],
+                   "dias_dobro": res.get("dias_dobro", 0), "bruto": res.get("total_proventos", 0),
+                   "liquido": res.get("liquido", 0), "avisos": res.get("avisos", [])})
+    avisos = []
+    if coletivas:
+        avisos.append("Comunique o órgão local do Ministério do Trabalho e o sindicato com 15 dias de antecedência "
+                      "e afixe aviso no local de trabalho (CLT art. 139 §§2º e 3º).")
+    return {"coletivas": coletivas, "data_inicio": inicio.isoformat(), "dias_gozo": dias_gozo,
+            "funcionarios": ok, "ignorados": ignorados, "avisos": avisos,
+            "total_bruto": round(sum(float(o["bruto"] or 0) for o in ok), 2),
+            "total_liquido": round(sum(float(o["liquido"] or 0) for o in ok), 2)}
+
+
+@router.post("/ferias/grupo/preview")
+def ferias_grupo_preview(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Simula férias para vários funcionários (individuais em grupo ou coletivas)."""
+    conn = get_conn()
+    try:
+        return _ferias_grupo(conn, current_user.get("company_id", 1), data, gravar=False)
+    finally:
+        conn.close()
+
+
+@router.post("/ferias/grupo", status_code=201)
+def ferias_grupo_gravar(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Grava as férias de cada funcionário apto; os que não puderem ficam listados em 'ignorados'."""
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    try:
+        payroll_engine.ensure_system_rubrics(conn, company_id)
+        out = _ferias_grupo(conn, company_id, data, gravar=True)
+        if not out["funcionarios"]:
+            conn.rollback()
+            raise HTTPException(status_code=400, detail="Nenhuma férias gravada. " + "; ".join(
+                f"{g['employee_name']}: {g['motivo']}" for g in out["ignorados"]))
+        conn.commit()
+        return out
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+# ── Programação de férias ────────────────────────────────────────────────────
+
+def _programacao_valores(conn, company_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
+    emp = _emp_or_404(conn, company_id, data.get("employee_id"))
+    inicio = _data_iso(data.get("data_inicio"), "Início previsto")
+    v = {"employee_id": emp["id"], "data_inicio": inicio.isoformat(),
+         "dias_gozo": _inteiro(data.get("dias_gozo") or 30, "Dias de gozo", 5, 30),
+         "dias_abono": _inteiro(data.get("dias_abono"), "Dias de abono", 0, 10),
+         "adiantar_13": 1 if data.get("adiantar_13") in (True, 1, "1", "true", "on") else 0,
+         "periodo_inicio": str(data.get("periodo_inicio") or "")[:10],
+         "observacao": str(data.get("observacao") or "")[:255]}
+    if not v["periodo_inicio"]:
+        periodos = _periodos_emp(conn, company_id, emp, inicio)
+        abertos = [p for p in periodos if p["completo"] and p["saldo"] > 0] or [p for p in periodos if not p["completo"]]
+        if not abertos:
+            raise HTTPException(status_code=400, detail="Funcionário sem período aquisitivo em aberto.")
+        v["periodo_inicio"] = abertos[0]["inicio"]
+    return v
+
+
+def _programacao_view(conn, company_id: int, row: Dict[str, Any], emp: Dict[str, Any]) -> Dict[str, Any]:
+    inicio = date.fromisoformat(row["data_inicio"])
+    fim = inicio + timedelta(days=int(row["dias_gozo"]) - 1)
+    alertas = []
+    try:
+        periodo = next((p for p in _periodos_emp(conn, company_id, emp, inicio)
+                        if p["inicio"] == row["periodo_inicio"]), None)
+    except HTTPException:
+        periodo = None
+    if periodo:
+        if not periodo["completo"]:
+            alertas.append(f"Período aquisitivo só se completa em {periodo['fim']}.")
+        if fim.isoformat() > periodo["limite_concessivo"]:
+            alertas.append(f"Termina depois do limite concessivo ({periodo['limite_concessivo']}): "
+                           "dias excedentes em dobro.")
+    return {**row, "employee_name": emp["name"], "department": emp.get("department") or "",
+            "data_fim": fim.isoformat(), "data_retorno": (fim + timedelta(days=1)).isoformat(),
+            "limite_concessivo": periodo["limite_concessivo"] if periodo else "", "alertas": alertas}
+
+
+def _programacao_listar(conn, company_id: int, ano: Optional[int], status: Optional[str]) -> List[Dict[str, Any]]:
+    sql, params = "SELECT * FROM ferias_programacao WHERE company_id=?", [company_id]
+    if ano:
+        sql += " AND data_inicio LIKE ?"
+        params.append(f"{int(ano)}-%")
+    if status:
+        sql += " AND status=?"
+        params.append(status)
+    rows = rows_to_dicts(conn.execute(sql + " ORDER BY data_inicio", params).fetchall())
+    emps = {e["id"]: e for e in rows_to_dicts(conn.execute(
+        "SELECT * FROM employees WHERE company_id=?", (company_id,)).fetchall())}
+    return [_programacao_view(conn, company_id, r, emps[r["employee_id"]]) for r in rows if r["employee_id"] in emps]
+
+
+@router.get("/ferias/programacao")
+def ferias_programacao_list(ano: Optional[int] = None, status: Optional[str] = None,
+                            current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    try:
+        return _programacao_listar(conn, current_user.get("company_id", 1), ano, status)
+    finally:
+        conn.close()
+
+
+@router.post("/ferias/programacao", status_code=201)
+def ferias_programacao_create(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    try:
+        v = _programacao_valores(conn, company_id, data)
+        cur = conn.execute(
+            """INSERT INTO ferias_programacao (company_id, employee_id, periodo_inicio, data_inicio, dias_gozo,
+               dias_abono, adiantar_13, status, observacao) VALUES (?,?,?,?,?,?,?,'programada',?)""",
+            (company_id, v["employee_id"], v["periodo_inicio"], v["data_inicio"], v["dias_gozo"], v["dias_abono"],
+             v["adiantar_13"], v["observacao"]))
+        conn.commit()
+        row = dict(conn.execute("SELECT * FROM ferias_programacao WHERE id=?", (cur.lastrowid,)).fetchone())
+        return _programacao_view(conn, company_id, row, _emp_or_404(conn, company_id, row["employee_id"]))
+    finally:
+        conn.close()
+
+
+def _programacao_or_404(conn, company_id: int, prog_id: int) -> Dict[str, Any]:
+    row = conn.execute("SELECT * FROM ferias_programacao WHERE id=? AND company_id=?", (prog_id, company_id)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Programação não encontrada.")
+    return dict(row)
+
+
+@router.put("/ferias/programacao/{prog_id:int}")
+def ferias_programacao_update(prog_id: int, data: Dict[str, Any] = Body(...),
+                              current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    try:
+        atual = _programacao_or_404(conn, company_id, prog_id)
+        if atual["status"] != "programada":
+            raise HTTPException(status_code=400, detail="Só é possível alterar programações ainda não calculadas.")
+        v = _programacao_valores(conn, company_id, {**atual, **data})
+        conn.execute("""UPDATE ferias_programacao SET employee_id=?, periodo_inicio=?, data_inicio=?, dias_gozo=?,
+                        dias_abono=?, adiantar_13=?, observacao=? WHERE id=?""",
+                     (v["employee_id"], v["periodo_inicio"], v["data_inicio"], v["dias_gozo"], v["dias_abono"],
+                      v["adiantar_13"], v["observacao"], prog_id))
+        conn.commit()
+        row = _programacao_or_404(conn, company_id, prog_id)
+        return _programacao_view(conn, company_id, row, _emp_or_404(conn, company_id, row["employee_id"]))
+    finally:
+        conn.close()
+
+
+@router.delete("/ferias/programacao/{prog_id:int}")
+def ferias_programacao_delete(prog_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    try:
+        atual = _programacao_or_404(conn, company_id, prog_id)
+        if atual["status"] == "calculada":
+            raise HTTPException(status_code=400, detail="Programação já calculada: exclua o recibo de férias primeiro.")
+        conn.execute("DELETE FROM ferias_programacao WHERE id=?", (prog_id,))
+        conn.commit()
+        return {"ok": True}
+    finally:
+        conn.close()
+
+
+@router.post("/ferias/programacao/{prog_id:int}/calcular", status_code=201)
+def ferias_programacao_calcular(prog_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Transforma a programação em recibo de férias gravado."""
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    try:
+        prog = _programacao_or_404(conn, company_id, prog_id)
+        if prog["status"] != "programada":
+            raise HTTPException(status_code=400, detail="Esta programação já foi calculada.")
+        payroll_engine.ensure_system_rubrics(conn, company_id)
+        new_id, res = _gravar_ferias(conn, company_id, {
+            "employee_id": prog["employee_id"], "data_inicio": prog["data_inicio"], "dias_gozo": prog["dias_gozo"],
+            "dias_abono": prog["dias_abono"], "periodo_inicio": prog["periodo_inicio"],
+            "adiantar_13": bool(prog["adiantar_13"])})
+        conn.execute("UPDATE ferias_programacao SET status='calculada', special_id=? WHERE id=?", (new_id, prog_id))
+        conn.commit()
+        return {"id": new_id, "programacao_id": prog_id, **res}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _esc_html(t: Any) -> str:
+    return str(t or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _data_br(d: str) -> str:
+    return "/".join(reversed(d.split("-"))) if d else ""
+
+
+@router.get("/ferias/programacao/relatorio", response_class=HTMLResponse)
+def ferias_programacao_relatorio(ano: int = Query(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Relatório de programação de férias do ano, agrupado por mês de início."""
+    company_id = current_user.get("company_id", 1)
+    conn = get_conn()
+    try:
+        itens = _programacao_listar(conn, company_id, ano, None)
+        co = dict(conn.execute("SELECT * FROM companies WHERE id=?", (company_id,)).fetchone() or {})
+    finally:
+        conn.close()
+    meses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro",
+             "Outubro", "Novembro", "Dezembro"]
+    situ = {"programada": "Programada", "calculada": "Calculada", "cancelada": "Cancelada"}
+    blocos = []
+    for m in range(1, 13):
+        do_mes = [i for i in itens if i["data_inicio"][5:7] == f"{m:02d}"]
+        if not do_mes:
+            continue
+        linhas = "".join(
+            f"<tr><td>{_esc_html(i['employee_name'])}</td><td>{_esc_html(i['department'])}</td>"
+            f"<td>{_data_br(i['periodo_inicio'])}</td><td>{_data_br(i['data_inicio'])}</td>"
+            f"<td>{_data_br(i['data_fim'])}</td><td class='n'>{i['dias_gozo']}</td>"
+            f"<td class='n'>{i['dias_abono'] or ''}</td><td>{'Sim' if i['adiantar_13'] else ''}</td>"
+            f"<td>{_data_br(i['limite_concessivo'])}</td><td>{situ.get(i['status'], i['status'])}"
+            + (f"<br><small>{_esc_html('; '.join(i['alertas']))}</small>" if i["alertas"] else "")
+            + "</td></tr>"
+            for i in do_mes)
+        blocos.append(f"<h2>{meses[m - 1]}</h2><table><tr><th>Funcionário</th><th>Departamento</th>"
+                      "<th>Per. aquisitivo</th><th>Início</th><th>Fim</th><th>Dias</th><th>Abono</th><th>13º</th>"
+                      f"<th>Limite concessivo</th><th>Situação</th></tr>{linhas}</table>")
+    corpo = "".join(blocos) or "<p>Nenhuma férias programada para o ano.</p>"
+    css = ("body{font-family:Arial,sans-serif;font-size:11px;margin:20px}h1{font-size:15px;margin:0}"
+           "h2{font-size:12px;background:#eee;padding:4px 6px;margin:14px 0 4px}table{width:100%;border-collapse:collapse}"
+           "th,td{border:1px solid #999;padding:3px 5px;text-align:left}th{background:#f5f5f5;font-size:10px}"
+           ".n{text-align:right}.np{text-align:right;margin-bottom:8px}@media print{.np{display:none}}")
+    html = (f'<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>Programação de férias {ano}</title>'
+            f'<style>{css}</style></head><body><div class="np"><button onclick="window.print()">Imprimir / Salvar PDF'
+            f'</button></div><h1>{_esc_html(co.get("razao_social"))} — Programação de férias {ano}</h1>'
+            f'<div>CNPJ {_esc_html(co.get("cnpj"))} · {len(itens)} programação(ões)</div>{corpo}</body></html>')
+    return HTMLResponse(html)
 
 
 @router.get("/ferias")
@@ -1356,7 +1681,8 @@ def ferias_list(employee_id: Optional[int] = None, current_user: Dict[str, Any] 
 
 @router.get("/ferias/alertas")
 def ferias_alertas(current_user: Dict[str, Any] = Depends(get_current_user)):
-    """Funcionários com férias vencidas (em dobro) ou com o concessivo terminando em até 60 dias."""
+    """Funcionários com férias vencidas (em dobro) ou com o concessivo terminando dentro da antecedência
+    definida em DP › Parâmetros (padrão 60 dias)."""
     conn = get_conn()
     company_id = current_user.get("company_id", 1)
     out = []
@@ -3926,6 +4252,37 @@ def benefits_summary(competencia: str = Query(None), current_user: Dict[str, Any
     return rows
 
 
+# ─── PARÂMETROS DA FOLHA ──────────────────────────────────────────────────────
+
+@router.get("/parametros")
+def get_parametros(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Parâmetros da folha da empresa, com os padrões e a descrição de cada campo."""
+    conn = get_conn()
+    try:
+        return {"parametros": dp_parametros.carregar(conn, current_user.get("company_id", 1)),
+                "padrao": dp_parametros.PADRAO, "descricoes": dp_parametros.DESCRICOES}
+    finally:
+        conn.close()
+
+
+@router.put("/parametros")
+def put_parametros(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    if not current_user.get("is_superadmin") and (current_user.get("role") or "") not in ("admin", "dp"):
+        raise HTTPException(status_code=403, detail="Apenas administrador ou Depto. Pessoal podem alterar os parâmetros da folha.")
+    conn = get_conn()
+    try:
+        out = dp_parametros.salvar(conn, current_user.get("company_id", 1), data, current_user.get("email", ""))
+        log_audit(conn, action="update", entity="payroll_parametros", entity_id=current_user.get("company_id", 1),
+                  new_data=out, user_id=current_user.get("id"), company_id=current_user.get("company_id", 1))
+        conn.commit()
+        return {"parametros": out}
+    except ValueError as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+
 # ─── ADIANTAMENTOS ────────────────────────────────────────────────────────────
 
 @router.get("/advances")
@@ -3956,8 +4313,11 @@ def create_advance(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any
         conn.close(); raise HTTPException(404, "Funcionário não encontrado.")
     salary = float(emp["salary"])
     valor = float(data["valor"])
-    if salary > 0 and valor > salary * 0.40:
-        conn.close(); raise HTTPException(400, f"Adiantamento não pode exceder 40% do salário ({salary*0.40:.2f}).")
+    limite = float(dp_parametros.carregar(conn, cid)["adiantamento_limite"])
+    if salary > 0 and valor > salary * limite / 100:
+        conn.close()
+        raise HTTPException(400, f"Adiantamento não pode exceder {limite:g}% do salário ({salary * limite / 100:.2f}). "
+                                 "O limite fica em DP › Parâmetros.")
     cur = conn.cursor()
     cur.execute("""INSERT INTO salary_advances (company_id,employee_id,competencia,valor,tipo,data_pagamento,status,observacoes)
                    VALUES (?,?,?,?,?,?,?,?)""",

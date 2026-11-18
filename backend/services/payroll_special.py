@@ -241,7 +241,8 @@ def avos_ferias(inicio: date, ate: date) -> int:
 
 def periodos_aquisitivos(admissao: date, ate: date, gozados: Optional[Dict[str, float]] = None,
                          faltas: Optional[Dict[str, int]] = None,
-                         dias_inss: Optional[Callable[[date, date], int]] = None) -> List[Dict[str, Any]]:
+                         dias_inss: Optional[Callable[[date, date], int]] = None,
+                         alerta_dias: int = 60) -> List[Dict[str, Any]]:
     """
     Períodos aquisitivos desde a admissão até `ate`.
     gozados/faltas: por data de início do período (ISO) → dias já quitados / faltas injustificadas.
@@ -275,7 +276,7 @@ def periodos_aquisitivos(admissao: date, ate: date, gozados: Optional[Dict[str, 
             status = "quitado"
         elif ate > limite:
             status = "vencido_dobro"
-        elif (limite - ate).days <= 60:
+        elif (limite - ate).days <= alerta_dias:
             status = "vence_em_breve"
         else:
             status = "a_gozar"

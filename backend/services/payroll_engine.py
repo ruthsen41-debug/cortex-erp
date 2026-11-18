@@ -16,6 +16,8 @@ from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional, Tuple
 
+from . import dp_parametros
+
 try:
     from .formula_engine import FormulaError, evaluate, validate
     from .payroll_tables import TaxTables, load_tables
@@ -129,6 +131,7 @@ class EmployeeInput:
     is_prolabore: bool = False
     horas_mes: float = 220.0
     dias_direito: int = 30          # 30, ou proporcional na admissão
+    base_dias: int = 30             # 30 (mês comercial) ou dias corridos do mês (parâmetro da empresa)
     dias_afastado_inss: int = 0     # dias pagos pelo INSS (não entram na folha)
     dias_ferias: int = 0            # dias de férias no mês (pagos no recibo de férias)
     faltas_dias: float = 0.0
@@ -306,11 +309,12 @@ def calculate_employee(
     salario = float(inp.salario or 0)
     horas_mes = float(inp.horas_mes or 220) or 220.0
     dias_mat = max(0, int(inp.dias_maternidade or 0))
-    dias = max(0, min(30, int(inp.dias_direito)) - max(0, int(inp.dias_afastado_inss))
+    base_dias = int(inp.base_dias or 30) or 30
+    dias = max(0, min(base_dias, int(inp.dias_direito)) - max(0, int(inp.dias_afastado_inss))
                - max(0, int(inp.dias_ferias)) - dias_mat)
     if inp.dias_ferias:
         avisos.append(f"{int(inp.dias_ferias)} dia(s) de férias no mês, pagos no recibo de férias.")
-    prop = dias / 30.0
+    prop = dias / float(base_dias)
     prolabore = bool(inp.is_prolabore)
 
     # Lançamentos manuais em rubricas de horas somam à quantidade vinda do ponto.
@@ -353,7 +357,7 @@ def calculate_employee(
 
     if dias_mat and not prolabore:
         # Remuneração integral (salário + adicionais fixos) proporcional aos dias de licença.
-        sys("SAL_MATERNIDADE", (salario + adicionais) / 30.0 * dias_mat, f"{dias_mat}d")
+        sys("SAL_MATERNIDADE", (salario + adicionais) / base_dias * dias_mat, f"{dias_mat}d")
         avisos.append(f"{dias_mat} dia(s) de salário-maternidade: valor compensável na DCTFWeb.")
 
     if inp.jornada_parcial and not prolabore:
@@ -368,7 +372,7 @@ def calculate_employee(
 
     # 2. Rubricas da empresa (fórmula ou valor informado)
     variaveis: Dict[str, float] = {
-        "salario_base": salario, "salario_dia": salario / 30.0, "salario_hora": salario / horas_mes,
+        "salario_base": salario, "salario_dia": salario / base_dias, "salario_hora": salario / horas_mes,
         "salario_minimo": tables.salario_minimo, "horas_mes": horas_mes, "dias_trabalhados": float(dias),
         "dias_uteis": float(inp.dias_uteis), "dias_dsr": float(inp.dias_dsr),
         "faltas_dias": float(inp.faltas_dias), "horas_faltantes": float(inp.horas_faltantes),
@@ -407,8 +411,8 @@ def calculate_employee(
 
     # 3. Descontos que reduzem a base: faltas, DSR perdido e atrasos
     if not prolabore:
-        sys("FALTAS", salario / 30.0 * inp.faltas_dias, f"{inp.faltas_dias:g}d")
-        sys("DSR_FALTAS", salario / 30.0 * inp.dsr_perdidos, f"{inp.dsr_perdidos:g}d")
+        sys("FALTAS", salario / base_dias * inp.faltas_dias, f"{inp.faltas_dias:g}d")
+        sys("DSR_FALTAS", salario / base_dias * inp.dsr_perdidos, f"{inp.dsr_perdidos:g}d")
         sys("ATRASOS", salario / horas_mes * inp.horas_faltantes, f"{inp.horas_faltantes:g}h")
 
     # 4. Salário-família (não integra nenhuma base)
@@ -583,7 +587,7 @@ def month_calendar(conn, company_id: int, competencia: str) -> Dict[str, Any]:
 _TIPOS_INSS = ("auxilio_doenca_b31", "auxilio_doenca_b91", "acidente_trabalho")
 
 
-def _dias_inss_no_mes(afastamentos: List[Dict[str, Any]], inicio: date, fim: date) -> int:
+def _dias_inss_no_mes(afastamentos: List[Dict[str, Any]], inicio: date, fim: date, cheio: int = 30) -> int:
     dias = set()
     for a in afastamentos:
         ini = _parse_date(a.get("data_inicio"))
@@ -599,10 +603,10 @@ def _dias_inss_no_mes(afastamentos: List[Dict[str, Any]], inicio: date, fim: dat
             dias.add(d)
             d += timedelta(days=1)
     total_mes = (fim - inicio).days + 1
-    return 30 if len(dias) >= total_mes else min(len(dias), 30)
+    return cheio if len(dias) >= total_mes else min(len(dias), cheio)
 
 
-def _dias_maternidade_no_mes(afastamentos: List[Dict[str, Any]], inicio: date, fim: date) -> int:
+def _dias_maternidade_no_mes(afastamentos: List[Dict[str, Any]], inicio: date, fim: date, cheio: int = 30) -> int:
     """Dias de salário-maternidade no mês: só os 120 primeiros dias da licença; a prorrogação
     da Empresa Cidadã (Lei 11.770/2008) é paga como salário normal (dedução no IRPJ)."""
     dias = set()
@@ -620,7 +624,7 @@ def _dias_maternidade_no_mes(afastamentos: List[Dict[str, Any]], inicio: date, f
             dias.add(d)
             d += timedelta(days=1)
     total_mes = (fim - inicio).days + 1
-    return 30 if len(dias) >= total_mes else min(len(dias), 30)
+    return cheio if len(dias) >= total_mes else min(len(dias), cheio)
 
 
 def custo_vt(vales: List[Dict[str, Any]], dias_padrao: int) -> float:
@@ -643,7 +647,7 @@ def dias_uteis_seg_sex(inicio: date, fim: date, feriados: set) -> int:
     return n
 
 
-def _dias_ferias_no_mes(ferias: List[Dict[str, Any]], inicio: date, fim: date) -> int:
+def _dias_ferias_no_mes(ferias: List[Dict[str, Any]], inicio: date, fim: date, cheio: int = 30) -> int:
     dias = set()
     for f in ferias:
         ini, f_fim = _parse_date(f.get("data_inicio")), _parse_date(f.get("data_fim"))
@@ -654,7 +658,7 @@ def _dias_ferias_no_mes(ferias: List[Dict[str, Any]], inicio: date, fim: date) -
             dias.add(d)
             d += timedelta(days=1)
     total_mes = (fim - inicio).days + 1
-    return 30 if len(dias) >= total_mes else min(len(dias), 30)
+    return cheio if len(dias) >= total_mes else min(len(dias), cheio)
 
 
 def _noturnas_do_mes(escala: Dict[str, Any], inicio_func: Any, inicio: date, fim: date,
@@ -713,6 +717,8 @@ def build_inputs(
     if rubrics is None:
         rubrics = load_rubrics(conn, company_id)
 
+    params = dp_parametros.carregar(conn, company_id)
+    base_dias = 30 if params["base_dias"] == "30" else fim.day
     employees = _rows(conn, "SELECT * FROM employees WHERE company_id=? AND active=1 ORDER BY name", (company_id,))
     if employee_ids:
         employees = [e for e in employees if e["id"] in set(employee_ids)]
@@ -780,9 +786,9 @@ def build_inputs(
         adm = _parse_date(e.get("admission_date"))
         if adm and adm > fim:
             continue  # ainda não admitido na competência
-        dias_direito = 30
+        dias_direito = base_dias
         if adm and adm >= inicio and adm.day > 1:
-            dias_direito = max(1, min(30, fim.day - adm.day + 1))
+            dias_direito = max(1, min(base_dias, fim.day - adm.day + 1))
 
         he50 = he100 = faltantes = faltas = 0.0
         semanas_com_falta = set()
@@ -887,10 +893,11 @@ def build_inputs(
             is_prolabore=bool(e.get("is_prolabore")),
             horas_mes=round(horas_semana * 5, 2),
             dias_direito=dias_direito,
-            dias_afastado_inss=_dias_inss_no_mes(afast.get(eid, []), inicio, fim),
-            dias_ferias=_dias_ferias_no_mes(ferias.get(eid, []), inicio, fim),
+            base_dias=base_dias,
+            dias_afastado_inss=_dias_inss_no_mes(afast.get(eid, []), inicio, fim, base_dias),
+            dias_ferias=_dias_ferias_no_mes(ferias.get(eid, []), inicio, fim, base_dias),
             faltas_dias=faltas,
-            dsr_perdidos=float(len(semanas_com_falta)),
+            dsr_perdidos=float(len(semanas_com_falta)) if params["descontar_dsr_faltas"] else 0.0,
             horas_faltantes=round(faltantes, 2),
             he50=round(he50, 2),
             he100=round(he100, 2),
@@ -915,7 +922,7 @@ def build_inputs(
             inss_ferias=r2(inss_ferias),
             base_inss_outros_vinculos=r2(base_outros),
             inss_outros_vinculos=r2(inss_outros),
-            dias_maternidade=_dias_maternidade_no_mes(afast.get(eid, []), inicio, fim),
+            dias_maternidade=_dias_maternidade_no_mes(afast.get(eid, []), inicio, fim, base_dias),
             jornada_parcial=(str(e.get("jornada_tipo") or "").lower() == "parcial"),
             horas_semana=horas_semana,
         ))

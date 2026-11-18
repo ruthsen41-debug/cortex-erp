@@ -52,6 +52,7 @@ function dpTabs() {
     { id: 'obrigacoes',   icon: 'file-check',      label: 'Obrigações' },
     { id: 'tabelas_fiscais',   icon: 'percent',      label: 'Tabelas Fiscais' },
     { id: 'rubricas',          icon: 'list-checks',  label: 'Rubricas' },
+    { id: 'parametros',        icon: 'sliders-horizontal', label: 'Parâmetros' },
     { id: 'sefip',             icon: 'building-2',   label: 'FGTS Digital' },
     { id: 'efd_reinf',         icon: 'file-code-2',  label: 'EFD-Reinf' },
     { id: 'beneficios',        icon: 'heart',         label: 'Benefícios' },
@@ -138,6 +139,7 @@ async function switchDpTab(tab, noRebuildTabs = false) {
     case 'obrigacoes':   renderObrigacoes(body); break;
     case 'tabelas_fiscais':    await renderTabelasFiscais(body); break;
     case 'rubricas':           await renderRubricas(body); break;
+    case 'parametros':         await renderParametrosFolha(body); break;
     case 'esocial_periodico':  await renderEsocialPeriodico(body); break;
     case 'sefip':              await renderSefip(body); break;
     case 'efd_reinf':          await renderEfdReinf(body); break;
@@ -881,9 +883,18 @@ async function renderFerias(el) {
     </tr>`).join('');
 
   el.innerHTML = `
-    <div class="mb-6">
-      <h2 class="font-bold text-slate-800 dark:text-slate-100 text-lg mb-1">Férias</h2>
-      <p class="text-xs text-slate-400">Controle de períodos aquisitivos, abono pecuniário, férias em dobro, médias variáveis e reflexo na folha.</p>
+    <div class="mb-6 flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h2 class="font-bold text-slate-800 dark:text-slate-100 text-lg mb-1">Férias</h2>
+        <p class="text-xs text-slate-400">Controle de períodos aquisitivos, abono pecuniário, férias em dobro, médias variáveis e reflexo na folha.
+          Pode dividir em até 3 partes (uma com 14 dias ou mais, as outras com 5 ou mais).</p>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <button onclick="abrirProgramacaoFerias()" class="text-xs font-semibold px-3 py-2 rounded-xl border border-sky-200 text-sky-700 bg-sky-50 hover:bg-sky-100 flex items-center gap-1.5">
+          <i data-lucide="calendar-days" class="w-3.5 h-3.5"></i> Programação</button>
+        <button onclick="abrirFeriasGrupo()" class="text-xs font-semibold px-3 py-2 rounded-xl border border-violet-200 text-violet-700 bg-violet-50 hover:bg-violet-100 flex items-center gap-1.5">
+          <i data-lucide="users" class="w-3.5 h-3.5"></i> Em grupo / coletivas</button>
+      </div>
     </div>
     ${alertHtml}
     ${card2(`
@@ -3763,6 +3774,9 @@ async function renderBeneficios(el) {
 async function renderAdiantamentos(el) {
   const hoje = new Date().toISOString().slice(0,7);
   let comp = hoje;
+  const par = (await apiFetch('/api/dp/parametros').catch(() => null))?.parametros
+    || { adiantamento_percentual: 40, adiantamento_limite: 40, adiantamento_dia_pagamento: 20 };
+  const advData = c => `${c}-${String(par.adiantamento_dia_pagamento).padStart(2, '0')}`;
   const render = async () => {
     const rows = await apiFetch(`/api/dp/advances?competencia=${comp}`);
     const total = rows.reduce((s,r)=>s+parseFloat(r.valor||0),0);
@@ -3813,9 +3827,9 @@ async function renderAdiantamentos(el) {
             <div class="form-group"><label>Tipo</label>
               <select id="adv-tipo" class="form-control"><option value="quinzenal">Quinzenal</option><option value="avulso">Avulso</option></select>
             </div>
-            <div class="form-group"><label>Data Pagamento</label><input id="adv-data" type="date" class="form-control" value="${new Date().toISOString().slice(0,10)}"></div>
+            <div class="form-group"><label>Data Pagamento</label><input id="adv-data" type="date" class="form-control" value="${advData(comp)}"></div>
           </div>
-          <div id="adv-warn" class="alert alert-warning" style="display:none">⚠️ Valor excede 40% do salário.</div>
+          <div id="adv-warn" class="alert alert-warning" style="display:none">⚠️ Valor excede ${par.adiantamento_limite}% do salário (limite em DP › Parâmetros).</div>
           <div class="d-flex gap-2 justify-content-end mt-3">
             <button onclick="document.getElementById('adv-modal').style.display='none'" class="btn btn-secondary">Cancelar</button>
             <button onclick="window._advSave()" class="btn btn-primary">Salvar</button>
@@ -3826,17 +3840,21 @@ async function renderAdiantamentos(el) {
       const sel = document.getElementById('adv-emp');
       if (!sel) return;
       const salary = parseFloat(sel.options[sel.selectedIndex]?.dataset?.salary||0);
-      const valor = parseFloat(document.getElementById('adv-valor')?.value||0);
+      const valorEl = document.getElementById('adv-valor');
+      if (salary > 0 && valorEl && !valorEl.value) valorEl.value = (salary * par.adiantamento_percentual / 100).toFixed(2);
+      const valor = parseFloat(valorEl?.value||0);
+      const lim = salary * par.adiantamento_limite / 100;
       const pct = salary>0 ? (valor/salary*100).toFixed(1)+'%' : '—';
       const pctEl = document.getElementById('adv-pct');
-      if (pctEl) { pctEl.value = pct; pctEl.style.color = (salary>0&&valor>salary*0.4)?'red':''; }
+      if (pctEl) { pctEl.value = pct; pctEl.style.color = (salary>0&&valor>lim)?'red':''; }
       const warnEl = document.getElementById('adv-warn');
-      if (warnEl) warnEl.style.display = (salary>0&&valor>salary*0.4)?'':'none';
+      if (warnEl) warnEl.style.display = (salary>0&&valor>lim)?'':'none';
     };
     window._advOpenModal = () => {
       document.getElementById('adv-emp').value = '';
       document.getElementById('adv-valor').value = '';
       document.getElementById('adv-pct').value = '';
+      document.getElementById('adv-data').value = advData(document.getElementById('adv-comp').value || comp);
       document.getElementById('adv-modal').style.display = 'flex';
     };
     window._advSave = async () => {
