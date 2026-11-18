@@ -33,11 +33,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 try:
-    from ..auth import require_superadmin
+    from ..auth import get_current_user
     from ..config import BASE_DIR
     from ..version import APP_VERSION, build_id, versao_tupla
 except ImportError:
-    from auth import require_superadmin
+    from auth import get_current_user
     from config import BASE_DIR
     from version import APP_VERSION, build_id, versao_tupla
 
@@ -287,20 +287,37 @@ def iniciar_atualizacao(info: Dict[str, Any], origem: str = "manual", usuario: s
 
 
 # ── API ──────────────────────────────────────────────────────────────────────
+def pode_atualizar(user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+    """Dono do sistema ou administrador da empresa (como "Atualização de software"
+    no celular: quem administra o aparelho pode verificar e instalar)."""
+    if not (user.get("is_superadmin") or user.get("role") == "admin"):
+        raise HTTPException(403, "Somente o administrador pode verificar e instalar atualizações.")
+    return user
+
+
+def verificar_nuvem() -> Dict[str, Any]:
+    """Na nuvem não há instalador: a versão "disponível" é a que está no ar agora.
+    O navegador compara com a versão em que a página foi aberta."""
+    return {"ok": True, "em": _agora(), "disponivel": {
+        "versao": APP_VERSION, "build": build_id(), "nova": False, "modo": "nuvem"}}
+
+
+# ── rotas ──────────────────────────────────────────────────────────────────────
 class AutoConfig(BaseModel):
     ativo: bool
     hora: str = Field("03:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
 @router.get("/status")
-def status(user: Dict[str, Any] = Depends(require_superadmin)):
+def status(user: Dict[str, Any] = Depends(pode_atualizar)):
     instalado = raiz_instalacao() is not None
+    verificacao = _ultima_verificacao if instalado else None
     st = ler_status() if instalado else {}
     return {
         "modo": "instalado" if instalado else "nuvem",
         "versao_atual": APP_VERSION,
         "build": build_id(),
-        "verificacao": _ultima_verificacao or None,
+        "verificacao": verificacao or None,
         "andamento": st or None,
         "em_andamento": em_andamento(st) if instalado else False,
         "auto": {k: v for k, v in ler_config().items() if k in ("auto", "hora")} if instalado else None,
@@ -308,12 +325,14 @@ def status(user: Dict[str, Any] = Depends(require_superadmin)):
 
 
 @router.post("/check")
-def check(user: Dict[str, Any] = Depends(require_superadmin)):
+def check(user: Dict[str, Any] = Depends(pode_atualizar)):
+    if raiz_instalacao() is None:
+        return verificar_nuvem()
     return verificar()
 
 
 @router.post("/apply")
-def apply(user: Dict[str, Any] = Depends(require_superadmin)):
+def apply(user: Dict[str, Any] = Depends(pode_atualizar)):
     if raiz_instalacao() is None:
         raise HTTPException(400, "Na nuvem a atualização é automática: cada publicação já entra no ar.")
     v = verificar()
@@ -324,7 +343,7 @@ def apply(user: Dict[str, Any] = Depends(require_superadmin)):
 
 
 @router.put("/auto")
-def set_auto(cfg: AutoConfig, user: Dict[str, Any] = Depends(require_superadmin)):
+def set_auto(cfg: AutoConfig, user: Dict[str, Any] = Depends(pode_atualizar)):
     arq = pasta_atualizacoes() / "config.json"
     atual = ler_config()
     atual.update({"auto": cfg.ativo, "hora": cfg.hora})

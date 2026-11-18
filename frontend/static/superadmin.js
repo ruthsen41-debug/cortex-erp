@@ -113,15 +113,17 @@
   };
   let updTimer = null;
   let updVerificacao = null;
+  let updBody = null;
 
   function fmtBytes(n) { return n ? (n / 1048576).toFixed(0) + ' MB' : ''; }
   function updAgendar(body, ms) {
     clearTimeout(updTimer);
-    updTimer = setTimeout(() => { if (saTab === 'updates' && document.getElementById('sa-body')) renderUpdates(body); }, ms);
+    updTimer = setTimeout(() => { if (body.isConnected) renderUpdates(body); }, ms);
   }
 
   async function renderUpdates(body) {
     clearTimeout(updTimer);
+    updBody = body;
     let st;
     try {
       st = await api('/api/system/update/status');
@@ -137,6 +139,10 @@
     const v = updVerificacao || st.verificacao;
     const and = st.andamento;
     const disp = v && v.ok ? v.disponivel : null;
+    const nuvem = st.modo !== 'instalado';
+    const cv = window.cortexVersao || {};
+    // nuvem: "nova" = o que está no ar é diferente do que está aberto neste navegador
+    const nova = !!disp && (nuvem ? !!(disp.build && cv.buildAberto && disp.build !== cv.buildAberto) : !!disp.nova);
     const paginaVelha = !!(window.cortexVersao && window.cortexVersao.versaoAberta && window.cortexVersao.versaoAberta !== st.versao_atual);
 
     let andamentoHtml = '';
@@ -164,7 +170,14 @@
       dispHtml = `<p class="text-muted" style="margin:0">Clique em <strong>Verificar atualizações</strong> para procurar uma versão nova.</p>`;
     } else if (!v.ok) {
       dispHtml = `<div class="alert alert-warning" style="margin:0">${esc(v.erro)}</div>`;
-    } else if (disp && disp.nova) {
+    } else if (nova && nuvem) {
+      dispHtml = `<div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
+          <div><div style="font-size:1.1rem;font-weight:700">Nova versão disponível${disp.versao ? ' (' + esc(disp.versao) + ')' : ''}</div>
+            <div class="text-muted" style="font-size:.8rem">Salve o que estiver fazendo: a página recarrega já na versão nova.</div></div>
+          <button class="btn btn-primary" onclick="cortexVersao.atualizar()">
+            <i data-lucide="download" style="width:16px;height:16px"></i> Atualizar agora</button>
+        </div>`;
+    } else if (nova) {
       const botao = st.modo === 'instalado'
         ? `<button class="btn btn-primary" data-versao="${esc(disp.versao)}" onclick="saAplicarAtualizacao(this.dataset.versao)" ${st.em_andamento ? 'disabled' : ''}>
             <i data-lucide="download" style="width:16px;height:16px"></i> Baixar e instalar</button>`
@@ -180,7 +193,7 @@
           O sistema fica fora do ar por 1 a 3 minutos. Se a versão nova não subir, ele volta sozinho para a anterior.</p>` : ''}`;
     } else {
       dispHtml = `<div style="display:flex;gap:.6rem;align-items:center"><i data-lucide="check-circle-2" style="color:#22c55e"></i>
-        <div><strong>O sistema está atualizado.</strong><div class="text-muted" style="font-size:.8rem">Última versão publicada: ${esc(disp ? disp.versao : '—')} · verificado em ${esc(fmtDate(v.em))}</div></div></div>`;
+        <div><strong>Você está na versão mais recente.</strong><div class="text-muted" style="font-size:.8rem">${nuvem ? 'Versão no ar' : 'Última versão publicada'}: ${esc(disp ? disp.versao : '—')} · verificado em ${esc(fmtDate(v.em))}</div></div></div>`;
     }
 
     const auto = st.auto || {};
@@ -203,9 +216,9 @@
       ${andamentoHtml}
       <div class="card" style="margin-bottom:1rem"><div class="card-body">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1rem">
-          <div><div class="text-muted" style="font-size:.8rem">Versão instalada</div>
-            <div style="font-size:1.6rem;font-weight:800;line-height:1.1">${esc(st.versao_atual)}</div>
-            <div class="text-muted" style="font-size:.75rem">build ${esc(st.build)} · ${st.modo === 'instalado' ? 'servidor instalado' : 'nuvem'}</div></div>
+          <div><div class="text-muted" style="font-size:.8rem">${nuvem ? 'Versão em uso' : 'Versão instalada'}</div>
+            <div style="font-size:1.6rem;font-weight:800;line-height:1.1">${esc(nuvem ? (cv.versaoAberta || st.versao_atual) : st.versao_atual)}</div>
+            <div class="text-muted" style="font-size:.75rem">build ${esc(nuvem ? (cv.buildAberto || st.build) : st.build)} · ${nuvem ? 'nuvem' : 'servidor instalado'}</div></div>
           <button class="btn btn-secondary" id="sa-upd-check" onclick="saVerificarAtualizacao()" ${st.em_andamento ? 'disabled' : ''}>
             <i data-lucide="refresh-cw" style="width:16px;height:16px"></i> Verificar atualizações</button>
         </div>
@@ -221,10 +234,8 @@
     if (bt) { bt.disabled = true; bt.textContent = 'Verificando…'; }
     try {
       updVerificacao = await api('/api/system/update/check', { method: 'POST' });
-      if (window.cortexVersao) window.cortexVersao.verificar();
     } catch (e) { toast(e.message, 'error'); }
-    const body = document.getElementById('sa-body');
-    if (body) renderUpdates(body);
+    if (updBody && updBody.isConnected) renderUpdates(updBody);
   };
 
   window.saAplicarAtualizacao = async function (versao) {
@@ -234,8 +245,7 @@
       await api('/api/system/update/apply', { method: 'POST' });
       toast('Atualização iniciada.', 'success');
     } catch (e) { toast(e.message, 'error'); }
-    const body = document.getElementById('sa-body');
-    if (body) renderUpdates(body);
+    if (updBody && updBody.isConnected) renderUpdates(updBody);
   };
 
   window.saSalvarAuto = async function () {
@@ -245,6 +255,19 @@
       await api('/api/system/update/auto', { method: 'PUT', body: { ativo, hora } });
       toast(ativo ? `Atualização automática ligada (${hora}).` : 'Atualização automática desligada.', 'success');
     } catch (e) { toast(e.message, 'error'); }
+  };
+
+  // Mesma tela, fora do Painel do Sistema: menu Administração › Atualizações (admin da empresa)
+  window.renderAtualizacoes = async function (container) {
+    container.innerHTML = `
+      <div class="page-header"><div>
+        <h2>Atualizações</h2>
+        <p style="font-size:.8rem;color:var(--muted);margin:.25rem 0 0">Como no celular: verifique se há versão nova do Cortex e atualize com um clique.</p>
+      </div></div>
+      <div id="upd-body"><div class="text-muted" style="padding:1rem">Carregando...</div></div>`;
+    const body = container.querySelector('#upd-body');
+    try { await renderUpdates(body); }
+    catch (e) { body.innerHTML = `<div class="alert alert-danger">${esc(e.message)}</div>`; }
   };
 
   async function renderOverview(body) {

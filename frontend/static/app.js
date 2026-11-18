@@ -69,6 +69,8 @@ function applyRoleFilter(role) {
   if (sectionAdmin) sectionAdmin.style.display = 'none';
   const navUsers = document.getElementById('nav-users');
   if (navUsers) navUsers.style.display = 'none';
+  const navUpdates = document.getElementById('nav-updates');
+  if (navUpdates) navUpdates.style.display = 'none';
 }
 
 // Formatters
@@ -333,6 +335,10 @@ async function switchTab(tab) {
     case 'support':
       if (typeof renderSupport === 'function') await renderSupport(main);
       else main.innerHTML = '<div class="p-6 text-slate-400">Módulo Suporte não carregado.</div>';
+      break;
+    case 'updates':
+      if (typeof renderAtualizacoes === 'function') await renderAtualizacoes(main);
+      else main.innerHTML = '<div class="p-6 text-slate-400">Módulo Atualizações não carregado.</div>';
       break;
     case 'users':
       if (typeof renderUsers === 'function') await renderUsers(main);

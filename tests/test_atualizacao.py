@@ -80,13 +80,47 @@ def test_status_na_nuvem_e_apply_recusado(monkeypatch):
     assert client.get("/api/system/update/status").status_code in (401, 403)
 
 
-def test_check_sem_internet_nao_quebra(monkeypatch):
+def test_check_sem_internet_nao_quebra(instalado, monkeypatch):
     def falha(url):
         raise urllib.error.URLError("offline")
     monkeypatch.setattr(atu, "_baixar_json", falha)
     r = client.post("/api/system/update/check", headers=_super())
     assert r.status_code == 200
     assert r.json()["ok"] is False and "conexão" in r.json()["erro"]
+
+
+def _login(email, senha="senha123"):
+    res = client.post("/api/auth/login", json={"email": email, "password": senha})
+    assert res.status_code == 200, res.text
+    return {"Authorization": f"Bearer {res.json()['access_token']}"}
+
+
+def test_admin_da_empresa_verifica_e_usuario_comum_nao(monkeypatch):
+    """Como no celular: o admin de cada empresa também vê "Verificar atualizações"."""
+    import uuid
+    monkeypatch.delenv("CORTEX_RAIZ_INSTALACAO", raising=False)
+    h_super = _super()
+    email = f"upd_{uuid.uuid4().hex[:8]}@teste.com.br"
+    res = client.post("/api/auth/register-company", json={
+        "company_name": "Cliente Atualização", "admin_name": "Dono", "email": email, "password": "senha123"})
+    assert res.status_code == 200, res.text
+    cid = res.json()["company"]["id"]
+    assert client.post(f"/api/superadmin/companies/{cid}/approve", headers=h_super).status_code == 200
+    h_adm = _login(email)
+
+    assert client.get("/api/system/update/status", headers=h_adm).status_code == 200
+    chk = client.post("/api/system/update/check", headers=h_adm)
+    assert chk.status_code == 200, chk.text
+    disp = chk.json()["disponivel"]  # nuvem: devolve o que está no ar, sem consultar o GitHub
+    assert chk.json()["ok"] is True and disp["modo"] == "nuvem"
+    assert disp["versao"] == APP_VERSION and disp["build"] == build_id()
+
+    email_dp = f"dp_{uuid.uuid4().hex[:6]}@t.com"
+    assert client.post("/api/auth/register", headers=h_adm, json={
+        "name": "DP", "email": email_dp, "password": "senha123", "role": "dp"}).status_code == 200
+    h_dp = _login(email_dp)
+    assert client.get("/api/system/update/status", headers=h_dp).status_code == 403
+    assert client.post("/api/system/update/check", headers=h_dp).status_code == 403
 
 
 # ── leitura da versão publicada ──────────────────────────────────────────────
