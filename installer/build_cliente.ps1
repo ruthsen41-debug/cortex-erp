@@ -1,18 +1,14 @@
 <#
-  Monta o programa Cortex.exe (janela própria que acha o servidor na rede) e o
-  instalador das estações.
+  Monta o programa Cortex.exe (janela própria que acha o servidor na rede).
 
   Uso:
       powershell -ExecutionPolicy Bypass -File installer\build_cliente.ps1
 
   Resultado:
-      installer\build\Cortex\Cortex.exe                  programa (modo pasta, abre rápido)
-      installer\Output\CortexERP-Estacao-Setup.exe       instalador das estações (se houver Inno Setup 6)
+      installer\build\Cortex\Cortex.exe   programa (modo pasta, abre rápido)
 
-  O build_servidor.ps1 chama este script para colocar o mesmo Cortex.exe no servidor.
-  Use -SemInstalador para só montar o Cortex.exe.
+  O build_instalador.ps1 chama este script antes de compilar o CortexERP-Setup.exe.
 #>
-param([switch]$SemInstalador)
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
@@ -55,14 +51,3 @@ if (Test-Path (Join-Path $Dist "Cortex")) { Remove-Item -Recurse -Force (Join-Pa
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller falhou" }
 Write-Host "Pronto: $(Join-Path $Dist 'Cortex\Cortex.exe')"
 
-if ($SemInstalador) { return }
-$Iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
-          "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
-if ($Iscc) {
-    Write-Host "Compilando instalador das estações"
-    & $Iscc (Join-Path $Here "CortexEstacao.iss")
-    if ($LASTEXITCODE -ne 0) { throw "Inno Setup falhou" }
-    Write-Host "Pronto: $(Join-Path $Here 'Output\CortexERP-Estacao-Setup.exe')"
-} else {
-    Write-Warning "Inno Setup 6 não encontrado. Instale com: winget install JRSoftware.InnoSetup"
-}

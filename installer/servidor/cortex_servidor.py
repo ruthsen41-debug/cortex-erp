@@ -63,7 +63,10 @@ def responder_descoberta(porta_http: int) -> None:
 def main() -> None:
     host = os.getenv("CORTEX_HOST", "0.0.0.0")
     porta = int(os.getenv("CORTEX_PORT", "47800"))
-    threading.Thread(target=responder_descoberta, args=(porta,), daemon=True, name="descoberta").start()
+    if os.getenv("CORTEX_MODO") == "mono":
+        host = "127.0.0.1"
+    if os.getenv("CORTEX_MODO", "servidor") != "mono":  # monousuário: invisível na rede
+        threading.Thread(target=responder_descoberta, args=(porta,), daemon=True, name="descoberta").start()
     print(f"Cortex ERP iniciando em http://{host}:{porta}", flush=True)
     uvicorn.run("backend.main:app", host=host, port=porta, workers=1, log_level="info")
 

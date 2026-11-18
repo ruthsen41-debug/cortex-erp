@@ -1,12 +1,14 @@
 <#
-  Monta o instalador do Cortex ERP para o servidor do escritório.
+  Monta o instalador único do Cortex ERP. Na instalação ele pergunta o tipo:
+  Servidor (multiusuário), Monousuário ou Estação.
 
   Uso (na raiz do repositório ou em qualquer lugar):
-      powershell -ExecutionPolicy Bypass -File installer\build_servidor.ps1
+      powershell -ExecutionPolicy Bypass -File installer\build_instalador.ps1
 
   Resultado:
-      installer\build\CortexServidor\        pacote montado (Python embutido + app)
-      installer\Output\CortexERP-Servidor-Setup.exe   instalador (se o Inno Setup 6 estiver instalado)
+      installer\build\CortexServidor\       sistema montado (Python embutido + app + serviço)
+      installer\build\Cortex\               programa Cortex.exe
+      installer\Output\CortexERP-Setup.exe  instalador (se o Inno Setup 6 estiver instalado)
 #>
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
@@ -77,16 +79,18 @@ try {
 # O teste de importação pode criar data\ e .jwt_secret — não podem ir no instalador
 if (Test-Path (Join-Path $AppDir "data")) { Remove-Item -Recurse -Force (Join-Path $AppDir "data") }
 
-Write-Host "Montando o programa Cortex.exe (também vai no servidor)"
-& (Join-Path $Here "build_cliente.ps1") -SemInstalador
+Write-Host "Montando o programa Cortex.exe"
+& (Join-Path $Here "build_cliente.ps1")
 
 $Iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
           "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
 if ($Iscc) {
     Write-Host "Compilando instalador com Inno Setup"
-    & $Iscc (Join-Path $Here "CortexServidor.iss")
+    # os instaladores separados da versão anterior foram substituídos pelo único
+    Remove-Item (Join-Path $Here "Output\CortexERP-Servidor-Setup.exe"), (Join-Path $Here "Output\CortexERP-Estacao-Setup.exe") -ErrorAction SilentlyContinue
+    & $Iscc /Q (Join-Path $Here "CortexERP.iss")
     if ($LASTEXITCODE -ne 0) { throw "Inno Setup falhou" }
-    Write-Host "Pronto: $(Join-Path $Here 'Output\CortexERP-Servidor-Setup.exe')"
+    Write-Host "Pronto: $(Join-Path $Here 'Output\CortexERP-Setup.exe')"
 } else {
     Write-Warning "Inno Setup 6 não encontrado. Instale com: winget install JRSoftware.InnoSetup"
 }
