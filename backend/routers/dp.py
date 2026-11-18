@@ -1286,7 +1286,8 @@ def _calc_decimo_emp(conn, company_id: int, emp: Dict[str, Any], ano: int, parce
     comp_ini = max(f"{ano}-01", adm.strftime("%Y-%m")) if adm else f"{ano}-01"
     comp_fim = f"{ano}-10" if parcela == 1 else f"{ano}-11"
     media = payroll_special.media_variaveis(conn, company_id, emp["id"], comp_ini, comp_fim, "incide_13",
-                                            payroll_special.meses_entre(comp_ini, comp_fim))
+                                            payroll_special.meses_entre(comp_ini, comp_fim),
+                                            hora=payroll_special.hora_atual(ctx, tables, emp))
     adiant = 0.0
     adiant_ferias = _adiant13_ferias(conn, company_id, emp["id"], ano)
     if parcela == 1 and adiant_ferias > 0:
@@ -1479,7 +1480,7 @@ def _calc_ferias(conn, company_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
     ctx = payroll_special.contexto_funcionario(conn, company_id, emp, inicio)
     m_ini, m_div = cct_regras.janela_media(ctx.cct, periodo["inicio"][:7], periodo["fim"][:7], 12)
     media = payroll_special.media_variaveis(conn, company_id, emp["id"], m_ini, periodo["fim"][:7],
-                                            "incide_ferias", m_div)
+                                            "incide_ferias", m_div, hora=payroll_special.hora_atual(ctx, tables, emp))
     adiant_13 = 0.0
     avisos_13 = []
     if data.get("adiantar_13") in (True, 1, "1", "true", "on"):
@@ -1922,9 +1923,6 @@ def _calc_rescisao(conn, company_id: int, data: Dict[str, Any]) -> Dict[str, Any
     ano_ini = max(f"{deslig.year}-01", adm.strftime("%Y-%m"))
     doze_ini = (date(deslig.year - 1, deslig.month, 1)).strftime("%Y-%m")
     eid = emp["id"]
-    media_13 = payroll_special.media_variaveis(conn, company_id, eid, ano_ini, anterior, "incide_13",
-                                               payroll_special.meses_entre(ano_ini, anterior))
-    media_12 = payroll_special.media_variaveis(conn, company_id, eid, doze_ini, anterior, "incide_ferias", 12)
 
     tem_2a = conn.execute(
         "SELECT COUNT(*) FROM payroll_special WHERE company_id=? AND employee_id=? AND tipo='decimo_2' AND referencia=? AND status != 'cancelado'",
@@ -1965,9 +1963,13 @@ def _calc_rescisao(conn, company_id: int, data: Dict[str, Any]) -> Dict[str, Any
     ctx = payroll_special.contexto_funcionario(conn, company_id, emp, deslig)
     if data.get("_salario"):
         ctx.salario = float(data["_salario"])
-    if ctx.cct and int(float(ctx.cct.get("media_meses") or 0)) > 0:
-        m_ini, m_div = cct_regras.janela_media(ctx.cct, doze_ini, anterior, 12)
-        media_12 = payroll_special.media_variaveis(conn, company_id, eid, m_ini, anterior, "incide_ferias", m_div)
+    hora = payroll_special.hora_atual(ctx, tables, emp)      # Súmula 347: horas × salário-hora atual
+    media_13 = payroll_special.media_variaveis(conn, company_id, eid, ano_ini, anterior, "incide_13",
+                                               payroll_special.meses_entre(ano_ini, anterior), hora=hora)
+    m_ini, m_div = cct_regras.janela_media(ctx.cct, doze_ini, anterior, 12)
+    media_12 = payroll_special.media_variaveis(conn, company_id, eid, m_ini, anterior, "incide_ferias", m_div,
+                                               hora=hora)
+    if m_div != 12:
         avisos_extra.append(f"Médias de férias e aviso pelos últimos {m_div} meses, conforme a convenção coletiva.")
     plano.pop("indenizacao_data_base", None)
     if tipo == "sem_justa_causa" and data.get("indenizacao_data_base") not in (False, 0, "0", "false"):

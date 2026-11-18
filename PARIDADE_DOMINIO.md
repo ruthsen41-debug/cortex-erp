@@ -199,7 +199,7 @@ Legenda: ✅ existe no Cortex · ⚠️ parcial · ❌ falta. O número entre pa
 ### Prioridade sugerida para as lacunas
 1. **Uso diário:** parâmetros da folha por empresa · programação de férias, férias em grupo e coletivas · rescisão complementar e em grupo, aviso prévio como processo · holerite por e-mail · relação de líquidos e relatórios de folha.
 2. ✅ **Documentos (concluído em 2026-11-18):** pacote de modelos (contratos, aviso e abono de férias, salário-família, VT, termos), personalizável por empresa.
-3. ✅ **Regras de CCT e categorias (concluído em 2026-11-18):** adicional por tempo de serviço, médias por CCT, indenização da data-base, comissionados com garantia mínima, horista e professor. Pendentes: média de HE por quantidade de horas (Súmula 347) e HE do comissionista só com o adicional (Súmula 340).
+3. ✅ **Regras de CCT e categorias (concluído em 2026-11-18):** adicional por tempo de serviço, médias por CCT, indenização da data-base, comissionados com garantia mínima, horista e professor. Também: médias de HE e adicional noturno pela quantidade de horas × salário-hora atual (Súmula 347) e HE do comissionista só com o adicional sobre as comissões (Súmula 340 e OJ 397).
 4. **Benefícios:** VT automático e compra, plano de saúde por faixa etária e coparticipação, consignado.
 5. **Automação e utilitários:** rotinas automáticas, alterações e exclusões em grupo, acerto de data de pagamento, baixa de pagamentos.
 6. **Menor uso:** PLR, intermitente, trabalho temporário e tomador, transparência salarial, demonstrativos folha × eSocial.

@@ -146,3 +146,59 @@ def test_api_rescisao_paga_indenizacao_da_data_base():
         "aviso_modo": "indenizado", "saldo_fgts": 0})
     assert resc.status_code in (200, 201), resc.text
     assert any(l["codigo"] == "0049" for l in resc.json()["lines"])
+
+
+# ── Súmula 340: hora extra do comissionista ─────────────────────────────────
+def test_sumula_340_comissionista_puro_recebe_so_o_adicional():
+    lanc = [{"codigo": "0016", "quantidade": 0, "valor": 2300.0}]
+    res = pe.calculate_employee(pe.EmployeeInput(employee_id=1, nome="V", salario=0.0, categoria="variavel",
+                                                 lancamentos=lanc, he50=10), T2026)
+    assert _valor(res, "0002") == 0.0                                     # nada de hora cheia
+    assert _valor(res, "0023") == 50.0                                    # 2.300 / (220 + 10)h × 50% × 10h
+    assert _valor(res, "0011") > 0                                        # o adicional reflete no DSR
+
+
+def test_oj_397_fixo_mais_comissao():
+    lanc = [{"codigo": "0016", "quantidade": 0, "valor": 1150.0}]
+    res = pe.calculate_employee(pe.EmployeeInput(employee_id=1, nome="M", salario=2200.0, lancamentos=lanc,
+                                                 he50=10, he100=0, horas_noturnas=0), T2026)
+    assert _valor(res, "0002") == 150.0                                   # parte fixa: hora + 50%
+    assert _valor(res, "0023") == 25.0                                    # comissões: 1.150 / 230 × 50% × 10
+
+
+# ── Súmula 347: média de HE pela quantidade de horas ─────────────────────────
+def test_sumula_347_media_pelas_horas_com_salario_hora_atual():
+    from backend.database import get_conn
+    from backend.services import payroll_special as ps
+
+    cid, h = _empresa_nova()
+    eid = client.post("/api/dp/employees", headers=h,
+                      json={**EMP, "cpf": _cpf(), "salary": 2200.0, "admission_date": "2025-06-02"}).json()["id"]
+    conn = get_conn()
+    pe.ensure_system_rubrics(conn, cid)
+    rid = conn.execute("SELECT id FROM payroll_rubrics WHERE company_id=? AND codigo='0002'", (cid,)).fetchone()[0]
+    conn.execute("INSERT INTO employee_rubrics (company_id, employee_id, rubric_id, competencia, quantidade, valor) "
+                 "VALUES (?,?,?,'',10,0)", (cid, eid, rid))
+    conn.commit()
+    conn.close()
+    for comp in ("2026-01", "2026-02", "2026-03"):
+        assert client.post("/api/dp/payroll/run", headers=h, json={"competence": comp}).status_code == 201
+
+    conn = get_conn()
+    try:
+        pagos = conn.execute("SELECT codigo, SUM(valor) FROM payroll_item_lines WHERE employee_id=? "
+                             "AND codigo IN ('0002','0011') GROUP BY codigo", (eid,)).fetchall()
+        pagos = {r[0]: r[1] for r in pagos}
+        assert pagos["0002"] == 450.0                                     # 3 × 10h × R$ 10 × 1,5
+        sem = ps.media_variaveis(conn, cid, eid, "2026-01", "2026-03", "incide_ferias", 3)
+        assert sem == round((pagos["0002"] + pagos["0011"]) / 3, 2)
+        # Mesmo salário: a média por horas dá o mesmo valor
+        igual = ps.media_variaveis(conn, cid, eid, "2026-01", "2026-03", "incide_ferias", 3,
+                                   hora={"valor_hora": 10.0, "he50": 50, "he100": 100, "noturno": 20})
+        assert igual == sem
+        # Depois de 10% de aumento: horas × salário-hora novo (R$ 11), DSR na mesma proporção
+        nova = ps.media_variaveis(conn, cid, eid, "2026-01", "2026-03", "incide_ferias", 3,
+                                  hora={"valor_hora": 11.0, "he50": 50, "he100": 100, "noturno": 20})
+        assert abs(nova - sem * 1.1) < 0.02
+    finally:
+        conn.close()

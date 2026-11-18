@@ -52,6 +52,10 @@ SYSTEM_RUBRICS: Dict[str, Tuple[str, str, str, int, int, int, str]] = {
     "DSR_COMISSAO":  ("0017", "DSR sobre Comissões", "provento", 1, 1, 1, "1002"),
     "GARANTIA_MIN":  ("0018", "Complemento de Garantia Mínima", "provento", 1, 1, 1, "1099"),
     "DSR_PROFESSOR": ("0019", "DSR do Professor (1/6)", "provento", 1, 1, 1, "1002"),
+    # Súmula 340 / OJ 397 TST: sobre as comissões, a hora extra paga só o adicional
+    "HE50_COMISSAO":  ("0023", "Adicional de HE 50% s/ Comissões", "provento", 1, 1, 1, "1003"),
+    "HE100_COMISSAO": ("0024", "Adicional de HE 100% s/ Comissões", "provento", 1, 1, 1, "1003"),
+    "NOTURNO_COMISSAO": ("0025", "Adicional Noturno s/ Comissões", "provento", 1, 1, 1, "1205"),
     "INSS":          ("0100", "INSS", "desconto", 0, 0, 0, "9201"),
     "IRRF":          ("0101", "IRRF", "desconto", 0, 0, 0, "9203"),
     "VT":            ("0102", "Vale-Transporte", "desconto", 0, 0, 0, "9216"),
@@ -391,6 +395,20 @@ def calculate_employee(
                         nome=None if p100 == 100 else f"Hora Extra {p100:g}%")
         v_extras += sys("NOTURNO", valor_hora * pnot / 100 * horas["horas_noturnas"], f"{horas['horas_noturnas']:g}h",
                         nome=None if pnot == 20 else f"Adicional Noturno {pnot:g}%")
+        # Súmula 340 TST (e OJ 397 para quem tem fixo + comissão): as comissões já remuneram a hora
+        # trabalhada, inclusive a extra; sobre elas paga-se só o adicional. Valor-hora das comissões =
+        # comissões do mês ÷ horas efetivamente trabalhadas (normais + extras).
+        horas_trab = horas_mes * prop + horas["he50"] + horas["he100"]
+        if comissoes > 0 and horas_trab > 0 and inp.categoria != "professor":
+            vh_com = comissoes / horas_trab
+            ref_com = f"R$ {vh_com:.2f}/h"
+            v_extras += sys("HE50_COMISSAO", vh_com * p50 / 100 * horas["he50"], f"{horas['he50']:g}h · {ref_com}",
+                            nome=None if p50 == 50 else f"Adicional de HE {p50:g}% s/ Comissões")
+            v_extras += sys("HE100_COMISSAO", vh_com * p100 / 100 * horas["he100"], f"{horas['he100']:g}h · {ref_com}",
+                            nome=None if p100 == 100 else f"Adicional de HE {p100:g}% s/ Comissões")
+            v_extras += sys("NOTURNO_COMISSAO", vh_com * pnot / 100 * horas["horas_noturnas"],
+                            f"{horas['horas_noturnas']:g}h · {ref_com}",
+                            nome=None if pnot == 20 else f"Adicional Noturno {pnot:g}% s/ Comissões")
         if v_extras and inp.dias_uteis > 0 and inp.dias_dsr > 0:
             sys("DSR_HE", v_extras / inp.dias_uteis * inp.dias_dsr, f"{inp.dias_dsr}d")
 

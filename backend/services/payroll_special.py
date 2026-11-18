@@ -12,6 +12,7 @@ exclusivo na fonte) e as férias (IRRF em separado do salário do mês).
 """
 import calendar
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -453,23 +454,75 @@ def dias_inss_fn(conn, company_id: int, employee_id: int) -> Callable[[date, dat
     return conta
 
 
+# Súmula 347 TST: a média de horas extras (e do adicional noturno) é apurada pela QUANTIDADE de horas,
+# valorizada pelo salário-hora da época do pagamento das férias, do 13º ou da rescisão.
+_HORAS_347 = {"0002": "he50", "0003": "he100", "0004": "noturno"}
+_DSR_HE = "0011"
+_RE_HORAS = re.compile(r"^\s*(\d+(?:[.,]\d+)?)\s*h")
+
+
+def hora_atual(ctx: "Contexto", tables: TaxTables, emp: Dict[str, Any]) -> Dict[str, float]:
+    """Salário-hora de hoje (salário + adicionais fixos ÷ horas do contrato) e percentuais da convenção."""
+    horas_mes = round((float(emp.get("horas_semana") or 0) or 44.0) * 5, 2)
+    he50, he100, noturno = cct_regras.percentuais(ctx.cct)
+    return {"valor_hora": ctx.remuneracao(tables) / horas_mes, "he50": he50, "he100": he100, "noturno": noturno}
+
+
+def _horas_da_referencia(ref: Any) -> Optional[float]:
+    m = _RE_HORAS.match(str(ref or ""))
+    return float(m.group(1).replace(",", ".")) if m else None
+
+
 def media_variaveis(conn, company_id: int, employee_id: int, comp_ini: str, comp_fim: str,
-                    flag: str, divisor: int) -> float:
+                    flag: str, divisor: int, hora: Optional[Dict[str, float]] = None) -> float:
     """
     Média mensal das rubricas variáveis (horas extras, comissões, DSR...) pagas nas folhas
     mensais entre comp_ini e comp_fim. `flag`: incide_13 ou incide_ferias da rubrica.
+    Com `hora` (ver hora_atual), horas extras e adicional noturno entram pela quantidade de horas
+    × salário-hora atual (Súmula 347) e o DSR sobre elas acompanha na mesma proporção; as diferenças
+    de dissídio dessas rubricas deixam de somar, pois o salário-hora atual já contém o reajuste.
     """
     if flag not in ("incide_13", "incide_ferias") or divisor <= 0 or comp_ini > comp_fim:
         return 0.0
     rows = pe._rows(conn, f"""
-        SELECT l.codigo, l.valor
+        SELECT l.run_id, l.codigo, l.valor, l.referencia, COALESCE(pr.tipo, 'mensal') AS run_tipo
         FROM payroll_item_lines l
         JOIN payroll_runs pr ON pr.id = l.run_id
         JOIN payroll_rubrics r ON r.company_id = pr.company_id AND r.codigo = l.codigo
         WHERE pr.company_id=? AND l.employee_id=? AND l.tipo='provento' AND r.{flag}=1
           AND pr.competence>=? AND pr.competence<=? AND pr.status != 'cancelado'""",
         (company_id, employee_id, comp_ini, comp_fim))
-    total = sum(float(r["valor"] or 0) for r in rows if str(r["codigo"]) not in _NAO_VARIAVEIS)
+    rows = [r for r in rows if str(r["codigo"]) not in _NAO_VARIAVEIS]
+    if not hora or not float(hora.get("valor_hora") or 0):
+        return r2(sum(float(r["valor"] or 0) for r in rows) / divisor)
+
+    vh = float(hora["valor_hora"])
+    pago: Dict[Any, float] = {}
+    novo: Dict[Any, float] = {}
+    total = 0.0
+    for r in rows:
+        cod, valor = str(r["codigo"]), float(r["valor"] or 0)
+        if cod in _HORAS_347 or cod == _DSR_HE:
+            if r["run_tipo"] != "mensal":
+                continue                       # diferença de dissídio: já coberta pelo salário-hora atual
+            if cod == _DSR_HE:
+                continue                       # tratado abaixo, na proporção das horas do mês
+            horas = _horas_da_referencia(r["referencia"])
+            if horas is None:
+                total += valor
+                continue
+            pct = float(hora[_HORAS_347[cod]])
+            fator = pct / 100 if cod == "0004" else 1 + pct / 100
+            atualizado = r2(horas * vh * fator)
+            pago[r["run_id"]] = pago.get(r["run_id"], 0.0) + valor
+            novo[r["run_id"]] = novo.get(r["run_id"], 0.0) + atualizado
+            total += atualizado
+        else:
+            total += valor
+    for r in rows:
+        if str(r["codigo"]) == _DSR_HE and r["run_tipo"] == "mensal":
+            p = pago.get(r["run_id"], 0.0)
+            total += r2(float(r["valor"] or 0) * novo[r["run_id"]] / p) if p > 0 else float(r["valor"] or 0)
     return r2(total / divisor)
 
 
