@@ -101,6 +101,10 @@ async function renderConventions(container) {
             <input type="number" id="convHoraExtra" class="form-control" value="50" step="0.01">
           </div>
           <div class="form-group">
+            <label>HE domingo/feriado (%)</label>
+            <input type="number" id="convHe100" class="form-control" value="100" step="0.01">
+          </div>
+          <div class="form-group">
             <label>VR Diário (R$)</label>
             <input type="number" id="convVR" class="form-control" value="0" step="0.01">
           </div>
@@ -108,6 +112,55 @@ async function renderConventions(container) {
         <div class="form-group">
           <label><input type="checkbox" id="convVT" checked> Vale-Transporte obrigatório</label>
         </div>
+        <fieldset style="border:1px solid var(--border,#ddd);border-radius:8px;padding:10px 12px;margin:8px 0">
+          <legend style="font-size:.85rem;padding:0 6px;width:auto">Regras aplicadas na folha</legend>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Adicional por tempo de serviço</label>
+              <select id="convAtsTipo" class="form-control">
+                <option value="">Não prevê</option>
+                <option value="anuenio">Anuênio (a cada ano)</option>
+                <option value="bienio">Biênio (a cada 2 anos)</option>
+                <option value="trienio">Triênio (a cada 3 anos)</option>
+                <option value="quinquenio">Quinquênio (a cada 5 anos)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>% por período</label>
+              <input type="number" id="convAtsPct" class="form-control" value="0" step="0.01" min="0">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Base do adicional</label>
+              <select id="convAtsBase" class="form-control">
+                <option value="salario">Salário do funcionário</option>
+                <option value="piso">Piso da categoria</option>
+                <option value="minimo">Salário mínimo</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Máximo de períodos (0 = sem limite)</label>
+              <input type="number" id="convAtsMax" class="form-control" value="0" min="0">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Mês da data-base</label>
+              <select id="convDataBase" class="form-control">
+                <option value="0">Não informado</option>
+                ${['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
+                  .map((m, i) => `<option value="${i + 1}">${m}</option>`).join('')}
+              </select>
+              <small class="text-muted">Dispensa sem justa causa nos 30 dias antes dela gera a indenização adicional (Lei 7.238/84, art. 9º).</small>
+            </div>
+            <div class="form-group">
+              <label>Meses para média de férias/13º/rescisão</label>
+              <input type="number" id="convMediaMeses" class="form-control" value="0" min="0" max="12">
+              <small class="text-muted">0 = padrão de 12 meses.</small>
+            </div>
+          </div>
+        </fieldset>
         <div class="form-group">
           <label>Observações / URL do arquivo</label>
           <textarea id="convObs" class="form-control" rows="2"></textarea>
@@ -184,6 +237,7 @@ function convOpenModal() {
   document.getElementById('convIntervalo').value = 60;
   document.getElementById('convNoturno').value = 20;
   document.getElementById('convHoraExtra').value = 50;
+  convSetRegras({});
   document.getElementById('convVR').value = 0;
   document.getElementById('convVT').checked = true;
   document.getElementById('convUfInput').value = 'SP';
@@ -206,10 +260,21 @@ function convEdit(r) {
   document.getElementById('convIntervalo').value = r.intervalo_jornada_min || 60;
   document.getElementById('convNoturno').value = r.adicional_noturno_pct || 20;
   document.getElementById('convHoraExtra').value = r.adicional_hora_extra_pct || 50;
+  convSetRegras(r);
   document.getElementById('convVR').value = r.vale_refeicao_diario || 0;
   document.getElementById('convVT').checked = !!r.vale_transporte;
   document.getElementById('convObs').value = r.observacoes || '';
   document.getElementById('convModal').style.display = 'flex';
+}
+
+function convSetRegras(r) {
+  document.getElementById('convHe100').value = r.he_100_pct || 100;
+  document.getElementById('convAtsTipo').value = r.ats_tipo || '';
+  document.getElementById('convAtsPct').value = r.ats_pct || 0;
+  document.getElementById('convAtsBase').value = r.ats_base || 'salario';
+  document.getElementById('convAtsMax').value = r.ats_max_periodos || 0;
+  document.getElementById('convDataBase').value = String(r.data_base_mes || 0);
+  document.getElementById('convMediaMeses').value = r.media_meses || 0;
 }
 
 function convCloseModal() { document.getElementById('convModal').style.display = 'none'; }
@@ -234,6 +299,13 @@ async function convSave() {
     vale_transporte: document.getElementById('convVT').checked ? 1 : 0,
     observacoes: document.getElementById('convObs').value,
     arquivo_url: '',
+    he_100_pct: parseFloat(document.getElementById('convHe100').value) || 100,
+    ats_tipo: document.getElementById('convAtsTipo').value,
+    ats_pct: parseFloat(document.getElementById('convAtsPct').value) || 0,
+    ats_base: document.getElementById('convAtsBase').value,
+    ats_max_periodos: parseInt(document.getElementById('convAtsMax').value) || 0,
+    data_base_mes: parseInt(document.getElementById('convDataBase').value) || 0,
+    media_meses: parseInt(document.getElementById('convMediaMeses').value) || 0,
   };
   try {
     if (id) {

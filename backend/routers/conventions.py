@@ -5,7 +5,7 @@ Permite pesquisar e registrar CCTs aplicáveis aos empregados da empresa.
 from datetime import date
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 try:
     from ..database import get_conn
@@ -55,6 +55,17 @@ class ConvencaoContrato(BaseModel):
     vale_transporte: int = 1
     observacoes: str = ""
     arquivo_url: str = ""
+    # Regras usadas pelo motor da folha (bloco 3 — CCT e categorias)
+    he_100_pct: float = Field(default=100.0, ge=0)
+    data_base_mes: int = Field(default=0, ge=0, le=12)          # 0 = não informado
+    ats_tipo: str = Field(default="", pattern="^(|anuenio|bienio|trienio|quinquenio)$")
+    ats_pct: float = Field(default=0.0, ge=0, le=100)
+    ats_base: str = Field(default="salario", pattern="^(salario|piso|minimo)$")
+    ats_max_periodos: int = Field(default=0, ge=0)              # 0 = sem limite
+    media_meses: int = Field(default=0, ge=0, le=12)            # 0 = padrão legal (12 meses)
+
+
+_CAMPOS = list(ConvencaoContrato.model_fields)
 
 
 class ConvencaoAlerta(BaseModel):
@@ -102,18 +113,12 @@ def create_convention(body: ConvencaoContrato, current_user: Dict[str, Any] = De
     conn = get_conn()
     company_id = current_user.get("company_id", 1)
     cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO cct_convencoes
-        (company_id, categoria, sindicato_empregados, sindicato_empregadores, uf, municipio,
-         data_inicio, data_fim, piso_salarial, reajuste_pct, jornada_semanal,
-         intervalo_jornada_min, adicional_noturno_pct, adicional_hora_extra_pct,
-         vale_refeicao_diario, vale_transporte, observacoes, arquivo_url)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    """, (company_id, body.categoria, body.sindicato_empregados, body.sindicato_empregadores,
-          body.uf, body.municipio, body.data_inicio, body.data_fim,
-          body.piso_salarial, body.reajuste_pct, body.jornada_semanal,
-          body.intervalo_jornada_min, body.adicional_noturno_pct, body.adicional_hora_extra_pct,
-          body.vale_refeicao_diario, body.vale_transporte, body.observacoes, body.arquivo_url))
+    dados = body.model_dump()
+    cur.execute(
+        f"INSERT INTO cct_convencoes (company_id, {', '.join(_CAMPOS)}) "
+        f"VALUES (?, {', '.join('?' for _ in _CAMPOS)})",
+        [company_id, *(dados[c] for c in _CAMPOS)],
+    )
     cid = cur.lastrowid
     conn.commit()
     conn.close()
@@ -124,19 +129,14 @@ def create_convention(body: ConvencaoContrato, current_user: Dict[str, Any] = De
 def update_convention(cid: int, body: ConvencaoContrato, current_user: Dict[str, Any] = Depends(get_current_user)):
     conn = get_conn()
     company_id = current_user.get("company_id", 1)
-    conn.execute("""
-        UPDATE cct_convencoes SET
-        categoria=?, sindicato_empregados=?, sindicato_empregadores=?, uf=?, municipio=?,
-        data_inicio=?, data_fim=?, piso_salarial=?, reajuste_pct=?, jornada_semanal=?,
-        intervalo_jornada_min=?, adicional_noturno_pct=?, adicional_hora_extra_pct=?,
-        vale_refeicao_diario=?, vale_transporte=?, observacoes=?, arquivo_url=?
-        WHERE id=? AND company_id=?
-    """, (body.categoria, body.sindicato_empregados, body.sindicato_empregadores,
-          body.uf, body.municipio, body.data_inicio, body.data_fim,
-          body.piso_salarial, body.reajuste_pct, body.jornada_semanal,
-          body.intervalo_jornada_min, body.adicional_noturno_pct, body.adicional_hora_extra_pct,
-          body.vale_refeicao_diario, body.vale_transporte, body.observacoes, body.arquivo_url,
-          cid, company_id))
+    dados = body.model_dump()
+    cur = conn.execute(
+        f"UPDATE cct_convencoes SET {', '.join(f'{c}=?' for c in _CAMPOS)} WHERE id=? AND company_id=?",
+        [*(dados[c] for c in _CAMPOS), cid, company_id],
+    )
+    if not cur.rowcount:
+        conn.close()
+        raise HTTPException(404, "Convenção não encontrada.")
     conn.commit()
     conn.close()
     return {"message": "Convenção atualizada."}

@@ -2968,6 +2968,14 @@ ESOCIAL_COLUNAS_EXTRAS = {
     ],
     "autonomous_workers": [("data_nascimento", "TEXT DEFAULT ''")],  # S-1200 do contribuinte individual
     "payroll_runs": [("data_pagamento", "TEXT DEFAULT ''")],  # S-1210
+    # Regras da convenção coletiva aplicadas na folha (bloco 3 da paridade)
+    "cct_convencoes": [
+        ("he_100_pct", "REAL DEFAULT 100.0"), ("data_base_mes", "INTEGER DEFAULT 0"),
+        ("ats_tipo", "TEXT DEFAULT ''"), ("ats_pct", "REAL DEFAULT 0.0"), ("ats_base", "TEXT DEFAULT 'salario'"),
+        ("ats_max_periodos", "INTEGER DEFAULT 0"), ("media_meses", "INTEGER DEFAULT 0"),
+    ],
+    # Convenção aplicada e categorias especiais (professor: hora-aula × aulas semanais)
+    "employees": [("cct_id", "INTEGER"), ("categoria_especial", "TEXT DEFAULT ''"), ("aulas_semanais", "REAL DEFAULT 0")],
 }
 
 

@@ -25,7 +25,7 @@ try:
     from ..services.formula_engine import FormulaError, FUNCOES as FORMULA_FUNCOES
     from ..services.ficha_registro import gerar_ficha_registro_html
     from ..services.folha_impressao import gerar_folha_html, gerar_recibos_html, gerar_holerite_unico_html, competencia_extenso
-    from ..services import holerite_email, relatorios_folha, modelos_documentos
+    from ..services import holerite_email, relatorios_folha, modelos_documentos, cct_regras
 except ImportError:
     from database import get_conn
     from auth import get_current_user, log_audit
@@ -40,7 +40,7 @@ except ImportError:
     from services.formula_engine import FormulaError, FUNCOES as FORMULA_FUNCOES
     from services.ficha_registro import gerar_ficha_registro_html
     from services.folha_impressao import gerar_folha_html, gerar_recibos_html, gerar_holerite_unico_html, competencia_extenso
-    from services import holerite_email, relatorios_folha, modelos_documentos
+    from services import holerite_email, relatorios_folha, modelos_documentos, cct_regras
 
 router = APIRouter(prefix="/api/dp", tags=["Departamento Pessoal"])
 
@@ -86,6 +86,8 @@ def create_employee(data: EmployeeCreate, current_user: Dict[str, Any] = Depends
         conn.close()
         raise HTTPException(status_code=400, detail="CPF já cadastrado.")
 
+    _validar_cct_categoria(conn, company_id, {"salary": data.salary, "is_prolabore": data.is_prolabore,
+                                              **data.model_dump(include=set(EmployeeFicha.model_fields))})
     matricula = data.matricula or f"MAT-{uuid.uuid4().hex[:6].upper()}"
     cur = conn.cursor()
     cur.execute("""
@@ -117,6 +119,24 @@ def create_employee(data: EmployeeCreate, current_user: Dict[str, Any] = Depends
     return row
 
 
+def _validar_cct_categoria(conn, company_id: int, emp: Dict[str, Any]) -> None:
+    """Convenção da própria empresa; salário zero só para remuneração variável; professor com aulas."""
+    cct_id = emp.get("cct_id")
+    if cct_id and not conn.execute("SELECT 1 FROM cct_convencoes WHERE id = ? AND company_id = ?",
+                                   (cct_id, company_id)).fetchone():
+        conn.close()
+        raise HTTPException(status_code=422, detail="Convenção coletiva não encontrada nesta empresa.")
+    tipo = str(emp.get("tipo_salario") or "5")
+    if not float(emp.get("salary") or 0) and tipo not in ("6", "7") and not emp.get("is_prolabore"):
+        conn.close()
+        raise HTTPException(status_code=422, detail="Informe o salário. Salário zero só para remuneração "
+                                                    "variável (tipo de salário 'tarefa' ou 'só comissões').")
+    if (emp.get("categoria_especial") or "") == "professor" and not float(emp.get("aulas_semanais") or 0):
+        conn.close()
+        raise HTTPException(status_code=422, detail="Professor: informe o número de aulas por semana "
+                                                    "(o salário é o valor da hora-aula).")
+
+
 @router.put("/employees/{emp_id}")
 def update_employee(
     emp_id: int, data: EmployeeUpdate,
@@ -138,6 +158,8 @@ def update_employee(
         conn.close()
         raise HTTPException(status_code=400, detail="CPF já cadastrado em outro funcionário.")
 
+    atual = dict(conn.execute("SELECT * FROM employees WHERE id = ?", (emp_id,)).fetchone())
+    _validar_cct_categoria(conn, company_id, {**atual, **payload})
     fields, values = [], []
     for field, value in payload.items():
         if field in ("active", "is_prolabore"):
@@ -1452,11 +1474,12 @@ def _calc_ferias(conn, company_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
     fim = inicio + timedelta(days=dias_gozo - 1)
     limite = date.fromisoformat(periodo["limite_concessivo"])
     dias_dobro = max(0, min(dias_gozo, (fim - max(inicio - timedelta(days=1), limite)).days))
-    media = payroll_special.media_variaveis(conn, company_id, emp["id"], periodo["inicio"][:7], periodo["fim"][:7],
-                                            "incide_ferias", 12)
     competencia = inicio.strftime("%Y-%m")
     tables = load_tables(conn, company_id, competencia)
     ctx = payroll_special.contexto_funcionario(conn, company_id, emp, inicio)
+    m_ini, m_div = cct_regras.janela_media(ctx.cct, periodo["inicio"][:7], periodo["fim"][:7], 12)
+    media = payroll_special.media_variaveis(conn, company_id, emp["id"], m_ini, periodo["fim"][:7],
+                                            "incide_ferias", m_div)
     adiant_13 = 0.0
     avisos_13 = []
     if data.get("adiantar_13") in (True, 1, "1", "true", "on"):
@@ -1942,6 +1965,17 @@ def _calc_rescisao(conn, company_id: int, data: Dict[str, Any]) -> Dict[str, Any
     ctx = payroll_special.contexto_funcionario(conn, company_id, emp, deslig)
     if data.get("_salario"):
         ctx.salario = float(data["_salario"])
+    if ctx.cct and int(float(ctx.cct.get("media_meses") or 0)) > 0:
+        m_ini, m_div = cct_regras.janela_media(ctx.cct, doze_ini, anterior, 12)
+        media_12 = payroll_special.media_variaveis(conn, company_id, eid, m_ini, anterior, "incide_ferias", m_div)
+        avisos_extra.append(f"Médias de férias e aviso pelos últimos {m_div} meses, conforme a convenção coletiva.")
+    plano.pop("indenizacao_data_base", None)
+    if tipo == "sem_justa_causa" and data.get("indenizacao_data_base") not in (False, 0, "0", "false"):
+        db = cct_regras.indenizacao_data_base(ctx.data_base_mes, date.fromisoformat(plano["data_projetada"]))
+        if db:
+            plano["indenizacao_data_base"] = db.strftime("%m/%Y")
+            avisos_extra.append(f"Dispensa (com a projeção do aviso) nos 30 dias antes da data-base {db.strftime('%m/%Y')}: "
+                                "indenização adicional de 1 salário (Lei 7.238/84, art. 9º).")
     res = payroll_special.calc_rescisao(ctx, tables, payroll_engine.load_rubrics(conn, company_id), plano,
                                         media_13=media_13, media_ferias=media_12, media_aviso=media_12,
                                         adiantamento_13=adiant_13, saldo_fgts=saldo_fgts,

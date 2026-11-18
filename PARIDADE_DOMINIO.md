@@ -148,7 +148,7 @@ Legenda: ✅ existe no Cortex · ⚠️ parcial · ❌ falta. O número entre pa
 |---|---|
 | Empregados (139) | ✅ Ficha completa de 8 abas, S-2200, histórico salarial. ⚠️ Faltam: nome social, campos livres, copiar cadastro, alteração em grupo |
 | Rubricas (160) e Bases de Cálculo (16) | ✅ Rubricas com incidências e fórmulas, rubricas fixas por funcionário. ⚠️ Faltam: base de cálculo nomeada e reutilizável; rubricas-padrão de mercado como anuênio, triênio, quinquênio, quebra de caixa, sobreaviso, gratificação e dupla função |
-| Sindicatos (106) | ✅ CCT, contribuição assistencial e oposição, repasse, piso. ⚠️ Faltam parâmetros por CCT: adicional por tempo de serviço, médias de férias, 13º e rescisão, indenização especial, multa da data-base (art. 9º da Lei 7.238), dias para pagamento da rescisão, estabilidades da convenção |
+| Sindicatos (106) | ✅ CCT, contribuição assistencial e oposição, repasse, piso. ✅ (2026-11-18) **Regras da CCT aplicadas na folha**: HE em dia útil e domingo/feriado e adicional noturno (nunca abaixo da lei), adicional por tempo de serviço (anuênio/biênio/triênio/quinquênio, base salário/piso/mínimo, teto de períodos), meses para médias de férias/13º/rescisão e indenização da data-base (Lei 7.238/84 art. 9º; Súmulas 182 e 314); convenção escolhida no cadastro ou a única vigente. ⚠️ Faltam: dias para pagamento da rescisão e estabilidades da convenção |
 | Contribuintes, Estagiários (76) | ✅ Autônomos/RPA (S-2300), estágio, pró-labore. ⚠️ Faltam: MEI prestador, cooperado, dirigente sindical |
 | Serviços (51) | ⚠️ S-1005 e S-1020 existem. Faltam: tomador de serviço, empreitada, obra própria (CNO), alocação de empregado por serviço, trabalho temporário |
 | Tabelas (14) | ✅ Tabelas fiscais por ano editáveis (INSS, IRRF, salário mínimo, salário-família). ⚠️ Faltam: IRRF exclusivo de PLR, salário mínimo estadual |
@@ -160,11 +160,11 @@ Legenda: ✅ existe no Cortex · ⚠️ parcial · ❌ falta. O número entre pa
 | Menu Domínio | Cortex |
 |---|---|
 | Cálculo (39): mensal, adiantamento, complementar | ✅ Mensal, adiantamento, complementar, dissídio. ❌ Faltam: folha de PLR, semanalista, mais de um adiantamento no mês |
-| Lançamentos (102) | ✅ Lançamento por rubrica, por funcionário e em lote, horas do ponto. ⚠️ Faltam: lançamento fixo com data-fim, DSR sobre comissão, faltas parciais em horas com DSR na semana |
+| Lançamentos (102) | ✅ Comissões com DSR e garantia mínima (mínimo ou piso). ✅ Lançamento por rubrica, por funcionário e em lote, horas do ponto. ⚠️ Faltam: lançamento fixo com data-fim, faltas parciais em horas com DSR na semana |
 | Férias (54) | ✅ Individual com períodos, abono, dobro, médias, 13º nas férias e perda por afastamento ou faltas. ❌ Faltam: **programação de férias**, **férias em grupo e coletivas calculadas**, fracionamento em até 3 períodos (art. 134 §1º), antecipação da Lei 14.457 |
 | Rescisões (69) | ✅ Individual com TRCT, aviso, multa FGTS e 13º/férias. ✅ (2026-11-18) **Rescisão complementar** (dissídio/CCT com recálculo por diferença, multa do art. 477, indenização da data-base, verbas avulsas), **rescisão em grupo** e **aviso prévio como processo** (registrar, carta, cancelar por reconsideração, redução 2h/7 dias, proporcional indenizado). ❌ Faltam: transferência entre empresas e filiais, morte, força maior |
 | Afastamentos (46) | ✅ Afastamentos com S-2230, atestados, CAT. ⚠️ Faltam: prorrogação de licença-maternidade, limbo previdenciário, declaração de último dia trabalhado |
-| Alteração Salarial (14) | ⚠️ Histórico salarial e dissídio existem. Faltam: alteração em grupo, troca de categoria (mensalista, horista, comissionado) |
+| Alteração Salarial (14) | ⚠️ Histórico salarial e dissídio existem. ✅ (2026-11-18) Categorias no cadastro: mensalista, horista, diarista, semanal, quinzenal, tarefa, só comissões e professor (hora-aula × aulas × 4,5 + DSR 1/6). Faltam: alteração em grupo |
 | Rotinas Automáticas (25) | ❌ Agendar cálculo da folha, recibos, guias e envios ao eSocial |
 | RPA (8), Pró-labore | ✅ |
 | Intermitente: convocações (3) | ❌ |
@@ -199,7 +199,7 @@ Legenda: ✅ existe no Cortex · ⚠️ parcial · ❌ falta. O número entre pa
 ### Prioridade sugerida para as lacunas
 1. **Uso diário:** parâmetros da folha por empresa · programação de férias, férias em grupo e coletivas · rescisão complementar e em grupo, aviso prévio como processo · holerite por e-mail · relação de líquidos e relatórios de folha.
 2. ✅ **Documentos (concluído em 2026-11-18):** pacote de modelos (contratos, aviso e abono de férias, salário-família, VT, termos), personalizável por empresa.
-3. **Regras de CCT e categorias:** adicional por tempo de serviço, médias por CCT, multa da data-base, comissionados com garantia mínima, horista e professor.
+3. ✅ **Regras de CCT e categorias (concluído em 2026-11-18):** adicional por tempo de serviço, médias por CCT, indenização da data-base, comissionados com garantia mínima, horista e professor. Pendentes: média de HE por quantidade de horas (Súmula 347) e HE do comissionista só com o adicional (Súmula 340).
 4. **Benefícios:** VT automático e compra, plano de saúde por faixa etária e coparticipação, consignado.
 5. **Automação e utilitários:** rotinas automáticas, alterações e exclusões em grupo, acerto de data de pagamento, baixa de pagamentos.
 6. **Menor uso:** PLR, intermitente, trabalho temporário e tomador, transparência salarial, demonstrativos folha × eSocial.

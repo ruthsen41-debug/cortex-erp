@@ -39,6 +39,7 @@ TIPOS_INSTRUMENTO = {
 # Rubricas de sistema proporcionais ao salário (recebem o percentual do dissídio).
 # Insalubridade fica de fora: é calculada sobre o salário mínimo.
 CODIGOS_SALARIAIS = {"0001", "0002", "0003", "0004", "0006", "0011", "0040",
+                     "0015", "0019",                                   # ATS, DSR do professor
                      "0008", "0009", "0030", "0031", "0032",          # férias, 1/3, abono
                      "0106", "0107", "0108"}                           # faltas, DSR perdido, atrasos (descontos)
 _VARIAVEIS_SALARIO = ("salario_base", "salario_dia", "salario_hora")

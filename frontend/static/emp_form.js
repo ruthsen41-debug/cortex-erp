@@ -34,7 +34,9 @@
     experiencia_dias: [[0, '—'], [30, '30 dias'], [45, '45 dias'], [60, '60 dias'], [90, '90 dias']],
     experiencia_prorrogacao: [[0, 'Sem prorrogação'], [30, '+30 dias'], [45, '+45 dias'], [60, '+60 dias']],
     tipo_salario: [['5', 'Mensalista'], ['1', 'Horista'], ['2', 'Diarista'], ['3', 'Semanal'], ['4', 'Quinzenal'],
-      ['6', 'Tarefa'], ['7', 'Não aplicável']],
+      ['6', 'Tarefa'], ['7', 'Só comissões / variável']],
+    categoria_especial: [['', 'Nenhuma'], ['professor', 'Professor (hora-aula)']],
+    cct_id: [[0, 'Automática (convenção vigente)']],
     forma_pagamento: [['deposito', 'Depósito em conta'], ['pix', 'PIX'], ['cheque', 'Cheque'], ['dinheiro', 'Dinheiro']],
     jornada_tipo: [['integral', 'Integral'], ['parcial', 'Tempo parcial']],
     escala: [['', '—'], ['5x2', '5x2 (segunda a sexta)'], ['6x1', '6x1'], ['12x36', '12x36'], ['4x2', '4x2'],
@@ -97,12 +99,15 @@
       ['funcao', 'Função', 'text'], ['department', 'Departamento', 'text'],
       ['centro_custo', 'Centro de custo', 'text'], ['local_trabalho', 'Local de trabalho', 'text', null, 3],
       ['_h', 'Sindicato'], ['sindicato_nome', 'Sindicato', 'text', null, 2], ['sindicato_cnpj', 'CNPJ do sindicato', 'text'],
+      ['cct_id', 'Convenção coletiva', 'select', OPT.cct_id, 2],
       ['data_base_mes', 'Data-base', 'select', MESES],
       ['contribuicao_sindical', 'Contribuição sindical autorizada', 'select', SIM_NAO, 2],
       ['is_prolabore', 'Pró-labore (sócio)', 'select', SIM_NAO, 2],
     ]},
     { id: 'salario', label: 'Salário e jornada', icon: 'banknote', fields: [
       ['salary', 'Salário base (R$) *', 'number'], ['tipo_salario', 'Tipo de salário', 'select', OPT.tipo_salario],
+      ['categoria_especial', 'Categoria especial', 'select', OPT.categoria_especial],
+      ['aulas_semanais', 'Aulas por semana (professor)', 'number'],
       ['forma_pagamento', 'Forma de pagamento', 'select', OPT.forma_pagamento],
       ['adiantamento_pct', 'Adiantamento (%)', 'number'],
       ['vt_monthly', 'Vale-transporte mensal (R$)', 'number'],
@@ -130,9 +135,9 @@
     ]},
   ];
 
-  const NUMERIC = new Set(['salary', 'vt_monthly', 'adiantamento_pct', 'horas_semana']);
+  const NUMERIC = new Set(['salary', 'vt_monthly', 'adiantamento_pct', 'horas_semana', 'aulas_semanais']);
   const INTS = new Set(['primeiro_emprego', 'experiencia_dias', 'experiencia_prorrogacao', 'contribuicao_sindical',
-    'periculosidade', 'fgts_aniversario', 'is_prolabore', 'dependents', 'filhos_sal_familia']);
+    'periculosidade', 'fgts_aniversario', 'is_prolabore', 'dependents', 'filhos_sal_familia', 'cct_id']);
   const DEFAULTS = { sexo: 'M', estado_civil: '1', raca_cor: '6', grau_instrucao: '07', nacionalidade: 'Brasileira',
     pais_nascimento: '105', tipo_admissao: '1', ind_admissao: '1', esocial_category: '101', regime_previdenciario: '1',
     tipo_contrato: 'indeterminado', tipo_salario: '5', forma_pagamento: 'deposito', jornada_tipo: 'integral',
@@ -263,8 +268,19 @@
     const body = document.getElementById('ef-body'); if (body) body.scrollTop = 0;
   };
 
+  async function carregarConvencoes() {
+    try {
+      const r = await fetch('/api/conventions/list', { headers: authHeaders() });
+      if (!r.ok) return;
+      const lista = await r.json();
+      OPT.cct_id.splice(1, OPT.cct_id.length, ...lista.map((c) =>
+        [c.id, `${c.categoria} · ${c.uf || ''}${c.status === 'vencida' ? ' (vencida)' : ''}`]));
+    } catch { /* mantém só a opção automática */ }
+  }
+
   async function openEmpForm(id) {
     state.tab = 'pessoais';
+    await carregarConvencoes();
     state.deps = [];
     if (id) {
       let emp = (typeof dpEmployees !== 'undefined' ? dpEmployees : []).find((e) => e.id === id);
@@ -361,7 +377,10 @@
     if (e.pis_pasep && !pisValido(e.pis_pasep)) return falha('pis_pasep', 'PIS/PASEP inválido. Confira os dígitos.');
     if (!e.admission_date) return falha('admission_date', 'Informe a data de admissão.');
     if (!e.role) return falha('role', 'Informe o cargo.');
-    if (!(e.salary > 0)) return falha('salary', 'Informe o salário base.');
+    if (!(e.salary > 0) && !['6', '7'].includes(String(e.tipo_salario)) && !e.is_prolabore)
+      return falha('salary', "Informe o salário base. Salário zero só para tipo 'Tarefa' ou 'Só comissões'.");
+    if (e.categoria_especial === 'professor' && !(e.aulas_semanais > 0))
+      return falha('aulas_semanais', 'Professor: informe as aulas por semana (o salário base é o valor da hora-aula).');
     if (e.birth_date && e.admission_date) {
       const idade = (new Date(e.admission_date) - new Date(e.birth_date)) / (365.25 * 864e5);
       if (idade < 14) return falha('birth_date', 'Idade na admissão menor que 14 anos.');

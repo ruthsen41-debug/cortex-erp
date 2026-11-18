@@ -22,10 +22,12 @@ try:
     from .formula_engine import FormulaError, evaluate, validate
     from .payroll_tables import TaxTables, load_tables
     from . import escalas as _escalas
+    from . import cct_regras as _cct
 except ImportError:  # execução com backend/ como raiz
     from services.formula_engine import FormulaError, evaluate, validate
     from services.payroll_tables import TaxTables, load_tables
     from services import escalas as _escalas
+    from services import cct_regras as _cct
 
 
 # ── Rubricas de sistema ──────────────────────────────────────────────────────
@@ -44,6 +46,12 @@ SYSTEM_RUBRICS: Dict[str, Tuple[str, str, str, int, int, int, str]] = {
     # Lei 8.213/91 art. 72 §1º: pago pela empresa e compensado nas contribuições; integra
     # o salário de contribuição (Lei 8.212/91 art. 28 §2º), o FGTS e o IRRF.
     "SAL_MATERNIDADE": ("0014", "Salário-Maternidade", "provento", 1, 1, 1, "4050"),
+    # Convenção coletiva e categorias (bloco 3)
+    "ATS":           ("0015", "Adicional por Tempo de Serviço", "provento", 1, 1, 1, "1206"),
+    "COMISSAO":      ("0016", "Comissões", "provento", 1, 1, 1, "1207"),
+    "DSR_COMISSAO":  ("0017", "DSR sobre Comissões", "provento", 1, 1, 1, "1002"),
+    "GARANTIA_MIN":  ("0018", "Complemento de Garantia Mínima", "provento", 1, 1, 1, "1099"),
+    "DSR_PROFESSOR": ("0019", "DSR do Professor (1/6)", "provento", 1, 1, 1, "1002"),
     "INSS":          ("0100", "INSS", "desconto", 0, 0, 0, "9201"),
     "IRRF":          ("0101", "IRRF", "desconto", 0, 0, 0, "9203"),
     "VT":            ("0102", "Vale-Transporte", "desconto", 0, 0, 0, "9216"),
@@ -88,6 +96,8 @@ SYSTEM_RUBRICS: Dict[str, Tuple[str, str, str, int, int, int, str]] = {
 _SYSTEM_CODES = {v[0]: k for k, v in SYSTEM_RUBRICS.items()}
 # Rubricas de sistema que aceitam lançamento manual de QUANTIDADE (horas).
 _HOUR_CODES = {"0002": "he50", "0003": "he100", "0004": "horas_noturnas"}
+# Rubricas de sistema que aceitam lançamento manual de VALOR (comissões do mês).
+_VALUE_CODES = {"0016": "comissoes"}
 
 INSALUBRIDADE_GRAUS = {"minimo": 0.10, "medio": 0.20, "maximo": 0.40}
 PERICULOSIDADE_PCT = 0.30
@@ -160,6 +170,16 @@ class EmployeeInput:
     dias_maternidade: int = 0       # dias de salário-maternidade (compensável) no mês
     jornada_parcial: bool = False   # CLT art. 58-A
     horas_semana: float = 44.0
+    # Convenção coletiva e categoria (bloco 3)
+    he50_pct: float = 50.0
+    he100_pct: float = 100.0
+    noturno_pct: float = 20.0
+    ats_valor: float = 0.0          # adicional por tempo de serviço, valor mensal cheio
+    ats_ref: str = ""
+    piso: float = 0.0               # piso da convenção (mensal, para 44h)
+    categoria: str = "mensalista"   # mensalista, horista, diarista, semanal, quinzenal, tarefa, variavel, professor
+    salario_ref: str = ""           # como o salário mensal foi obtido (horista, professor...)
+    comissoes: float = 0.0
 
 
 # ── Cálculos de imposto ──────────────────────────────────────────────────────
@@ -322,10 +342,13 @@ def calculate_employee(
     # Lançamentos manuais em rubricas de horas somam à quantidade vinda do ponto.
     horas = {"he50": float(inp.he50), "he100": float(inp.he100), "horas_noturnas": float(inp.horas_noturnas)}
     custom: List[Dict[str, Any]] = []
+    comissoes = float(inp.comissoes or 0)
     for lanc in inp.lancamentos:
         cod = str(lanc.get("codigo", ""))
         if cod in _HOUR_CODES and not float(lanc.get("valor") or 0):
             horas[_HOUR_CODES[cod]] += float(lanc.get("quantidade") or 0)
+        elif cod in _VALUE_CODES:
+            comissoes += float(lanc.get("valor") or 0) * (float(lanc.get("quantidade") or 0) or 1.0)
         elif cod in _SYSTEM_CODES and cod not in _HOUR_CODES:
             avisos.append(f"Lançamento na rubrica de sistema {cod} ignorado (ela é calculada automaticamente).")
         else:
@@ -341,21 +364,55 @@ def calculate_employee(
         sys("PROLABORE", salario * prop, f"{dias}d")
         adicionais = 0.0
     else:
-        sys("SALARIO", salario * prop, f"{dias}d")
+        if inp.categoria == "professor":
+            # CLT art. 320: aulas × 4,5 semanas; DSR de 1/6 (Súmula 351 TST). O salário mensal já soma os dois.
+            sys("SALARIO", salario * 6 / 7 * prop, f"{dias}d", nome="Aulas (hora-aula × aulas × 4,5 semanas)")
+            sys("DSR_PROFESSOR", salario / 7 * prop, "1/6")
+        elif inp.categoria == "horista":
+            sys("SALARIO", salario * prop, f"{horas_mes * prop:g}h", nome="Salário Horista (horas + DSR)")
+        else:
+            sys("SALARIO", salario * prop, f"{dias}d")
+        if inp.ats_valor:
+            sys("ATS", float(inp.ats_valor) * prop, inp.ats_ref)
         insal_cheio, peric_cheio, grau, conflito = adicionais_fixos(
             salario, inp.insalubridade_grau, inp.periculosidade, tables)
         if conflito:
             avisos.append("Insalubridade e periculosidade não acumulam: foi pago o adicional de maior valor.")
         sys("INSALUBRIDADE", insal_cheio * prop, f"{int(grau * 100)}% s/ mínimo")
         sys("PERICULOSIDADE", peric_cheio * prop, "30%")
-        adicionais = insal_cheio + peric_cheio
+        adicionais = insal_cheio + peric_cheio + float(inp.ats_valor or 0)
 
+        # Hora extra e adicional noturno com os percentuais da convenção (mínimos legais: 50% e 20%).
+        p50, p100, pnot = float(inp.he50_pct or 50), float(inp.he100_pct or 100), float(inp.noturno_pct or 20)
         valor_hora = (salario + adicionais) / horas_mes
-        v_extras = sys("HE50", valor_hora * 1.5 * horas["he50"], f"{horas['he50']:g}h")
-        v_extras += sys("HE100", valor_hora * 2.0 * horas["he100"], f"{horas['he100']:g}h")
-        v_extras += sys("NOTURNO", valor_hora * 0.20 * horas["horas_noturnas"], f"{horas['horas_noturnas']:g}h")
+        v_extras = sys("HE50", valor_hora * (1 + p50 / 100) * horas["he50"], f"{horas['he50']:g}h",
+                       nome=None if p50 == 50 else f"Hora Extra {p50:g}%")
+        v_extras += sys("HE100", valor_hora * (1 + p100 / 100) * horas["he100"], f"{horas['he100']:g}h",
+                        nome=None if p100 == 100 else f"Hora Extra {p100:g}%")
+        v_extras += sys("NOTURNO", valor_hora * pnot / 100 * horas["horas_noturnas"], f"{horas['horas_noturnas']:g}h",
+                        nome=None if pnot == 20 else f"Adicional Noturno {pnot:g}%")
         if v_extras and inp.dias_uteis > 0 and inp.dias_dsr > 0:
             sys("DSR_HE", v_extras / inp.dias_uteis * inp.dias_dsr, f"{inp.dias_dsr}d")
+
+        # Comissões do mês e DSR sobre elas (Lei 605/49 art. 7º; Súmula 27 TST)
+        if comissoes > 0:
+            v_com = sys("COMISSAO", comissoes, "")
+            if inp.dias_uteis > 0 and inp.dias_dsr > 0:
+                sys("DSR_COMISSAO", v_com / inp.dias_uteis * inp.dias_dsr, f"{inp.dias_dsr}d")
+        # Garantia mínima de quem ganha comissão (CF art. 7º, VII; Lei 8.716/93): mínimo ou piso da convenção.
+        if comissoes > 0 or inp.categoria == "variavel":
+            garantia = max(tables.salario_minimo, float(inp.piso or 0)) / 220.0 * horas_mes * prop
+            cods = {SYSTEM_RUBRICS[k][0] for k in ("SALARIO", "COMISSAO", "DSR_COMISSAO")}
+            recebido = sum(l["valor"] for l in lines if l["codigo"] in cods)
+            if recebido + 0.005 < garantia:
+                sys("GARANTIA_MIN", garantia - recebido, f"mín. R$ {garantia:.2f}")
+                avisos.append("Remuneração abaixo da garantia mínima: pago complemento até o mínimo/piso.")
+
+        # Piso da convenção, proporcional à jornada
+        if inp.piso and inp.categoria not in ("variavel", "tarefa") and salario:
+            piso_prop = float(inp.piso) / 220.0 * horas_mes
+            if salario + 0.005 < piso_prop:
+                avisos.append(f"Salário abaixo do piso da convenção (R$ {piso_prop:.2f} para a jornada).")
 
     if dias_mat and not prolabore:
         # Remuneração integral (salário + adicionais fixos) proporcional aos dias de licença.
@@ -782,6 +839,9 @@ def build_inputs(
         ini, f = _parse_date(r.get("data_inicio")), _parse_date(r.get("data_fim"))
         return (ini is None or ini <= fim) and (f is None or f >= inicio)
 
+    ccts_conv = _cct.carregar_ccts(conn, company_id)
+    tables_sm = load_tables(conn, company_id, competencia).salario_minimo if ccts_conv else 0.0
+
     inputs: List[EmployeeInput] = []
     for e in employees:
         eid = e["id"]
@@ -887,10 +947,20 @@ def build_inputs(
                     base_outros += float(oe.get("salary") or 0)
 
         horas_semana = float(e.get("horas_semana") or 44) or 44.0
+        cct = _cct.cct_do_funcionario(ccts_conv, e, fim)
+        p50, p100, pnot = _cct.percentuais(cct)
+        sal_mensal, sal_ref = _cct.salario_mensal(e)
+        ats_valor, ats_ref = _cct.adicional_tempo_servico(cct, adm, fim, sal_mensal, tables_sm)
+        categoria = ("professor" if (e.get("categoria_especial") or "") == "professor"
+                     else _cct.TIPOS_SALARIO.get(str(e.get("tipo_salario") or "5"), "mensalista"))
         inputs.append(EmployeeInput(
             employee_id=eid,
             nome=e.get("name") or "",
-            salario=float(e.get("salary") or 0),
+            salario=sal_mensal,
+            he50_pct=p50, he100_pct=p100, noturno_pct=pnot,
+            ats_valor=ats_valor, ats_ref=ats_ref,
+            piso=float((cct or {}).get("piso_salarial") or 0),
+            categoria=categoria, salario_ref=sal_ref,
             dependentes=int(e.get("dependents") or 0),
             is_prolabore=bool(e.get("is_prolabore")),
             horas_mes=round(horas_semana * 5, 2),

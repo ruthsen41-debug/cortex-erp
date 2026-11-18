@@ -17,11 +17,11 @@ from datetime import date, timedelta
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 try:
-    from . import payroll_engine as pe
-    from .payroll_tables import TaxTables
+    from . import payroll_engine as pe, cct_regras
+    from .payroll_tables import TaxTables, load_tables
 except ImportError:  # execução com backend/ como raiz
-    from services import payroll_engine as pe
-    from services.payroll_tables import TaxTables
+    from services import payroll_engine as pe, cct_regras
+    from services.payroll_tables import TaxTables, load_tables
 
 r2 = pe.r2
 
@@ -48,11 +48,15 @@ class Contexto:
     insalubridade_grau: str = ""
     periculosidade: bool = False
     pensoes: List[Dict[str, Any]] = field(default_factory=list)
+    ats: float = 0.0                 # adicional por tempo de serviço da convenção (valor mensal)
+    ats_ref: str = ""
+    cct: Optional[Dict[str, Any]] = None
+    data_base_mes: int = 0
 
     def remuneracao(self, tables: TaxTables) -> float:
-        """Salário + adicionais fixos (insalubridade/periculosidade): base de 13º, férias e aviso."""
+        """Salário + adicionais fixos (insalubridade, periculosidade e tempo de serviço): base de 13º, férias e aviso."""
         insal, peric, _, _ = pe.adicionais_fixos(self.salario, self.insalubridade_grau, self.periculosidade, tables)
-        return self.salario + insal + peric
+        return self.salario + insal + peric + self.ats
 
 
 class _Folha:
@@ -354,16 +358,22 @@ def calc_rescisao(ctx: Contexto, tables: TaxTables, rubrics: Optional[Dict[str, 
                   outros_descontos: float = 0.0) -> Dict[str, Any]:
     f = _Folha(rubrics)
     insal, peric, grau, _ = pe.adicionais_fixos(ctx.salario, ctx.insalubridade_grau, ctx.periculosidade, tables)
-    rem = ctx.salario + insal + peric
+    rem = ctx.salario + insal + peric + ctx.ats
     dia = rem / 30.0
 
     # Grupo mensal: saldo de salário, adicionais e aviso prévio
     sd = plano["saldo_dias"]
     f.add("SALDO_SALARIO", ctx.salario / 30.0 * sd, f"{sd}d")
+    f.add("ATS", ctx.ats / 30.0 * sd, ctx.ats_ref)
     f.add("INSALUBRIDADE", insal / 30.0 * sd, f"{int(grau * 100)}% s/ mínimo")
     f.add("PERICULOSIDADE", peric / 30.0 * sd, "30%")
     ai = plano["aviso_indenizado_dias"]
     f.add("AVISO_IND", (rem + media_aviso) / 30.0 * ai, f"{ai}d")
+
+    # Indenização adicional da data-base (Lei 7.238/84 art. 9º): 1 salário mensal com os adicionais
+    # mensais (Súmula 242 TST), quando a dispensa projetada cai nos 30 dias anteriores à data-base.
+    if plano.get("indenizacao_data_base"):
+        f.add("INDENIZ_DATA_BASE", rem, f"data-base {plano['indenizacao_data_base']}")
 
     # Grupo 13º
     a13, a13i = plano["avos_13"], plano["avos_13_indenizado"]
@@ -395,7 +405,7 @@ def calc_rescisao(ctx: Contexto, tables: TaxTables, rubrics: Optional[Dict[str, 
 
 
 # ── Leitura do banco ─────────────────────────────────────────────────────────
-_NAO_VARIAVEIS = ("0001", "0005", "0006", "0012", "0013")  # salário e adicionais fixos entram pela remuneração
+_NAO_VARIAVEIS = ("0001", "0005", "0006", "0012", "0013", "0015", "0018", "0019")  # salário e adicionais fixos entram pela remuneração
 
 
 def contexto_funcionario(conn, company_id: int, emp: Dict[str, Any], em: date) -> Contexto:
@@ -405,11 +415,19 @@ def contexto_funcionario(conn, company_id: int, emp: Dict[str, Any], em: date) -
         ini, fim = pe._parse_date(p.get("data_inicio")), pe._parse_date(p.get("data_fim"))
         if (ini is None or ini <= em) and (fim is None or fim >= em):
             pensoes.append(p)
+    salario, _ = cct_regras.salario_mensal(emp)
+    admissao = pe._parse_date(emp.get("admission_date"))
+    cct = cct_regras.cct_do_funcionario(cct_regras.carregar_ccts(conn, company_id), emp, em)
+    ats, ats_ref = 0.0, ""
+    if cct and not emp.get("is_prolabore"):
+        sm = load_tables(conn, company_id, em.strftime("%Y-%m")).salario_minimo
+        ats, ats_ref = cct_regras.adicional_tempo_servico(cct, admissao, em, salario, sm)
     return Contexto(
-        employee_id=emp["id"], nome=emp.get("name") or "", salario=float(emp.get("salary") or 0),
-        admissao=pe._parse_date(emp.get("admission_date")), dependentes=int(emp.get("dependents") or 0),
+        employee_id=emp["id"], nome=emp.get("name") or "", salario=salario,
+        admissao=admissao, dependentes=int(emp.get("dependents") or 0),
         is_prolabore=bool(emp.get("is_prolabore")), insalubridade_grau=emp.get("insalubridade_grau") or "",
         periculosidade=bool(emp.get("periculosidade")), pensoes=pensoes,
+        ats=pe.r2(ats), ats_ref=ats_ref, cct=cct, data_base_mes=cct_regras.mes_data_base(cct, emp),
     )
 
 

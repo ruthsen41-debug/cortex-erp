@@ -62,7 +62,10 @@ class EmployeeFicha(BaseModel):
     data_base_mes: Optional[str] = None
     contribuicao_sindical: Optional[int] = None
     # Salário e jornada
-    tipo_salario: Optional[str] = None      # undSalFixo: 1 hora 2 dia 3 semana 4 quinzena 5 mês 6 tarefa
+    tipo_salario: Optional[str] = None      # undSalFixo: 1 hora 2 dia 3 semana 4 quinzena 5 mês 6 tarefa 7 só variável
+    categoria_especial: Optional[str] = Field(default=None, pattern="^(|professor)$")
+    aulas_semanais: Optional[float] = Field(default=None, ge=0, le=80)
+    cct_id: Optional[int] = Field(default=None, ge=0)   # 0 = automático (a única convenção vigente)
     forma_pagamento: Optional[str] = None
     adiantamento_pct: Optional[float] = Field(default=None, ge=0, le=100)
     jornada_tipo: Optional[str] = None
@@ -100,7 +103,7 @@ class EmployeeCreate(EmployeeFicha):
     role: str
     cbo: Optional[str] = "111105"
     department: Optional[str] = ""
-    salary: float = Field(..., gt=0)
+    salary: float = Field(..., ge=0)   # zero só para remuneração variável (tipo_salario 6 ou 7)
     is_prolabore: Optional[bool] = False
     dependents: int = Field(default=0, ge=0)
     vt_monthly: Optional[float] = 0.0
@@ -129,7 +132,7 @@ class EmployeeUpdate(EmployeeFicha):
     role: Optional[str] = None
     cbo: Optional[str] = None
     department: Optional[str] = None
-    salary: Optional[float] = Field(default=None, gt=0)
+    salary: Optional[float] = Field(default=None, ge=0)
     dependents: Optional[int] = Field(default=None, ge=0)
     vt_monthly: Optional[float] = None
     is_prolabore: Optional[bool] = None
