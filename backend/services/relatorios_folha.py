@@ -224,7 +224,7 @@ CSS = """*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;col
 .doc{max-width:1100px;margin:0 auto 24px;padding:0 10px}
 .hdr{display:flex;justify-content:space-between;align-items:flex-end;border:1.2px solid #000;padding:6px 8px}
 .hdr .rs{font-size:12px;font-weight:bold}.hdr h1{font-size:13px;margin:0;text-align:right}
-.sub{border:1.2px solid #000;border-top:none;padding:3px 8px;font-size:9.5px;display:flex;justify-content:space-between}
+.subhdr{border:1.2px solid #000;border-top:none;padding:3px 8px;font-size:9.5px;display:flex;justify-content:space-between}
 table{border-collapse:collapse;width:100%;margin-top:6px}
 th{font-size:8.5px;text-transform:uppercase;border-bottom:1.2px solid #000;text-align:left;padding:3px 4px}
 td{padding:2px 4px;border-bottom:1px dotted #ccc;font-size:9.5px}
@@ -246,7 +246,7 @@ def para_html(rel: Dict[str, Any], empresa: Dict[str, Any], emitido_em: str) -> 
             f'<td class="num">{_num(l.get(c["k"]))}</td>' if c["num"] else f'<td>{escape(str(l.get(c["k"], "") or ""))}</td>'
             for c in cols)
         corpo.append(f'<tr class="{cls}">{tds}</tr>')
-    if len(rel["linhas"]) <= 1:
+    if not any(not l.get("_cls") for l in rel["linhas"]):
         corpo.insert(0, f'<tr><td colspan="{len(cols)}" style="text-align:center;padding:14px;color:#555">Nenhum registro no período.</td></tr>')
     pagina = "@page{size:A4 landscape;margin:9mm}" if rel.get("paisagem") else "@page{size:A4;margin:10mm}"
     return f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>{escape(rel['titulo'])}</title>
@@ -255,7 +255,7 @@ def para_html(rel: Dict[str, Any], empresa: Dict[str, Any], emitido_em: str) -> 
 <div class="doc">
   <div class="hdr"><div><div class="rs">{escape(empresa.get('razao_social') or '')}</div>CNPJ {escape(empresa.get('cnpj') or '')}</div>
     <h1>{escape(rel['titulo'])}</h1></div>
-  <div class="sub"><span>{escape(rel.get('subtitulo') or '')}</span><span>Emitido em {escape(emitido_em)}</span></div>
+  <div class="subhdr"><span>{escape(rel.get('subtitulo') or '')}</span><span>Emitido em {escape(emitido_em)}</span></div>
   <table><thead><tr>{cab}</tr></thead><tbody>{''.join(corpo)}</tbody></table>
   {f'<div class="nota">{escape(rel["nota"])}</div>' if rel.get('nota') else ''}
 </div></body></html>"""
