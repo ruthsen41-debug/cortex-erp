@@ -74,6 +74,7 @@
       ['Auditoria', 'shield-check', 'audit'],
       ['Usuários', 'users', 'users'],
       ['Configurações', 'building-2', 'settings'],
+      ['Atualizações', 'refresh-cw', 'updates'],
       ['Suporte', 'life-buoy', 'support'],
       ['Painel do sistema', 'shield-half', 'superadmin'],
     ] },
@@ -85,7 +86,7 @@
 
   let pendingCat = null;
   // Telas do sistema (painel do dono e suporte) não mostram atalhos de nenhuma área.
-  const FORCE_CAT = { superadmin: 'sys', support: 'sys' };
+  const FORCE_CAT = { superadmin: 'sys', support: 'sys', updates: 'sys' };
 
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
