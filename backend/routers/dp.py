@@ -25,7 +25,7 @@ try:
     from ..services.formula_engine import FormulaError, FUNCOES as FORMULA_FUNCOES
     from ..services.ficha_registro import gerar_ficha_registro_html
     from ..services.folha_impressao import gerar_folha_html, gerar_recibos_html, gerar_holerite_unico_html, competencia_extenso
-    from ..services import holerite_email, relatorios_folha, modelos_documentos, cct_regras
+    from ..services import holerite_email, relatorios_folha, modelos_documentos, cct_regras, beneficios
 except ImportError:
     from database import get_conn
     from auth import get_current_user, log_audit
@@ -40,7 +40,7 @@ except ImportError:
     from services.formula_engine import FormulaError, FUNCOES as FORMULA_FUNCOES
     from services.ficha_registro import gerar_ficha_registro_html
     from services.folha_impressao import gerar_folha_html, gerar_recibos_html, gerar_holerite_unico_html, competencia_extenso
-    from services import holerite_email, relatorios_folha, modelos_documentos, cct_regras
+    from services import holerite_email, relatorios_folha, modelos_documentos, cct_regras, beneficios
 
 router = APIRouter(prefix="/api/dp", tags=["Departamento Pessoal"])
 
@@ -1978,10 +1978,25 @@ def _calc_rescisao(conn, company_id: int, data: Dict[str, Any]) -> Dict[str, Any
             plano["indenizacao_data_base"] = db.strftime("%m/%Y")
             avisos_extra.append(f"Dispensa (com a projeção do aviso) nos 30 dias antes da data-base {db.strftime('%m/%Y')}: "
                                 "indenização adicional de 1 salário (Lei 7.238/84, art. 9º).")
+    consignados = []
+    if not data.get("_plano"):          # a complementar recalcula por diferença: o consignado já foi quitado
+        for c in conn.execute("""SELECT * FROM emprestimos_consignados WHERE company_id=? AND employee_id=?
+                                 AND ativo=1 AND desconta_rescisao=1 ORDER BY competencia_inicio, id""",
+                              (company_id, eid)).fetchall():
+            c = dict(c)
+            saldo = beneficios.saldo_rescisao(c, comp)
+            if saldo > 0:
+                consignados.append({"nome": f"Consignado {c.get('instituicao') or ''} — saldo".replace("  ", " "),
+                                    "valor": saldo, "origem": c.get("origem")})
+        if consignados:
+            avisos_extra.append("Saldo de empréstimo consignado descontado até a margem consignável (Lei 10.820/2003). "
+                                "Repasse à instituição e informe o restante, se houver.")
     res = payroll_special.calc_rescisao(ctx, tables, payroll_engine.load_rubrics(conn, company_id), plano,
                                         media_13=media_13, media_ferias=media_12, media_aviso=media_12,
                                         adiantamento_13=adiant_13, saldo_fgts=saldo_fgts,
-                                        outros_descontos=adiantamentos + outros)
+                                        outros_descontos=adiantamentos + outros, consignados=consignados,
+                                        consignado_pct=float(dp_parametros.carregar(conn, company_id)
+                                                             .get("consignado_margem_pct") or 35))
     res["avisos"].extend(avisos_extra)
     return _especial_view(res, tipo=tipo, tipo_nome=payroll_special.TIPOS_RESCISAO[tipo]["nome"],
                           aviso_modo=aviso_modo, data_desligamento=deslig.isoformat(), competencia=comp,

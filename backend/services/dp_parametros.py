@@ -22,6 +22,9 @@ PADRAO: Dict[str, Any] = {
     "ferias_alerta_dias": 60,
     # Texto impresso no rodapé de todos os holerites
     "mensagem_recibo": "",
+    # Empréstimo consignado (Lei 10.820/2003): % máximo da remuneração disponível
+    # (bruto − INSS − IRRF − pensão). Confira o percentual vigente da lei.
+    "consignado_margem_pct": 35.0,
 }
 
 DESCRICOES: Dict[str, str] = {
@@ -32,6 +35,7 @@ DESCRICOES: Dict[str, str] = {
     "descontar_dsr_faltas": "Descontar o DSR da semana com falta injustificada",
     "ferias_alerta_dias": "Avisar férias a vencer com quantos dias de antecedência",
     "mensagem_recibo": "Mensagem impressa nos holerites",
+    "consignado_margem_pct": "Margem do empréstimo consignado (% da remuneração disponível)",
 }
 
 
@@ -81,6 +85,14 @@ def validar(dados: Dict[str, Any]) -> Dict[str, Any]:
         if not 0 <= dias <= 365:
             raise ValueError("Antecedência do aviso de férias deve ficar entre 0 e 365 dias.")
         v["ferias_alerta_dias"] = dias
+    if "consignado_margem_pct" in dados:
+        try:
+            n = float(dados["consignado_margem_pct"])
+        except (TypeError, ValueError):
+            raise ValueError(f"{DESCRICOES['consignado_margem_pct']}: informe um número.")
+        if not 0 < n <= 100:
+            raise ValueError(f"{DESCRICOES['consignado_margem_pct']}: deve ficar entre 0 e 100.")
+        v["consignado_margem_pct"] = round(n, 2)
     if "mensagem_recibo" in dados:
         v["mensagem_recibo"] = str(dados["mensagem_recibo"] or "").strip()[:300]
     return v

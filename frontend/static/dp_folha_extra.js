@@ -517,6 +517,9 @@ async function renderParametrosFolha(el) {
       <div class="text-[11px] font-bold uppercase tracking-wide text-violet-600 mt-5">Férias</div>
       ${linha('Aviso de férias a vencer', 'Quantos dias antes do fim do período concessivo as férias aparecem como "vence em breve".',
         `<div class="flex items-center gap-2"><input id="par-ferias_alerta_dias" type="number" min="0" max="365" value="${p.ferias_alerta_dias}" class="${inputCls()} max-w-[140px]"><span class="text-xs text-slate-500">dias</span></div>`)}
+      <div class="text-[11px] font-bold uppercase tracking-wide text-violet-600 mt-5">Empréstimo consignado</div>
+      ${linha('Margem consignável', 'Percentual máximo da remuneração disponível (bruto menos INSS, IRRF e pensão) que as parcelas podem descontar, pela Lei 10.820/2003. O padrão é 35%; confira o percentual vigente antes de alterar.',
+        `<div class="flex items-center gap-2"><input id="par-consignado_margem_pct" type="number" step="0.01" min="1" max="100" value="${p.consignado_margem_pct ?? 35}" class="${inputCls()} max-w-[140px]"><span class="text-xs text-slate-500">%</span></div>`)}
       <div class="text-[11px] font-bold uppercase tracking-wide text-violet-600 mt-5">Holerite</div>
       ${linha('Mensagem no holerite', 'Texto impresso em todos os recibos de pagamento (até 300 caracteres).',
         `<textarea id="par-mensagem_recibo" rows="2" maxlength="300" class="${inputCls()}" placeholder="ex.: Feliz aniversário aos colaboradores do mês!">${_dpEsc(p.mensagem_recibo || '')}</textarea>`)}
@@ -537,6 +540,7 @@ async function _dpxSalvarParametros() {
     adiantamento_dia_pagamento: v('adiantamento_dia_pagamento').value,
     ferias_alerta_dias: v('ferias_alerta_dias').value,
     mensagem_recibo: v('mensagem_recibo').value,
+    consignado_margem_pct: v('consignado_margem_pct').value,
   };
   const msg = document.getElementById('par-msg');
   try {

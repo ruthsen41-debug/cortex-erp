@@ -3610,10 +3610,16 @@ async function renderBeneficios(el) {
       <div class="flex gap-2 mb-4">
         <button onclick="window._bfTab('tipos')" class="btn btn-sm ${innerTab==='tipos'?'btn-primary':'btn-secondary'}">Tipos de Benefício</button>
         <button onclick="window._bfTab('por_funcionario')" class="btn btn-sm ${innerTab==='por_funcionario'?'btn-primary':'btn-secondary'}">Por Funcionário</button>
+        <button onclick="window._bfTab('vt')" class="btn btn-sm ${innerTab==='vt'?'btn-primary':'btn-secondary'}">Vale-transporte</button>
+        <button onclick="window._bfTab('plano')" class="btn btn-sm ${innerTab==='plano'?'btn-primary':'btn-secondary'}">Plano de Saúde</button>
+        <button onclick="window._bfTab('consignado')" class="btn btn-sm ${innerTab==='consignado'?'btn-primary':'btn-secondary'}">Consignado</button>
       </div>
       <div id="bf-content"></div>`;
     window._bfTab = async (t) => { innerTab = t; await render(); };
     const bc = document.getElementById('bf-content');
+    if (innerTab === 'vt') { await renderBfVT(bc); return; }
+    if (innerTab === 'plano') { await renderBfPlano(bc); return; }
+    if (innerTab === 'consignado') { await renderBfConsignado(bc); return; }
     if (innerTab === 'tipos') {
       bc.innerHTML = `
         <div class="flex justify-between items-center mb-3">

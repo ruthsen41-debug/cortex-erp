@@ -2809,6 +2809,7 @@ def migrate_db(conn: sqlite3.Connection) -> None:
     _migrate_esocial_complementos(cur)
     _migrate_complementar_escalas(cur)
     _migrate_dp_rotinas(cur)
+    _migrate_beneficios(cur)
     conn.commit()
 
 
@@ -3109,6 +3110,81 @@ def _migrate_dp_rotinas(cur) -> None:
         atualizado_por TEXT DEFAULT '',
         PRIMARY KEY (company_id, codigo)
     )""")
+
+
+def _migrate_beneficios(cur) -> None:
+    """Bloco 4 da paridade DP: plano de saúde por faixa etária e coparticipação, consignado."""
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS planos_saude (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL,
+        nome TEXT NOT NULL,
+        tipo TEXT DEFAULT 'saude',
+        operadora TEXT DEFAULT '',
+        cnpj_operadora TEXT DEFAULT '',
+        registro_ans TEXT DEFAULT '',
+        modalidade_valor TEXT DEFAULT 'faixa',
+        valor_fixo_titular REAL DEFAULT 0,
+        valor_fixo_dependente REAL DEFAULT 0,
+        pct_empresa_titular REAL DEFAULT 0,
+        pct_empresa_dependente REAL DEFAULT 0,
+        copart_pct_empregado REAL DEFAULT 100,
+        ativo INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS planos_saude_faixas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        plano_id INTEGER NOT NULL,
+        idade_min INTEGER NOT NULL,
+        idade_max INTEGER NOT NULL,
+        valor REAL DEFAULT 0
+    )""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS employee_planos_saude (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL,
+        employee_id INTEGER NOT NULL,
+        plano_id INTEGER NOT NULL,
+        data_inicio TEXT NOT NULL,
+        data_fim TEXT DEFAULT '',
+        incluir_dependentes INTEGER DEFAULT 1,
+        carteirinha TEXT DEFAULT '',
+        ativo INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS planos_saude_copart (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL,
+        employee_id INTEGER NOT NULL,
+        plano_id INTEGER NOT NULL,
+        competencia TEXT NOT NULL,
+        beneficiario TEXT DEFAULT 'Titular',
+        descricao TEXT DEFAULT '',
+        valor REAL DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS emprestimos_consignados (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL,
+        employee_id INTEGER NOT NULL,
+        origem TEXT DEFAULT 'credito_trabalhador',
+        instituicao TEXT DEFAULT '',
+        contrato TEXT DEFAULT '',
+        valor_parcela REAL DEFAULT 0,
+        parcelas_total INTEGER DEFAULT 0,
+        competencia_inicio TEXT NOT NULL,
+        saldo_devedor REAL DEFAULT 0,
+        desconta_rescisao INTEGER DEFAULT 1,
+        ativo INTEGER DEFAULT 1,
+        observacoes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
+    # Tabela 03 do eSocial: 9219 é desconto de plano de saúde coletivo; a 9220 (alimentação) foi
+    # extinta no S-1.0. O desconto de VA/VR passa a "outros descontos" (9299).
+    cur.execute("UPDATE payroll_rubrics SET esocial_nat_rubrica='9299' WHERE codigo='0103' AND esocial_nat_rubrica='9219'")
 
 
 def _migrate_esocial_complementos(cur) -> None:

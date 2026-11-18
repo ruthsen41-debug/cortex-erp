@@ -18,10 +18,10 @@ from datetime import date, timedelta
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 try:
-    from . import payroll_engine as pe, cct_regras
+    from . import payroll_engine as pe, cct_regras, beneficios as _benef
     from .payroll_tables import TaxTables, load_tables
 except ImportError:  # execução com backend/ como raiz
-    from services import payroll_engine as pe, cct_regras
+    from services import payroll_engine as pe, cct_regras, beneficios as _benef
     from services.payroll_tables import TaxTables, load_tables
 
 r2 = pe.r2
@@ -356,7 +356,8 @@ def planejar_rescisao(admissao: date, desligamento: date, tipo: str, aviso_modo:
 def calc_rescisao(ctx: Contexto, tables: TaxTables, rubrics: Optional[Dict[str, Any]], plano: Dict[str, Any],
                   media_13: float = 0.0, media_ferias: float = 0.0, media_aviso: float = 0.0,
                   adiantamento_13: float = 0.0, saldo_fgts: float = 0.0,
-                  outros_descontos: float = 0.0) -> Dict[str, Any]:
+                  outros_descontos: float = 0.0, consignados: Optional[List[Dict[str, Any]]] = None,
+                  consignado_pct: float = 35.0) -> Dict[str, Any]:
     f = _Folha(rubrics)
     insal, peric, grau, _ = pe.adicionais_fixos(ctx.salario, ctx.insalubridade_grau, ctx.periculosidade, tables)
     rem = ctx.salario + insal + peric + ctx.ats
@@ -394,6 +395,16 @@ def calc_rescisao(ctx: Contexto, tables: TaxTables, rubrics: Optional[Dict[str, 
     f.add("ADIANTAMENTO", outros_descontos)
     inss_m, irrf_m = _encargos(f, ctx, tables, "mensal", "INSS", "IRRF")
     inss_13, irrf_13 = _encargos(f, ctx, tables, "decimo", "INSS_13", "IRRF_13", so_pensao_percentual=True)
+
+    if consignados:
+        # Lei 10.820/2003: saldo do consignado descontado das verbas até a margem consignável
+        pensao = sum(l["valor"] for l in f.lines if l["codigo"] == pe.SYSTEM_RUBRICS["PENSAO"][0])
+        marg = _benef.margem(f.total("provento"), inss_m + inss_13 + irrf_m + irrf_13 + pensao, consignado_pct)
+        parcelas, avs = _benef.aplicar_margem(consignados, marg)
+        f.avisos.extend(a.replace("parcela", "saldo") for a in avs)
+        for c in parcelas:
+            f.add("CONSIGNADO_CONV" if c.get("origem") == "convenio" else "CONSIGNADO", c["valor"], "saldo",
+                  nome=c.get("nome") or None)
 
     base_fgts = f.base("incide_fgts")
     fgts = r2(base_fgts * tables.fgts_aliquota)

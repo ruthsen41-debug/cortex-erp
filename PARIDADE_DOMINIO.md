@@ -153,7 +153,7 @@ Legenda: ✅ existe no Cortex · ⚠️ parcial · ❌ falta. O número entre pa
 | Serviços (51) | ⚠️ S-1005 e S-1020 existem. Faltam: tomador de serviço, empreitada, obra própria (CNO), alocação de empregado por serviço, trabalho temporário |
 | Tabelas (14) | ✅ Tabelas fiscais por ano editáveis (INSS, IRRF, salário mínimo, salário-família). ⚠️ Faltam: IRRF exclusivo de PLR, salário mínimo estadual |
 | Jornadas e Horários (25) | ✅ Escalas fixas e cíclicas (12x36 e outras) |
-| Plano de Saúde, VT, VA (11) | ⚠️ Há benefícios genéricos. Faltam: plano por faixa etária e por dependente, coparticipação, VT automático com teto de 6%, compra e recibo de VT |
+| Plano de Saúde, VT, VA (11) | ✅ (2026-11-18) **VT** com cadastro de linhas por funcionário, dias de uso automáticos (sem feriados, férias, afastamentos e faltas), desconto de 6% do salário básico limitado ao custo, pedido de compra (HTML/CSV) e recibo de entrega. **Plano de saúde/odonto** por faixa etária da ANS (RN 63/2003) ou valor fixo, titular e dependentes, rateio empresa × empregado, coparticipação (lançamento e importação do extrato da operadora) e conferência com a fatura. Rubricas 0111/0112 (natureza 9219). ⚠️ Falta: informações de plano de saúde por beneficiário no S-1210 |
 | Cargos, Funções, Departamentos, Centros de Custo | ✅ |
 
 ### Processos
@@ -168,7 +168,7 @@ Legenda: ✅ existe no Cortex · ⚠️ parcial · ❌ falta. O número entre pa
 | Rotinas Automáticas (25) | ❌ Agendar cálculo da folha, recibos, guias e envios ao eSocial |
 | RPA (8), Pró-labore | ✅ |
 | Intermitente: convocações (3) | ❌ |
-| Empréstimo consignado (2) | ❌ Limite de 35%, desconto na folha e na rescisão |
+| Empréstimo consignado (2) | ✅ (2026-11-18) Contratos do Crédito do Trabalhador (natureza 9253) e de convênio (9254), parcela por competência, margem consignável configurável (padrão 35% da remuneração disponível), consulta de margem e desconto do saldo na rescisão até a margem. ⚠️ Falta: importar as parcelas do FGTS Digital |
 | Aposentadoria, Advertência e Suspensão, Estabilidades | ✅ Advertência, suspensão e estabilidades. ⚠️ Aposentadoria só como motivo de desligamento |
 | Pagamentos (4): baixa da folha e dos encargos | ❌ |
 | Informações: desoneração e multivínculo | ✅ Multivínculo. ⚠️ Desoneração / INSS sobre receita bruta |
@@ -200,6 +200,6 @@ Legenda: ✅ existe no Cortex · ⚠️ parcial · ❌ falta. O número entre pa
 1. **Uso diário:** parâmetros da folha por empresa · programação de férias, férias em grupo e coletivas · rescisão complementar e em grupo, aviso prévio como processo · holerite por e-mail · relação de líquidos e relatórios de folha.
 2. ✅ **Documentos (concluído em 2026-11-18):** pacote de modelos (contratos, aviso e abono de férias, salário-família, VT, termos), personalizável por empresa.
 3. ✅ **Regras de CCT e categorias (concluído em 2026-11-18):** adicional por tempo de serviço, médias por CCT, indenização da data-base, comissionados com garantia mínima, horista e professor. Também: médias de HE e adicional noturno pela quantidade de horas × salário-hora atual (Súmula 347) e HE do comissionista só com o adicional sobre as comissões (Súmula 340 e OJ 397).
-4. **Benefícios:** VT automático e compra, plano de saúde por faixa etária e coparticipação, consignado.
+4. ✅ **Benefícios (concluído em 2026-11-18):** VT automático e compra, plano de saúde por faixa etária e coparticipação, consignado.
 5. **Automação e utilitários:** rotinas automáticas, alterações e exclusões em grupo, acerto de data de pagamento, baixa de pagamentos.
 6. **Menor uso:** PLR, intermitente, trabalho temporário e tomador, transparência salarial, demonstrativos folha × eSocial.

@@ -23,11 +23,13 @@ try:
     from .payroll_tables import TaxTables, load_tables
     from . import escalas as _escalas
     from . import cct_regras as _cct
+    from . import beneficios as _benef
 except ImportError:  # execução com backend/ como raiz
     from services.formula_engine import FormulaError, evaluate, validate
     from services.payroll_tables import TaxTables, load_tables
     from services import escalas as _escalas
     from services import cct_regras as _cct
+    from services import beneficios as _benef
 
 
 # ── Rubricas de sistema ──────────────────────────────────────────────────────
@@ -59,7 +61,8 @@ SYSTEM_RUBRICS: Dict[str, Tuple[str, str, str, int, int, int, str]] = {
     "INSS":          ("0100", "INSS", "desconto", 0, 0, 0, "9201"),
     "IRRF":          ("0101", "IRRF", "desconto", 0, 0, 0, "9203"),
     "VT":            ("0102", "Vale-Transporte", "desconto", 0, 0, 0, "9216"),
-    "VA":            ("0103", "Vale-Alimentação/Refeição", "desconto", 0, 0, 0, "9219"),
+    # 9219 é plano de saúde; a 9220 (alimentação) foi extinta no S-1.0 → outros descontos
+    "VA":            ("0103", "Vale-Alimentação/Refeição", "desconto", 0, 0, 0, "9299"),
     "PENSAO":        ("0104", "Pensão Alimentícia", "desconto", 0, 0, 0, "9213"),
     "ADIANTAMENTO":  ("0105", "Adiantamento de Salário", "desconto", 0, 0, 0, "9200"),
     "FALTAS":        ("0106", "Faltas Injustificadas", "desconto", 1, 1, 1, "9207"),
@@ -67,6 +70,11 @@ SYSTEM_RUBRICS: Dict[str, Tuple[str, str, str, int, int, int, str]] = {
     "ATRASOS":       ("0108", "Atrasos e Saídas Antecipadas", "desconto", 1, 1, 1, "9209"),
     "CONTRIB_ASSIST": ("0109", "Contribuição Assistencial", "desconto", 0, 0, 0, "9231"),
     "BENEFICIO":     ("0110", "Benefícios (coparticipação)", "desconto", 0, 0, 0, "9299"),
+    # Bloco 4 — benefícios (Tabela 03 do eSocial)
+    "PLANO_SAUDE":   ("0111", "Plano de Saúde", "desconto", 0, 0, 0, "9219"),
+    "PLANO_COPART":  ("0112", "Coparticipação do Plano de Saúde", "desconto", 0, 0, 0, "9219"),
+    "CONSIGNADO":    ("0113", "Empréstimo Consignado (Crédito do Trabalhador)", "desconto", 0, 0, 0, "9253"),
+    "CONSIGNADO_CONV": ("0114", "Empréstimo Consignado (Convênio)", "desconto", 0, 0, 0, "9254"),
     # Férias, 13º e rescisão (usadas por payroll_special)
     "FERIAS":        ("0008", "Férias", "provento", 1, 1, 1, "1020"),
     "FERIAS_TERCO":  ("0009", "1/3 Constitucional de Férias", "provento", 1, 1, 1, "1020"),
@@ -163,6 +171,11 @@ class EmployeeInput:
     filhos_sal_familia: int = 0
     vt_mensal: float = 0.0
     beneficios: List[Dict[str, Any]] = field(default_factory=list)   # {nome, tipo, desconto}
+    planos_saude: List[Dict[str, Any]] = field(default_factory=list)  # {nome, valor (parte do empregado), ref}
+    copart: List[Dict[str, Any]] = field(default_factory=list)        # {nome, valor}
+    consignados: List[Dict[str, Any]] = field(default_factory=list)   # {nome, valor, origem}
+    consignado_pct: float = 35.0
+    avisos_extra: List[str] = field(default_factory=list)
     adiantamentos: float = 0.0
     pensoes: List[Dict[str, Any]] = field(default_factory=list)      # {modalidade, percentual, valor_fixo, base_calculo, beneficiario}
     cct_percentual: float = 0.0
@@ -303,7 +316,7 @@ def calculate_employee(
     """
     rubrics = rubrics or {}
     lines: List[Dict[str, Any]] = []
-    avisos: List[str] = []
+    avisos: List[str] = list(inp.avisos_extra)
 
     def meta(codigo: str) -> Dict[str, Any]:
         return rubric_meta(rubrics, codigo)
@@ -544,6 +557,18 @@ def calculate_employee(
             continue
         key = "VA" if ("aliment" in tipo_b or "refei" in tipo_b) else "BENEFICIO"
         sys(key, float(b.get("desconto") or 0), "", b.get("nome") or None)
+    for p in inp.planos_saude:
+        sys("PLANO_SAUDE", float(p.get("valor") or 0), p.get("ref") or "", p.get("nome") or None)
+    for c in inp.copart:
+        sys("PLANO_COPART", float(c.get("valor") or 0), "", c.get("nome") or None)
+    if inp.consignados:
+        # Lei 10.820/2003: margem sobre a remuneração disponível (bruto − INSS − IRRF − pensão)
+        marg = _benef.margem(bruto, inss + irrf + sum(pens), inp.consignado_pct)
+        parcelas, avs = _benef.aplicar_margem(inp.consignados, marg)
+        avisos.extend(avs)
+        for p in parcelas:
+            key = "CONSIGNADO_CONV" if p.get("origem") == "convenio" else "CONSIGNADO"
+            sys(key, p["valor"], p.get("ref") or "", p.get("nome") or None)
     sys("ADIANTAMENTO", inp.adiantamentos)
     if not prolabore and inp.cct_percentual > 0:
         sys("CONTRIB_ASSIST", salario * inp.cct_percentual / 100.0, f"{inp.cct_percentual:g}%")
@@ -841,6 +866,21 @@ def build_inputs(
     vt_vales = por_emp(_rows(conn, "SELECT * FROM employee_vt WHERE company_id=? AND ativo=1", (company_id,)))
     dias_vt = dias_uteis_seg_sex(inicio, fim, cal["feriados"])
 
+    # Bloco 4 — plano de saúde (faixa etária, dependentes, coparticipação) e consignado
+    planos = {p["id"]: p for p in _rows(conn, "SELECT * FROM planos_saude WHERE company_id=? AND ativo=1", (company_id,))}
+    faixas_plano: Dict[int, List[Dict[str, Any]]] = {}
+    if planos:
+        for f in _rows(conn, f"SELECT * FROM planos_saude_faixas WHERE plano_id IN ({','.join('?' * len(planos))})",
+                       tuple(planos)):
+            faixas_plano.setdefault(f["plano_id"], []).append(f)
+    adesoes = por_emp(_rows(conn, "SELECT * FROM employee_planos_saude WHERE company_id=? AND ativo=1", (company_id,)))
+    deps_plano = por_emp(_rows(conn, "SELECT * FROM employee_dependents WHERE company_id=? AND plano_saude=1",
+                               (company_id,)))
+    copart = por_emp(_rows(conn, "SELECT * FROM planos_saude_copart WHERE company_id=? AND competencia=?",
+                           (company_id, competencia)))
+    consig = por_emp(_rows(conn, """SELECT * FROM emprestimos_consignados WHERE company_id=? AND ativo=1
+                                    ORDER BY competencia_inicio, id""", (company_id,)))
+
     lanc = por_emp(_rows(conn, """
         SELECT er.employee_id, er.quantidade, er.valor, er.competencia, r.codigo
         FROM employee_rubrics er JOIN payroll_rubrics r ON r.id = er.rubric_id
@@ -964,6 +1004,42 @@ def build_inputs(
                 elif oe["id"] < eid:
                     base_outros += float(oe.get("salary") or 0)
 
+        # VT: só os dias úteis em que trabalha (fora férias, afastamentos e faltas)
+        vt_custo = float(e.get("vt_monthly") or 0)
+        if vt_vales.get(eid):
+            fora = [(_parse_date(f.get("data_inicio")), _parse_date(f.get("data_fim"))) for f in ferias.get(eid, [])]
+            fora += [(_parse_date(a.get("data_inicio")), _parse_date(a.get("data_fim")) or fim)
+                     for a in afast.get(eid, [])]
+            datas_falta = {_parse_date(t.get("data")) for t in ponto.get(eid, [])
+                           if (t.get("tipo_ocorrencia") or "").lower() == "falta_injustificada"}
+            dias_uso = _benef.dias_uso_vt(inicio, fim, cal["feriados"], adm, _parse_date(e.get("termination_date")),
+                                          fora, datas_falta)
+            vt_custo = custo_vt(vt_vales[eid], dias_uso)
+
+        planos_emp, copart_emp, avisos_emp = [], [], []
+        for ad in adesoes.get(eid, []):
+            plano = planos.get(ad["plano_id"])
+            if not plano or not vigente(ad):
+                continue
+            deps = deps_plano.get(eid, []) if int(ad.get("incluir_dependentes", 1) or 0) else []
+            m = _benef.mensalidade_plano(plano, faixas_plano.get(plano["id"], []), e.get("birth_date"), deps, fim)
+            avisos_emp.extend(m["avisos"])
+            if m["empregado"] > 0:
+                vidas = len(m["vidas"])
+                planos_emp.append({"nome": f"Plano {plano['nome']}", "valor": m["empregado"],
+                                   "ref": f"{vidas} vida(s)" if vidas > 1 else "titular"})
+            pct_c = min(100.0, max(0.0, float(plano.get("copart_pct_empregado") if plano.get("copart_pct_empregado") is not None else 100))) / 100.0
+            tot_c = sum(float(c.get("valor") or 0) for c in copart.get(eid, []) if c["plano_id"] == plano["id"])
+            if tot_c * pct_c > 0:
+                copart_emp.append({"nome": f"Coparticipação — {plano['nome']}", "valor": r2(tot_c * pct_c)})
+        consig_emp = []
+        for c in consig.get(eid, []):
+            n_parc, v_parc = _benef.parcela_do_mes(c, competencia)
+            if v_parc > 0:
+                consig_emp.append({"nome": f"Consignado {c.get('instituicao') or ''}".strip(), "valor": v_parc,
+                                   "origem": c.get("origem") or "credito_trabalhador",
+                                   "ref": f"{n_parc}/{c.get('parcelas_total') or '?'}"})
+
         horas_semana = float(e.get("horas_semana") or 44) or 44.0
         cct = _cct.cct_do_funcionario(ccts_conv, e, fim)
         p50, p100, pnot = _cct.percentuais(cct)
@@ -997,7 +1073,9 @@ def build_inputs(
             insalubridade_grau=e.get("insalubridade_grau") or "",
             periculosidade=bool(e.get("periculosidade")),
             filhos_sal_familia=int(e.get("filhos_sal_familia") or 0),
-            vt_mensal=(custo_vt(vt_vales[eid], dias_vt) if vt_vales.get(eid) else float(e.get("vt_monthly") or 0)),
+            vt_mensal=vt_custo,
+            planos_saude=planos_emp, copart=copart_emp, consignados=consig_emp, avisos_extra=avisos_emp,
+            consignado_pct=float(params.get("consignado_margem_pct") or _benef.MARGEM_PADRAO),
             beneficios=[{"nome": b.get("bt_nome"), "tipo": b.get("bt_tipo"),
                          "desconto": float(b.get("valor_desconto") or 0)}
                         for b in benef.get(eid, []) if vigente(b)],
