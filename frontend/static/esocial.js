@@ -45,7 +45,7 @@
     raiz = el;
     try { st.cfg = await apiFetch('/api/esocial/config'); } catch (e) { st.cfg = null; }
     const abas = [['painel', 'layout-list', 'Painel de eventos'], ['gerar', 'wand-sparkles', 'Gerar eventos'],
-      ['lotes', 'package', 'Lotes enviados'], ['totalizadores', 'sigma', 'Totalizadores'], ['config', 'settings', 'Configuração']];
+      ['lotes', 'package', 'Lotes enviados'], ['totalizadores', 'sigma', 'Totalizadores'], ['conferencia', 'scale', 'Conferência folha × eSocial'], ['config', 'settings', 'Configuração']];
     const cert = st.cfg?.certificado || {};
     const amb = st.cfg?.config?.ambiente || 2;
     el.innerHTML = `
@@ -84,6 +84,7 @@
     else if (id === 'gerar') await gerar(c);
     else if (id === 'lotes') await lotes(c);
     else if (id === 'totalizadores') await totalizadores(c);
+    else if (id === 'conferencia') await conferencia(c);
     else await config(c);
     if (window.lucide) lucide.createIcons();
   }
@@ -445,6 +446,86 @@
         <td class="px-3 py-2">${esc(x.funcionario || '')}</td><td class="px-3 py-2 text-xs text-slate-500">${esc(x.created_at)}</td></tr>`).join('')
         || '<tr><td colspan="5" class="px-3 py-10 text-center text-slate-400">Nenhum totalizador recebido ainda.</td></tr>'}</tbody></table></div>`;
   }
+
+  // ── conferência folha × eSocial ─────────────────────────────
+  st.confComp = st.confComp || hojeComp();
+  async function conferencia(c) {
+    const comp = st.confComp;
+    let d;
+    try { d = await apiFetch(`/api/esocial/conferencia/${encodeURIComponent(comp)}`); }
+    catch (e) { c.innerHTML = `<p class="text-sm text-rose-600">${esc(e.message)}</p>`; return; }
+    const SIT = {
+      ok: ['Confere', 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'],
+      divergente: ['Divergente', 'bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300'],
+      sem_totalizador: ['Sem totalizador', 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'],
+      so_esocial: ['Só no eSocial', 'bg-sky-50 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300'],
+    };
+    const cel = (v) => {
+      if (!v) return '<td class="px-2 py-2 text-right text-slate-300">—</td>';
+      const dif = v.diferenca;
+      const cor = v.esocial === null ? 'text-amber-600' : Math.abs(dif) > 0.02 ? 'text-rose-600 font-semibold' : 'text-slate-500';
+      return `<td class="px-2 py-2 text-right tabular-nums whitespace-nowrap"><div>${brl(v.folha)}</div>
+        <div class="text-[11px] ${cor}">${v.esocial === null ? 'sem retorno' : `eSocial ${brl(v.esocial)}${Math.abs(dif) > 0.02 ? ` (${dif > 0 ? '+' : ''}${brl(dif)})` : ''}`}</div></td>`;
+    };
+    const resumo = Object.entries(SIT).map(([k, [nome, cls]]) =>
+      `<span class="px-3 py-1.5 rounded-full text-xs font-semibold ${cls}">${nome}: ${d.contagem[k] || 0}</span>`).join('');
+    const cons = Object.entries(d.consolidados || {}).map(([t, ok]) =>
+      `<span class="text-[11px] ${ok ? 'text-emerald-600' : 'text-slate-400'}">${t} ${ok ? 'recebido' : 'não recebido'}</span>`).join(' · ');
+    const linhas = d.linhas.map((l, i) => `
+      <tr class="border-b border-slate-100 dark:border-slate-800 ${l.divergencias.length || l.faltando.length ? 'cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50' : ''}"
+          onclick="document.getElementById('es-cf-${i}')?.classList.toggle('hidden')">
+        <td class="px-3 py-2"><div class="font-semibold text-slate-700 dark:text-slate-200">${esc(l.nome)}</div>
+          <div class="text-[11px] text-slate-400 font-mono">${esc(l.cpf)}${l.origem === 'rpa' ? ' · autônomo' : l.origem === 'estagio' ? ' · estagiário' : ''}</div></td>
+        <td class="px-2 py-2"><span class="px-2 py-0.5 rounded-full text-[11px] font-semibold ${SIT[l.situacao][1]}">${SIT[l.situacao][0]}</span></td>
+        ${d.itens.map((it) => cel(l.valores[it.chave])).join('')}</tr>
+      ${l.divergencias.length || l.faltando.length ? `<tr id="es-cf-${i}" class="hidden bg-slate-50 dark:bg-slate-800/40"><td colspan="${d.itens.length + 2}" class="px-4 py-3 text-xs space-y-1">
+        ${l.divergencias.map((x) => `<p><b class="text-rose-600">${esc(x.rotulo)}</b> (${esc(x.totalizador)}): folha ${brl(x.folha)} × eSocial ${brl(x.esocial)}. ${esc(x.dica)}</p>`).join('')}
+        ${l.faltando.length ? `<p class="text-amber-700 dark:text-amber-300">Sem retorno do eSocial: ${l.faltando.map(esc).join(', ')}. Envie os eventos do período (S-1200, S-2299, S-1210) e consulte os lotes.</p>` : ''}
+      </td></tr>` : ''}`).join('');
+    const tot = d.itens.map((it) => {
+      const t = d.totais[it.chave], dif = Math.round((t.esocial - t.folha) * 100) / 100;
+      return `<td class="px-2 py-2 text-right tabular-nums whitespace-nowrap"><div>${brl(t.folha)}</div>
+        <div class="text-[11px] ${Math.abs(dif) > 0.02 ? 'text-rose-600' : 'text-slate-500'}">eSocial ${brl(t.esocial)}</div></td>`;
+    }).join('');
+    c.innerHTML = `
+      <div class="flex flex-wrap items-end gap-3 mb-3">
+        <div>${lbl('Competência (AAAA-MM, ou AAAA para o 13º)')}<input id="es-cf-comp" class="${inp}" style="width:12rem" value="${esc(comp)}"
+          onkeydown="if(event.key==='Enter'){esConfComp(this.value)}"></div>
+        <button class="${btn('primario')}" onclick="esConfComp(document.getElementById('es-cf-comp').value)"><i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>Conferir</button>
+        <button class="${btn('secundario')}" onclick="esConfCsv()"><i data-lucide="sheet" class="w-3.5 h-3.5"></i>Planilha (CSV)</button>
+        <div class="flex flex-wrap gap-2 ml-auto">${resumo}</div>
+      </div>
+      <div class="rounded-2xl px-4 py-3 mb-3 text-xs ${d.pode_fechar ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200' : 'bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200'}">
+        ${d.pode_fechar ? 'Tudo confere: a folha e o eSocial batem para todos os trabalhadores. Pode fechar a competência (S-1299) e transmitir a DCTFWeb.'
+          : d.linhas.length ? 'Há diferenças ou retornos faltando. Clique na linha para ver o motivo provável antes de fechar a competência.'
+          : 'Nada para conferir nesta competência: processe a folha e envie os eventos.'}
+        <div class="mt-1 text-[11px] opacity-80">${esc(d.observacao)}${cons ? ` · Consolidados: ${cons}` : ''}</div></div>
+      <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-x-auto"><table class="w-full text-sm">
+        <thead><tr class="text-[11px] text-slate-400 uppercase border-b border-slate-100 dark:border-slate-800">
+          <th class="px-3 py-2 text-left">Trabalhador</th><th class="px-2 py-2 text-left">Situação</th>
+          ${d.itens.map((it) => `<th class="px-2 py-2 text-right">${esc(it.rotulo)}<div class="normal-case font-normal">${esc(it.totalizador)}</div></th>`).join('')}</tr></thead>
+        <tbody>${linhas || `<tr><td colspan="${d.itens.length + 2}" class="px-3 py-10 text-center text-slate-400">Nenhum valor da folha nem totalizador nesta competência.</td></tr>`}</tbody>
+        ${d.linhas.length ? `<tfoot><tr class="font-semibold border-t border-slate-200 dark:border-slate-700"><td class="px-3 py-2" colspan="2">Totais</td>${tot}</tr></tfoot>` : ''}
+      </table></div>`;
+    if (window.lucide) lucide.createIcons();
+  }
+  window.esConfComp = async (v) => {
+    v = String(v || '').trim();
+    if (!/^\d{4}(-(0[1-9]|1[0-2]))?$/.test(v)) { toast('Competência no formato AAAA-MM ou AAAA.', 'error'); return; }
+    st.confComp = v;
+    await abrir('conferencia');
+  };
+  window.esConfCsv = async () => {
+    try {
+      const r = await fetch(`/api/esocial/conferencia/${encodeURIComponent(st.confComp)}?formato=csv`,
+        { headers: { Authorization: `Bearer ${localStorage.getItem('cortex_token') || ''}` } });
+      if (!r.ok) { toast('Erro ao gerar a planilha.', 'error'); return; }
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(await r.blob()); a.download = `conferencia_esocial_${st.confComp}.csv`;
+      document.body.appendChild(a); a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    } catch { toast('Erro de conexão.', 'error'); }
+  };
 
   // ── configuração ────────────────────────────────────────────
   async function config(c) {

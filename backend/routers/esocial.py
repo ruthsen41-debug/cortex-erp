@@ -7,12 +7,12 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
 try:
     from ..auth import get_current_user
     from ..database import get_conn
-    from ..services.esocial import complementos, servico
+    from ..services.esocial import complementos, conferencia, servico
     from ..services.esocial.tabelas import AMBIENTES, CLASS_TRIB, MOTIVO_AFASTAMENTO, NOMES_EVENTOS
 except ImportError:
     from auth import get_current_user
     from database import get_conn
-    from services.esocial import complementos, servico
+    from services.esocial import complementos, conferencia, servico
     from services.esocial.tabelas import AMBIENTES, CLASS_TRIB, MOTIVO_AFASTAMENTO, NOMES_EVENTOS
 
 router = APIRouter(prefix="/api/esocial", tags=["eSocial"])
@@ -342,6 +342,16 @@ def lotes(user=Depends(get_current_user)):
 @router.get("/fgts/{per_apur}")
 def fgts(per_apur: str, user=Depends(get_current_user)):
     return _executa(servico.conferencia_fgts, _cid(user), _comp(per_apur))
+
+
+@router.get("/conferencia/{per_apur}")
+def conferencia_folha(per_apur: str, formato: str = Query(default="json"), user=Depends(get_current_user)):
+    """Conferência folha × eSocial por trabalhador (INSS, IRRF e FGTS) a partir dos totalizadores S-5001/5002/5003."""
+    dados = _executa(conferencia.conferir, _cid(user), per_apur)
+    if formato == "csv":
+        return Response(conferencia.csv_conferencia(dados), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="conferencia_esocial_{per_apur}.csv"'})
+    return dados
 
 
 @router.get("/totalizadores")
