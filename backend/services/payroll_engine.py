@@ -73,6 +73,8 @@ SYSTEM_RUBRICS: Dict[str, Tuple[str, str, str, int, int, int, str]] = {
     "FERIAS_PROP":   ("0045", "Férias Proporcionais Indenizadas", "provento", 0, 0, 0, "6006"),
     "FERIAS_RESC_TERCO": ("0046", "1/3 s/ Férias na Rescisão", "provento", 0, 0, 0, "6006"),
     "FERIAS_RESC_DOBRO": ("0047", "Dobra de Férias Vencidas", "provento", 0, 0, 0, "6007"),
+    "MULTA_477":     ("0048", "Multa do Art. 477 § 8º da CLT", "provento", 0, 0, 0, "6106"),
+    "INDENIZ_DATA_BASE": ("0049", "Indenização Adicional (Lei 7.238/84 art. 9º)", "provento", 0, 0, 0, "6102"),
     "DECIMO_ADIANT_DESC": ("0120", "Adiantamento de 13º (1ª parcela)", "desconto", 0, 0, 1, "9214"),
     "INSS_13":       ("0121", "INSS s/ 13º Salário", "desconto", 0, 0, 0, "9201"),
     "IRRF_13":       ("0122", "IRRF s/ 13º Salário", "desconto", 0, 0, 0, "9203"),

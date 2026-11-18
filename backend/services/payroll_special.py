@@ -299,11 +299,18 @@ def dias_aviso_previo(admissao: date, desligamento: date) -> int:
 
 def planejar_rescisao(admissao: date, desligamento: date, tipo: str, aviso_modo: str = "indenizado",
                       gozados: Optional[Dict[str, float]] = None, faltas: Optional[Dict[str, int]] = None,
-                      dias_inss: Optional[Callable[[date, date], int]] = None) -> Dict[str, Any]:
-    """Transforma datas e tipo de rescisão em quantidades (dias e avos) de cada verba."""
+                      dias_inss: Optional[Callable[[date, date], int]] = None,
+                      aviso_indenizado_dias: Optional[int] = None,
+                      aviso_total_dias: Optional[int] = None) -> Dict[str, Any]:
+    """Transforma datas e tipo de rescisão em quantidades (dias e avos) de cada verba.
+    aviso_indenizado_dias / aviso_total_dias: vêm do aviso prévio registrado (ex.: 30 dias
+    trabalhados + proporcional indenizado), em vez de serem deduzidos do modo do aviso."""
     regra = TIPOS_RESCISAO[tipo]
-    aviso_total = dias_aviso_previo(admissao, desligamento)
-    aviso_ind = int(round(aviso_total * regra["aviso"])) if aviso_modo == "indenizado" else 0
+    aviso_total = aviso_total_dias if aviso_total_dias is not None else dias_aviso_previo(admissao, desligamento)
+    if aviso_indenizado_dias is not None:
+        aviso_ind = max(0, int(aviso_indenizado_dias))
+    else:
+        aviso_ind = int(round(aviso_total * regra["aviso"])) if aviso_modo == "indenizado" else 0
     projetada = desligamento + timedelta(days=aviso_ind)  # o aviso indenizado conta como tempo de serviço
 
     ultimo = calendar.monthrange(desligamento.year, desligamento.month)[1]

@@ -69,6 +69,7 @@ function dpTabs() {
     { id: 'documentos',        icon: 'file-text',     label: 'Documentos' },
     { id: 'dctfweb',           icon: 'landmark',      label: 'DCTFWeb' },
     { id: 'compliance',        icon: 'shield-check',  label: 'Compliance' },
+    { id: 'rel_folha',         icon: 'clipboard-list', label: 'Relatórios da Folha' },
     { id: 'rel_custo',         icon: 'calculator',    label: 'Custo CLT' },
     { id: 'rel_provisoes',     icon: 'piggy-bank',    label: 'Provisões' },
     { id: 'rel_folha_analitica', icon: 'table-2',     label: 'Folha Analítica' },
@@ -158,6 +159,7 @@ async function switchDpTab(tab, noRebuildTabs = false) {
     case 'esocial_tabelas':    await renderEsocialTabelas(body); break;
     case 'dctfweb':            await renderDctfweb(body); break;
     case 'compliance':         await renderCompliance(body); break;
+    case 'rel_folha':          await renderRelatoriosFolha(body); break;
     case 'rel_custo':          await renderRelCusto(body); break;
     case 'rel_provisoes':      await renderRelProvisoes(body); break;
     case 'rel_folha_analitica': await renderRelFolhaAnalitica(body); break;
@@ -583,6 +585,9 @@ async function openFolhaDetail(runId) {
           <button onclick="openAuthDoc('/api/dp/payroll/${run.id}/folha-impressa')"
             class="inline-flex items-center gap-1.5 text-xs text-violet-700 bg-violet-50 border border-violet-200 hover:bg-violet-100 px-3 py-1.5 rounded-lg">
             <i data-lucide="file-text" class="w-3.5 h-3.5"></i> Imprimir folha</button>
+          <button onclick="abrirEnvioHolerites(${run.id})"
+            class="inline-flex items-center gap-1.5 text-xs text-violet-700 bg-violet-50 border border-violet-200 hover:bg-violet-100 px-3 py-1.5 rounded-lg">
+            <i data-lucide="mail" class="w-3.5 h-3.5"></i> Enviar por e-mail</button>
           <button onclick="esFolhaParaCentral(${run.id})"
             class="inline-flex items-center gap-1.5 text-xs text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 px-3 py-1.5 rounded-lg">
             <i data-lucide="send" class="w-3.5 h-3.5"></i> eSocial (S-1200/S-1210)</button>
@@ -1117,20 +1122,49 @@ async function renderRescisao(el) {
       <td class="px-4 py-2.5 text-right whitespace-nowrap">
         <button onclick="event.stopPropagation();openEspecialDocumento(${r.id})"
           class="text-xs text-violet-600 hover:underline mr-2">TRCT</button>
+        <button onclick="event.stopPropagation();abrirRescisaoComplementar(${r.id}, ${r.employee_id})"
+          class="text-xs text-amber-600 hover:underline mr-2" title="Diferenças de dissídio, multa do art. 477, comissões">Complementar</button>
         <button onclick="event.stopPropagation();esEnviarCentral('/api/esocial/gerar/desligamento/${r.id}')"
           class="text-xs text-indigo-500 hover:underline mr-2" title="Gera o S-2299 na Central do eSocial">eSocial</button>
         <button onclick="event.stopPropagation();deleteEspecial(${r.id}, 'esta rescisão', 'rescisao')"
           class="text-xs text-rose-500 hover:underline">Excluir</button>
       </td>
     </tr>
+    ${(r.complementares || []).map(c => `
+    <tr class="border-b border-slate-100 dark:border-slate-800 bg-amber-50/40 dark:bg-amber-900/10 cursor-pointer"
+        onclick="toggleEspecialLines('res-reg', ${c.id})" title="Clique para ver as rubricas">
+      <td class="px-4 py-2 pl-8 text-xs text-amber-700">↳ Complementar #${c.id}</td>
+      <td class="px-4 py-2 text-xs text-slate-500">${_dpEsc((JSON.parse(c.params || '{}').motivo_nome) || '')}</td>
+      <td class="px-4 py-2 text-xs text-slate-400" colspan="2">pago em ${fDate2(c.data_pagamento)}</td>
+      <td class="px-4 py-2 text-sm text-slate-700 dark:text-slate-300">${fBRL2(c.total_proventos)}</td>
+      <td class="px-4 py-2 text-sm font-bold text-emerald-600">${fBRL2(c.liquido)}</td>
+      <td class="px-4 py-2 text-xs text-blue-600">${fBRL2(c.multa_fgts)}</td>
+      <td class="px-4 py-2 text-right whitespace-nowrap">
+        <button onclick="event.stopPropagation();openEspecialDocumento(${c.id})" class="text-xs text-violet-600 hover:underline mr-2">TRCT</button>
+        <button onclick="event.stopPropagation();deleteEspecial(${c.id}, 'esta rescisão complementar', 'rescisao')"
+          class="text-xs text-rose-500 hover:underline">Excluir</button>
+      </td>
+    </tr>
+    <tr id="res-reg-lines-${c.id}" class="hidden bg-slate-50/60 dark:bg-slate-900/40">
+      <td colspan="8" class="px-6 py-4">${_dpHoleriteTable(c)}</td>
+    </tr>`).join('')}
     <tr id="res-reg-lines-${r.id}" class="hidden bg-slate-50/60 dark:bg-slate-900/40">
       <td colspan="8" class="px-6 py-4">${_dpHoleriteTable(r)}</td>
     </tr>`).join('');
 
   el.innerHTML = `
-    <div class="mb-6">
-      <h2 class="font-bold text-slate-800 dark:text-slate-100 text-lg mb-1">Cálculo de Rescisão (TRCT)</h2>
-      <p class="text-xs text-slate-400">Saldo de salário, aviso prévio proporcional (Lei 12.506), 13º, férias vencidas/proporcionais, médias e multa FGTS.</p>
+    <div class="mb-6 flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h2 class="font-bold text-slate-800 dark:text-slate-100 text-lg mb-1">Cálculo de Rescisão (TRCT)</h2>
+        <p class="text-xs text-slate-400">Saldo de salário, aviso prévio proporcional (Lei 12.506), 13º, férias vencidas/proporcionais, médias e multa FGTS.
+          Se o funcionário tem aviso prévio registrado, a data e os dias vêm dele.</p>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <button onclick="abrirAvisosPrevios()" class="text-xs font-semibold px-3 py-2 rounded-xl border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100 flex items-center gap-1.5">
+          <i data-lucide="bell-ring" class="w-3.5 h-3.5"></i> Aviso prévio</button>
+        <button onclick="abrirRescisaoGrupo()" class="text-xs font-semibold px-3 py-2 rounded-xl border border-rose-200 text-rose-700 bg-rose-50 hover:bg-rose-100 flex items-center gap-1.5">
+          <i data-lucide="users" class="w-3.5 h-3.5"></i> Em grupo</button>
+      </div>
     </div>
     ${card2(`
       <div class="p-5">

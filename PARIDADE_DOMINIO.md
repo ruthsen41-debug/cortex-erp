@@ -162,7 +162,7 @@ Legenda: ✅ existe no Cortex · ⚠️ parcial · ❌ falta. O número entre pa
 | Cálculo (39): mensal, adiantamento, complementar | ✅ Mensal, adiantamento, complementar, dissídio. ❌ Faltam: folha de PLR, semanalista, mais de um adiantamento no mês |
 | Lançamentos (102) | ✅ Lançamento por rubrica, por funcionário e em lote, horas do ponto. ⚠️ Faltam: lançamento fixo com data-fim, DSR sobre comissão, faltas parciais em horas com DSR na semana |
 | Férias (54) | ✅ Individual com períodos, abono, dobro, médias, 13º nas férias e perda por afastamento ou faltas. ❌ Faltam: **programação de férias**, **férias em grupo e coletivas calculadas**, fracionamento em até 3 períodos (art. 134 §1º), antecipação da Lei 14.457 |
-| Rescisões (69) | ✅ Individual com TRCT, aviso, multa FGTS e 13º/férias. ❌ Faltam: **rescisão complementar** (dissídio, CCT, multa do art. 477, comissões), **rescisão em grupo**, aviso prévio como processo (gerar, cancelar, reduzir 2h/dia ou 7 dias), transferência entre empresas e filiais, morte, força maior |
+| Rescisões (69) | ✅ Individual com TRCT, aviso, multa FGTS e 13º/férias. ✅ (2026-11-18) **Rescisão complementar** (dissídio/CCT com recálculo por diferença, multa do art. 477, indenização da data-base, verbas avulsas), **rescisão em grupo** e **aviso prévio como processo** (registrar, carta, cancelar por reconsideração, redução 2h/7 dias, proporcional indenizado). ❌ Faltam: transferência entre empresas e filiais, morte, força maior |
 | Afastamentos (46) | ✅ Afastamentos com S-2230, atestados, CAT. ⚠️ Faltam: prorrogação de licença-maternidade, limbo previdenciário, declaração de último dia trabalhado |
 | Alteração Salarial (14) | ⚠️ Histórico salarial e dissídio existem. Faltam: alteração em grupo, troca de categoria (mensalista, horista, comissionado) |
 | Rotinas Automáticas (25) | ❌ Agendar cálculo da folha, recibos, guias e envios ao eSocial |
@@ -176,12 +176,12 @@ Legenda: ✅ existe no Cortex · ⚠️ parcial · ❌ falta. O número entre pa
 ### Relatórios
 | Menu Domínio | Cortex |
 |---|---|
-| Recibos (20) | ✅ Holerite em 2 vias, TRCT, recibo de férias. ❌ Faltam: **holerite por e-mail**, mensagem no recibo, termos de quitação e homologação, carta de preposto |
-| Folha (14) | ✅ Folha analítica com resumo, CNAB. ❌ Faltam: relação de líquidos, folha por empregado, extrato mensal, relatório de lançamentos, resumo de férias, relatório de rescisões |
+| Recibos (20) | ✅ Holerite em 2 vias, TRCT, recibo de férias, mensagem no recibo. ✅ (2026-11-18) **Holerite por e-mail** (SMTP próprio da empresa com senha cifrada, texto com campos, teste, registro e reenvio das falhas). ❌ Faltam: termos de quitação e homologação, carta de preposto |
+| Folha (14) | ✅ Folha analítica com resumo, CNAB. ✅ (2026-11-18) Relação de líquidos, ficha financeira anual (folha por empregado), lançamentos por rubrica, resumo de férias e relação de rescisões, em HTML para imprimir ou CSV. ❌ Faltam: extrato mensal consolidado |
 | Encargos e Guias (24) | ✅ GPS, DARF, DCTFWeb, FGTS Digital, SEFIP. ⚠️ Faltam: relatório de IRRF, analítico de GPS, encargos da empresa consolidado |
 | eSocial (57) | ✅ Central do eSocial e totalizadores. ⚠️ Faltam: demonstrativos de conferência folha × eSocial (INSS, IRRF, FGTS, PIS) e análise de fechamento |
 | Cadastrais e Gerenciador (72) | ⚠️ Há ficha de registro, contrato, advertência e quitação. ❌ Faltam modelos: contrato de experiência, determinado e intermitente, acordo de compensação e de prorrogação de horas, ficha e termo de salário-família, declaração de dependentes para IR, declaração e renúncia de VT, autorização de desconto, termo LGPD, carta de recomendação, comunicado de abandono de emprego, término de experiência |
-| Aviso Prévio (12) | ❌ Avisos prévios (empregador trabalhado e indenizado, pedido de demissão, acordo), aviso e solicitação de abono de férias |
+| Aviso Prévio (12) | ✅ Carta de aviso do empregador (trabalhado/indenizado, acordo) e pedido de demissão. ❌ Faltam: aviso e solicitação de abono de férias |
 | Outros (29) | ✅ Vencimento de experiência e de férias. ❌ Faltam: faltas, histórico do empregado, alterações salariais, quantidade de colaboradores, quadro de horário, cálculo de médias |
 | Informativos | ❌ Relatório de Transparência Salarial (Lei 14.611/2023) |
 | Programação de Férias | ❌ |

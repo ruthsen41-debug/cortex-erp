@@ -521,7 +521,9 @@ async function renderParametrosFolha(el) {
       ${linha('Mensagem no holerite', 'Texto impresso em todos os recibos de pagamento (até 300 caracteres).',
         `<textarea id="par-mensagem_recibo" rows="2" maxlength="300" class="${inputCls()}" placeholder="ex.: Feliz aniversário aos colaboradores do mês!">${_dpEsc(p.mensagem_recibo || '')}</textarea>`)}
       <div id="par-msg" class="text-xs my-3"></div>
-    </div>`)}`;
+    </div>`)}
+    <div id="par-email" class="mt-6"></div>`;
+  if (typeof renderEmailConfig === 'function') await renderEmailConfig(document.getElementById('par-email'));
   if (window.lucide) lucide.createIcons();
 }
 

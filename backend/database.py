@@ -3053,6 +3053,43 @@ def _migrate_dp_rotinas(cur) -> None:
         atualizado_em TEXT DEFAULT '',
         atualizado_por TEXT DEFAULT ''
     )""")
+    # Servidor de e-mail (SMTP) da empresa, para envio de holerites; senha cifrada (crypto_vault)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS smtp_config (
+        company_id INTEGER PRIMARY KEY,
+        host TEXT DEFAULT '',
+        porta INTEGER DEFAULT 587,
+        seguranca TEXT DEFAULT 'starttls',
+        usuario TEXT DEFAULT '',
+        senha_cifrada TEXT DEFAULT '',
+        remetente TEXT DEFAULT '',
+        nome_remetente TEXT DEFAULT '',
+        assunto TEXT DEFAULT '',
+        corpo TEXT DEFAULT '',
+        atualizado_em TEXT DEFAULT ''
+    )""")
+    # Aviso prévio como processo (CLT arts. 487 a 491 e Lei 12.506/2011)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS avisos_previos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL,
+        employee_id INTEGER NOT NULL,
+        iniciativa TEXT NOT NULL,
+        modo TEXT NOT NULL,
+        reducao TEXT DEFAULT '',
+        data_aviso TEXT NOT NULL,
+        dias_total INTEGER DEFAULT 30,
+        dias_trabalhados INTEGER DEFAULT 0,
+        dias_indenizados INTEGER DEFAULT 0,
+        data_fim TEXT DEFAULT '',
+        data_desligamento TEXT DEFAULT '',
+        data_projetada TEXT DEFAULT '',
+        status TEXT DEFAULT 'ativo',
+        rescisao_id INTEGER,
+        motivo_cancelamento TEXT DEFAULT '',
+        observacao TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
 
 
 def _migrate_esocial_complementos(cur) -> None:

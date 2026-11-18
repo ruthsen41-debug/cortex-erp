@@ -201,6 +201,18 @@ def gerar_recibos_html(co: Dict[str, Any], run: Dict[str, Any], items: List[Dict
 </body></html>"""
 
 
+def gerar_holerite_unico_html(co: Dict[str, Any], run: Dict[str, Any], it: Dict[str, Any],
+                              mensagem: str = "") -> str:
+    """Holerite de um funcionário em via única (anexo do envio por e-mail)."""
+    comp = competencia_extenso(_txt(run.get("competence")))
+    return f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+<title>{_esc(f"Holerite {it.get('employee_name', '')} - {comp}")}</title>
+<style>{RECIBO_CSS}</style></head><body>
+<div class="no-print"><span>{_esc(comp)}</span> <button onclick="window.print()">Imprimir / Salvar PDF</button></div>
+<div class="folha">{_recibo_via(co, run, it, "Via do empregado", mensagem)}</div>
+</body></html>"""
+
+
 # ─── Folha de pagamento (analítica + resumo) ──────────────────────────────────
 
 FOLHA_CSS = """*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;color:#000;background:#fff;margin:0;font-size:9.5px}

@@ -20,11 +20,12 @@ try:
     from ..services.esocial_generator import (gerar_s2200, gerar_s1200, gerar_s2299, gerar_s2230, gerar_s2210,
         gerar_s1000, gerar_s1005, gerar_s1020, gerar_s1050, gerar_s1070, gerar_s3000, gerar_s5001, gerar_s5011,
         gerar_s2298, _build_det_verbas)
-    from ..services import payroll_engine, payroll_special, payroll_complementar, escalas, dp_parametros
+    from ..services import payroll_engine, payroll_special, payroll_complementar, escalas, dp_parametros, rescisao_extra
     from ..services.payroll_tables import default_seed, load_tables
     from ..services.formula_engine import FormulaError, FUNCOES as FORMULA_FUNCOES
     from ..services.ficha_registro import gerar_ficha_registro_html
-    from ..services.folha_impressao import gerar_folha_html, gerar_recibos_html
+    from ..services.folha_impressao import gerar_folha_html, gerar_recibos_html, gerar_holerite_unico_html, competencia_extenso
+    from ..services import holerite_email, relatorios_folha
 except ImportError:
     from database import get_conn
     from auth import get_current_user, log_audit
@@ -34,11 +35,12 @@ except ImportError:
     from services.esocial_generator import (gerar_s2200, gerar_s1200, gerar_s2299, gerar_s2230, gerar_s2210,
         gerar_s1000, gerar_s1005, gerar_s1020, gerar_s1050, gerar_s1070, gerar_s3000, gerar_s5001, gerar_s5011,
         gerar_s2298, _build_det_verbas)
-    from services import payroll_engine, payroll_special, payroll_complementar, escalas, dp_parametros
+    from services import payroll_engine, payroll_special, payroll_complementar, escalas, dp_parametros, rescisao_extra
     from services.payroll_tables import default_seed, load_tables
     from services.formula_engine import FormulaError, FUNCOES as FORMULA_FUNCOES
     from services.ficha_registro import gerar_ficha_registro_html
-    from services.folha_impressao import gerar_folha_html, gerar_recibos_html
+    from services.folha_impressao import gerar_folha_html, gerar_recibos_html, gerar_holerite_unico_html, competencia_extenso
+    from services import holerite_email, relatorios_folha
 
 router = APIRouter(prefix="/api/dp", tags=["Departamento Pessoal"])
 
@@ -528,6 +530,153 @@ def imprimir_recibos(run_id: int, employee_id: Optional[int] = Query(default=Non
     mensagem = dp_parametros.carregar(conn, current_user.get("company_id", 1))["mensagem_recibo"]
     conn.close()
     return Response(content=gerar_recibos_html(company, run, items, mensagem), media_type="text/html")
+
+
+# ── Holerite por e-mail ──────────────────────────────────────────────────────
+
+def _pode_configurar_email(current_user: Dict[str, Any]) -> None:
+    if not current_user.get("is_superadmin") and (current_user.get("role") or "") not in ("admin", "dp"):
+        raise HTTPException(status_code=403, detail="Apenas administrador ou Depto. Pessoal podem configurar o e-mail.")
+
+
+@router.get("/email-config")
+def email_config_get(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Servidor de e-mail usado no envio de holerites (a senha nunca é devolvida)."""
+    conn = get_conn()
+    try:
+        cfg = holerite_email.carregar_config(conn, current_user.get("company_id", 1))
+    finally:
+        conn.close()
+    return {**cfg, "assunto_padrao": holerite_email.ASSUNTO_PADRAO, "corpo_padrao": holerite_email.CORPO_PADRAO}
+
+
+@router.put("/email-config")
+def email_config_put(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    _pode_configurar_email(current_user)
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    try:
+        holerite_email.salvar_config(conn, company_id, data)
+        conn.commit()
+        return holerite_email.carregar_config(conn, company_id)
+    except holerite_email.EmailConfigErro as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        conn.close()
+
+
+@router.post("/email-config/teste")
+def email_config_teste(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    _pode_configurar_email(current_user)
+    conn = get_conn()
+    try:
+        cfg = holerite_email.carregar_config(conn, current_user.get("company_id", 1), com_senha=True)
+    finally:
+        conn.close()
+    try:
+        holerite_email.enviar_teste(cfg, str(data.get("para") or "").strip())
+    except holerite_email.EmailConfigErro as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"O servidor de e-mail recusou: {str(e)[:300]}")
+    return {"ok": True}
+
+
+def _ultimos_envios(conn, run_id: int, company_id: int) -> Dict[int, Dict[str, Any]]:
+    ult: Dict[int, Dict[str, Any]] = {}
+    for r in rows_to_dicts(conn.execute(
+            "SELECT * FROM holerite_envios WHERE run_id=? AND company_id=? ORDER BY id", (run_id, company_id)).fetchall()):
+        ult[r["employee_id"]] = r
+    return ult
+
+
+@router.get("/payroll/{run_id:int}/holerites/envios")
+def holerites_envios(run_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Funcionários da folha com o e-mail do cadastro e a situação do último envio."""
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    try:
+        run, _, items = _load_payroll_print(conn, run_id, company_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="Folha não encontrada.")
+        emails = {r["id"]: r["email"] for r in rows_to_dicts(conn.execute(
+            "SELECT id, email FROM employees WHERE company_id=?", (company_id,)).fetchall())}
+        ult = _ultimos_envios(conn, run_id, company_id)
+        cfg = holerite_email.carregar_config(conn, company_id)
+    finally:
+        conn.close()
+    out = []
+    for it in items:
+        u = ult.get(it["employee_id"]) or {}
+        email = (emails.get(it["employee_id"]) or "").strip()
+        out.append({"employee_id": it["employee_id"], "employee_name": it["employee_name"], "email": email,
+                    "email_valido": holerite_email.email_valido(email), "liquido": it.get("net_salary"),
+                    "status": u.get("status") or "", "erro": u.get("erro") or "", "enviado_em": u.get("enviado_em") or ""})
+    return {"run_id": run_id, "competencia": run["competence"], "smtp_origem": cfg["origem"],
+            "remetente": cfg["remetente"], "funcionarios": out}
+
+
+@router.post("/payroll/{run_id:int}/holerites/email")
+def holerites_enviar(run_id: int, data: Dict[str, Any] = Body(default={}),
+                     current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Envia o holerite de cada funcionário para o e-mail do cadastro.
+    employee_ids: só esses; somente_pendentes: pula quem já recebeu com sucesso."""
+    _pode_configurar_email(current_user)
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    try:
+        run, company, items = _load_payroll_print(conn, run_id, company_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="Folha não encontrada.")
+        if (run.get("status") or "") == "cancelado":
+            raise HTTPException(status_code=400, detail="Folha cancelada.")
+        ids = {int(i) for i in (data or {}).get("employee_ids") or []}
+        if ids:
+            items = [it for it in items if it["employee_id"] in ids]
+        if (data or {}).get("somente_pendentes"):
+            ult = _ultimos_envios(conn, run_id, company_id)
+            items = [it for it in items if (ult.get(it["employee_id"]) or {}).get("status") != "enviado"]
+        if not items:
+            raise HTTPException(status_code=400, detail="Nenhum holerite para enviar.")
+        emails = {r["id"]: r["email"] for r in rows_to_dicts(conn.execute(
+            "SELECT id, email FROM employees WHERE company_id=?", (company_id,)).fetchall())}
+        cfg = holerite_email.carregar_config(conn, company_id, com_senha=True)
+        mensagem = dp_parametros.carregar(conn, company_id)["mensagem_recibo"]
+    except Exception:
+        conn.close()
+        raise
+    conn.close()
+
+    comp_ext = competencia_extenso(run["competence"])
+    empresa = company.get("nome_fantasia") or company.get("razao_social") or ""
+    destinos = [{"employee_id": it["employee_id"], "nome": it["employee_name"] or "",
+                 "email": emails.get(it["employee_id"]) or "", "competencia": run["competence"],
+                 "competencia_extenso": comp_ext, "empresa": empresa,
+                 "liquido": _fmt_brl(it.get("net_salary")).replace("R$", "").strip(), "item": it} for it in items]
+    try:
+        resultado = holerite_email.enviar_holerites(
+            cfg, destinos, lambda it: gerar_holerite_unico_html(company, run, it, mensagem))
+    except holerite_email.EmailConfigErro as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Não foi possível conectar ao servidor de e-mail: {str(e)[:300]}")
+
+    conn = get_conn()
+    try:
+        agora = datetime.now().isoformat(timespec="seconds")
+        for r in resultado:
+            conn.execute("""INSERT INTO holerite_envios (company_id, run_id, employee_id, email, status, erro, enviado_em)
+                            VALUES (?,?,?,?,?,?,?)""",
+                         (company_id, run_id, r["employee_id"], r["email"], r["status"], r["erro"], agora))
+        conn.commit()
+    finally:
+        conn.close()
+    nomes = {d["employee_id"]: d["nome"] for d in destinos}
+    for r in resultado:
+        r["employee_name"] = nomes.get(r["employee_id"], "")
+    return {"enviados": sum(1 for r in resultado if r["status"] == "enviado"),
+            "falhas": sum(1 for r in resultado if r["status"] != "enviado"), "resultado": resultado}
 
 
 @router.get("/payroll/{run_id:int}/folha-impressa")
@@ -1699,7 +1848,33 @@ def ferias_alertas(current_user: Dict[str, Any] = Depends(get_current_user)):
 
 # ── Rescisão ─────────────────────────────────────────────────────────────────
 
+def _aviso_da_rescisao(conn, company_id: int, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Aviso prévio registrado que alimenta a rescisão: o informado em aviso_id ou o ativo do funcionário."""
+    if data.get("aviso_id"):
+        row = conn.execute("SELECT * FROM avisos_previos WHERE id=? AND company_id=?",
+                           (data["aviso_id"], company_id)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Aviso prévio não encontrado.")
+        aviso = dict(row)
+        if aviso["status"] == "cancelado":
+            raise HTTPException(status_code=400, detail="Este aviso prévio foi cancelado.")
+        if data.get("employee_id") and int(data["employee_id"]) != aviso["employee_id"]:
+            raise HTTPException(status_code=400, detail="O aviso prévio é de outro funcionário.")
+        return aviso
+    if data.get("ignorar_aviso") or not data.get("employee_id"):
+        return None
+    row = conn.execute("SELECT * FROM avisos_previos WHERE company_id=? AND employee_id=? AND status='ativo' "
+                       "ORDER BY id DESC LIMIT 1", (company_id, data["employee_id"])).fetchone()
+    return dict(row) if row else None
+
+
 def _calc_rescisao(conn, company_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
+    aviso = _aviso_da_rescisao(conn, company_id, data)
+    if aviso:
+        data = {**data, "employee_id": aviso["employee_id"],
+                "tipo": rescisao_extra.INICIATIVAS[aviso["iniciativa"]]["tipo_rescisao"],
+                "aviso_modo": aviso["modo"],
+                "data_desligamento": data.get("data_desligamento") or aviso["data_desligamento"]}
     emp = _emp_or_404(conn, company_id, data.get("employee_id"))
     tipo = str(data.get("tipo") or data.get("termination_type") or "sem_justa_causa")
     if tipo not in payroll_special.TIPOS_RESCISAO:
@@ -1715,8 +1890,10 @@ def _calc_rescisao(conn, company_id: int, data: Dict[str, Any]) -> Dict[str, Any
         raise HTTPException(status_code=400, detail="A data de desligamento é anterior à admissão.")
 
     gozados, faltas = payroll_special.ferias_registradas(conn, company_id, emp["id"])
-    plano = payroll_special.planejar_rescisao(adm, deslig, tipo, aviso_modo, gozados, faltas,
-                                              payroll_special.dias_inss_fn(conn, company_id, emp["id"]))
+    plano = data.get("_plano") or payroll_special.planejar_rescisao(
+        adm, deslig, tipo, aviso_modo, gozados, faltas, payroll_special.dias_inss_fn(conn, company_id, emp["id"]),
+        aviso_indenizado_dias=aviso["dias_indenizados"] if aviso else None,
+        aviso_total_dias=aviso["dias_total"] if aviso else None)
     comp = deslig.strftime("%Y-%m")
     anterior = (date(deslig.year, deslig.month, 1) - timedelta(days=1)).strftime("%Y-%m")
     ano_ini = max(f"{deslig.year}-01", adm.strftime("%Y-%m"))
@@ -1737,7 +1914,10 @@ def _calc_rescisao(conn, company_id: int, data: Dict[str, Any]) -> Dict[str, Any
         adiant_13 = float(dict(row)["t"] or 0) + _adiant13_ferias(conn, company_id, eid, deslig.year)
 
     avisos_extra = []
-    if tem_2a:
+    if aviso:
+        avisos_extra.append(f"Aviso prévio registrado em {_fmt_dt(aviso['data_aviso'])}: {aviso['dias_trabalhados']} dia(s) "
+                            f"trabalhado(s), {aviso['dias_indenizados']} indenizado(s).")
+    if tem_2a and not data.get("_plano"):
         plano["avos_13"] = plano["avos_13_indenizado"] = 0
         avisos_extra.append("O 13º deste ano já foi pago integralmente (2ª parcela gravada); não entra na rescisão.")
     if data.get("saldo_fgts") not in (None, ""):
@@ -1760,6 +1940,8 @@ def _calc_rescisao(conn, company_id: int, data: Dict[str, Any]) -> Dict[str, Any
 
     tables = load_tables(conn, company_id, comp)
     ctx = payroll_special.contexto_funcionario(conn, company_id, emp, deslig)
+    if data.get("_salario"):
+        ctx.salario = float(data["_salario"])
     res = payroll_special.calc_rescisao(ctx, tables, payroll_engine.load_rubrics(conn, company_id), plano,
                                         media_13=media_13, media_ferias=media_12, media_aviso=media_12,
                                         adiantamento_13=adiant_13, saldo_fgts=saldo_fgts,
@@ -1767,7 +1949,8 @@ def _calc_rescisao(conn, company_id: int, data: Dict[str, Any]) -> Dict[str, Any
     res["avisos"].extend(avisos_extra)
     return _especial_view(res, tipo=tipo, tipo_nome=payroll_special.TIPOS_RESCISAO[tipo]["nome"],
                           aviso_modo=aviso_modo, data_desligamento=deslig.isoformat(), competencia=comp,
-                          saldo_fgts_origem=origem, admission_date=emp.get("admission_date"))
+                          saldo_fgts_origem=origem, admission_date=emp.get("admission_date"),
+                          aviso_id=aviso["id"] if aviso else None)
 
 
 @router.post("/rescisao/preview")
@@ -1779,6 +1962,29 @@ def rescisao_preview(data: Dict[str, Any] = Body(...), current_user: Dict[str, A
         conn.close()
 
 
+def _gravar_rescisao(conn, company_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
+    res = _calc_rescisao(conn, company_id, data)
+    if conn.execute(
+            "SELECT COUNT(*) FROM payroll_special WHERE company_id=? AND employee_id=? AND tipo='rescisao' AND status != 'cancelado'",
+            (company_id, res["employee_id"])).fetchone()[0]:
+        raise HTTPException(status_code=400, detail="Este funcionário já tem uma rescisão gravada. Exclua-a para refazer.")
+    desligar = data.get("desligar", True) not in (False, 0, "false", "0")
+    salario = conn.execute("SELECT salary FROM employees WHERE id=?", (res["employee_id"],)).fetchone()[0]
+    new_id = _save_special(
+        conn, company_id, "rescisao", res, referencia=res["tipo"], competencia=res["competencia"],
+        data_inicio=res["data_desligamento"], data_fim=res["plano"]["data_projetada"],
+        params={"plano": res["plano"], "aviso_modo": res["aviso_modo"], "saldo_fgts": res["saldo_fgts"],
+                "saldo_fgts_origem": res["saldo_fgts_origem"], "desligou": desligar,
+                "aviso_id": res.get("aviso_id"), "salario": float(salario or 0)})
+    if desligar:
+        conn.execute("UPDATE employees SET active = 0, termination_date = ?, termination_reason = ? WHERE id = ? AND company_id = ?",
+                     (res["data_desligamento"], res["tipo"], res["employee_id"], company_id))
+    if res.get("aviso_id"):
+        conn.execute("UPDATE avisos_previos SET status='convertido', rescisao_id=? WHERE id=? AND company_id=?",
+                     (new_id, res["aviso_id"], company_id))
+    return {"id": new_id, "ok": True, "desligado": desligar, **res}
+
+
 @router.post("/rescisao", status_code=201)
 def rescisao_create(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
     """Grava a rescisão. Com desligar=true (padrão), o funcionário é marcado como desligado."""
@@ -1786,34 +1992,25 @@ def rescisao_create(data: Dict[str, Any] = Body(...), current_user: Dict[str, An
     company_id = current_user.get("company_id", 1)
     try:
         payroll_engine.ensure_system_rubrics(conn, company_id)
-        res = _calc_rescisao(conn, company_id, data)
-        if conn.execute(
-                "SELECT COUNT(*) FROM payroll_special WHERE company_id=? AND employee_id=? AND tipo='rescisao' AND status != 'cancelado'",
-                (company_id, res["employee_id"])).fetchone()[0]:
-            raise HTTPException(status_code=400, detail="Este funcionário já tem uma rescisão gravada. Exclua-a para refazer.")
-        desligar = data.get("desligar", True) not in (False, 0, "false", "0")
-        new_id = _save_special(
-            conn, company_id, "rescisao", res, referencia=res["tipo"], competencia=res["competencia"],
-            data_inicio=res["data_desligamento"], data_fim=res["plano"]["data_projetada"],
-            params={"plano": res["plano"], "aviso_modo": res["aviso_modo"], "saldo_fgts": res["saldo_fgts"],
-                    "saldo_fgts_origem": res["saldo_fgts_origem"], "desligou": desligar})
-        if desligar:
-            conn.execute("UPDATE employees SET active = 0, termination_date = ?, termination_reason = ? WHERE id = ? AND company_id = ?",
-                         (res["data_desligamento"], res["tipo"], res["employee_id"], company_id))
+        out = _gravar_rescisao(conn, company_id, data)
         conn.commit()
     except Exception:
         conn.rollback()
         conn.close()
         raise
     conn.close()
-    return {"id": new_id, "ok": True, "desligado": desligar, **res}
+    return out
 
 
 @router.get("/rescisao")
 def rescisao_list(current_user: Dict[str, Any] = Depends(get_current_user)):
     conn = get_conn()
-    rows = _list_special(conn, current_user.get("company_id", 1), ["rescisao"])
+    company_id = current_user.get("company_id", 1)
+    rows = _list_special(conn, company_id, ["rescisao"])
+    compl = _list_special(conn, company_id, ["rescisao_compl"])
     conn.close()
+    for r in rows:
+        r["complementares"] = [c for c in compl if c.get("referencia") == str(r["id"])]
     return rows
 
 
@@ -1823,11 +2020,357 @@ def rescisao_tipos(current_user: Dict[str, Any] = Depends(get_current_user)):
             "aviso_modos": list(payroll_special.AVISO_MODOS)}
 
 
+
+# ── Aviso prévio como processo ───────────────────────────────────────────────
+
+def _plano_aviso(conn, company_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
+    emp = _emp_or_404(conn, company_id, data.get("employee_id"))
+    adm = payroll_engine._parse_date(emp.get("admission_date"))
+    if not adm:
+        raise HTTPException(status_code=400, detail="Funcionário sem data de admissão válida.")
+    data_aviso = _data_iso(data.get("data_aviso"), "Data do aviso")
+    try:
+        plano = rescisao_extra.planejar_aviso(
+            adm, data_aviso, str(data.get("iniciativa") or "empregador"), str(data.get("modo") or "trabalhado"),
+            str(data.get("reducao") or ""), bool(data.get("proporcional_trabalhado")))
+    except rescisao_extra.AvisoInvalido as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return {**plano, "employee_id": emp["id"], "employee_name": emp["name"],
+            "admission_date": emp.get("admission_date"), "observacao": str(data.get("observacao") or "")[:500]}
+
+
+@router.post("/avisos-previos/preview")
+def aviso_previo_preview(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    try:
+        return _plano_aviso(conn, current_user.get("company_id", 1), data)
+    finally:
+        conn.close()
+
+
+@router.post("/avisos-previos", status_code=201)
+def aviso_previo_create(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Registra o aviso prévio. A rescisão do funcionário passa a usar os dias e a data dele."""
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    try:
+        p = _plano_aviso(conn, company_id, data)
+        if conn.execute("SELECT COUNT(*) FROM avisos_previos WHERE company_id=? AND employee_id=? AND status='ativo'",
+                        (company_id, p["employee_id"])).fetchone()[0]:
+            raise HTTPException(status_code=400, detail="Este funcionário já tem um aviso prévio em andamento. Cancele-o antes.")
+        if conn.execute("SELECT COUNT(*) FROM payroll_special WHERE company_id=? AND employee_id=? AND tipo='rescisao' "
+                        "AND status != 'cancelado'", (company_id, p["employee_id"])).fetchone()[0]:
+            raise HTTPException(status_code=400, detail="Este funcionário já tem rescisão gravada.")
+        cur = conn.cursor()
+        cur.execute("""INSERT INTO avisos_previos (company_id, employee_id, iniciativa, modo, reducao, data_aviso,
+                           dias_total, dias_trabalhados, dias_indenizados, data_fim, data_desligamento, data_projetada,
+                           status, observacao) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'ativo',?)""",
+                    (company_id, p["employee_id"], p["iniciativa"], p["modo"], p["reducao"], p["data_aviso"],
+                     p["dias_total"], p["dias_trabalhados"], p["dias_indenizados"], p["data_fim"],
+                     p["data_desligamento"], p["data_projetada"], p["observacao"]))
+        new_id = cur.lastrowid
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        conn.close()
+        raise
+    conn.close()
+    return {"id": new_id, "status": "ativo", **p}
+
+
+@router.get("/avisos-previos")
+def aviso_previo_list(status: Optional[str] = None, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    sql = """SELECT a.*, e.name AS employee_name, e.role FROM avisos_previos a
+             JOIN employees e ON e.id = a.employee_id WHERE a.company_id=?"""
+    params: List[Any] = [current_user.get("company_id", 1)]
+    if status:
+        sql += " AND a.status=?"
+        params.append(status)
+    rows = rows_to_dicts(conn.execute(sql + " ORDER BY a.data_aviso DESC, a.id DESC", params).fetchall())
+    conn.close()
+    for r in rows:
+        r["iniciativa_nome"] = rescisao_extra.INICIATIVAS.get(r["iniciativa"], {}).get("nome", r["iniciativa"])
+        r["reducao_nome"] = rescisao_extra.REDUCOES.get(r.get("reducao") or "", "")
+    return rows
+
+
+@router.post("/avisos-previos/{aviso_id:int}/cancelar")
+def aviso_previo_cancelar(aviso_id: int, data: Dict[str, Any] = Body(default={}),
+                          current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Reconsideração do aviso (CLT art. 489): só vale com a concordância da outra parte."""
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    try:
+        row = conn.execute("SELECT * FROM avisos_previos WHERE id=? AND company_id=?", (aviso_id, company_id)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Aviso prévio não encontrado.")
+        if dict(row)["status"] != "ativo":
+            raise HTTPException(status_code=400, detail="Só é possível cancelar um aviso em andamento (sem rescisão gravada).")
+        motivo = str((data or {}).get("motivo") or "").strip()
+        if not motivo:
+            raise HTTPException(status_code=422, detail="Informe o motivo do cancelamento (reconsideração aceita pela outra parte, art. 489).")
+        conn.execute("UPDATE avisos_previos SET status='cancelado', motivo_cancelamento=? WHERE id=?", (motivo[:500], aviso_id))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "id": aviso_id, "status": "cancelado"}
+
+
+@router.delete("/avisos-previos/{aviso_id:int}")
+def aviso_previo_delete(aviso_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    try:
+        row = conn.execute("SELECT status FROM avisos_previos WHERE id=? AND company_id=?", (aviso_id, company_id)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Aviso prévio não encontrado.")
+        if dict(row)["status"] == "convertido":
+            raise HTTPException(status_code=400, detail="O aviso já virou rescisão. Exclua a rescisão antes.")
+        conn.execute("DELETE FROM avisos_previos WHERE id=?", (aviso_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True}
+
+
+@router.get("/avisos-previos/{aviso_id:int}/documento", response_class=HTMLResponse)
+def aviso_previo_documento(aviso_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Carta de aviso prévio (empregador → empregado) ou pedido de demissão do empregado."""
+    from html import escape as _esc
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    row = conn.execute("SELECT * FROM avisos_previos WHERE id=? AND company_id=?", (aviso_id, company_id)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Aviso prévio não encontrado.")
+    a = dict(row)
+    emp = dict(conn.execute("SELECT * FROM employees WHERE id=?", (a["employee_id"],)).fetchone() or {})
+    co = dict(conn.execute("SELECT * FROM companies WHERE id=?", (company_id,)).fetchone() or {})
+    conn.close()
+    empresa, nome = _esc(co.get("razao_social") or ""), _esc(emp.get("name") or "")
+    cpf, cargo = _esc(emp.get("cpf") or ""), _esc(emp.get("role") or "")
+    dt = _fmt_dt
+    inicio = (date.fromisoformat(a["data_aviso"][:10]) + timedelta(days=1)).isoformat()
+    if a["iniciativa"] == "empregado":
+        titulo = "PEDIDO DE DEMISSÃO E AVISO PRÉVIO"
+        corpo = (f"<p>À {empresa},</p><p>Eu, <b>{nome}</b>, CPF {cpf}, comunico que não tenho mais interesse em "
+                 f"continuar trabalhando nesta empresa e peço demissão do cargo de {cargo}.</p>")
+        if a["modo"] == "trabalhado":
+            corpo += (f"<p>Cumprirei o aviso prévio de 30 dias, de {dt(inicio)} a {dt(a['data_fim'])}, "
+                      "conforme o art. 487 da CLT.</p>")
+        elif a["modo"] == "dispensado":
+            corpo += "<p>Solicito a dispensa do cumprimento do aviso prévio.</p><p>( ) De acordo — Empregador</p>"
+        else:
+            corpo += "<p>Não cumprirei o aviso prévio e estou ciente do desconto de 30 dias (art. 487 §2º da CLT).</p>"
+        assin_a, assin_b = f"{nome}<br>Empregado", f"{empresa}<br>Ciente — Empregador"
+    else:
+        titulo = "AVISO PRÉVIO DO EMPREGADOR" + (" — ACORDO (ART. 484-A DA CLT)" if a["iniciativa"] == "acordo" else "")
+        corpo = (f"<p>Ao(À) Sr(a). <b>{nome}</b>, CPF {cpf}, cargo {cargo}.</p>"
+                 f"<p>Comunicamos que, a partir desta data, {dt(a['data_aviso'])}, o seu contrato de trabalho será "
+                 f"rescindido, com aviso prévio de {a['dias_total']} dias (Lei 12.506/2011).</p>")
+        if a["modo"] == "trabalhado":
+            corpo += f"<p>O aviso será <b>trabalhado</b> de {dt(inicio)} a {dt(a['data_fim'])} ({a['dias_trabalhados']} dias)"
+            corpo += (f" e os {a['dias_indenizados']} dias restantes serão indenizados.</p>" if a["dias_indenizados"] else ".</p>")
+            if a.get("reducao") == "2h":
+                corpo += "<p>Opção do empregado (art. 488 da CLT): <b>redução de 2 horas diárias</b> na jornada.</p>"
+            elif a.get("reducao") == "7dias":
+                corpo += "<p>Opção do empregado (art. 488, parágrafo único, da CLT): <b>falta de 7 dias corridos</b> ao final do aviso.</p>"
+            else:
+                corpo += ("<p>Opção do empregado pela redução (art. 488 da CLT): ( ) 2 horas diárias &nbsp; "
+                          "( ) 7 dias corridos ao final.</p>")
+        else:
+            corpo += (f"<p>O aviso será <b>indenizado</b> ({a['dias_indenizados']} dias), com desligamento em "
+                      f"{dt(a['data_desligamento'])} e projeção até {dt(a['data_projetada'])}.</p>")
+        corpo += "<p>Compareça ao Departamento Pessoal para o exame demissional e o acerto das verbas rescisórias.</p>"
+        assin_a, assin_b = f"{empresa}<br>Empregador", f"{nome}<br>Ciente — Empregado"
+    if a["status"] == "cancelado":
+        corpo += f"<p style='color:#be123c'><b>AVISO CANCELADO</b> — {_esc(a.get('motivo_cancelamento') or '')}</p>"
+    html = f"""<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>{titulo} — {nome}</title>
+<style>body{{font-family:Arial,Helvetica,sans-serif;margin:32px;color:#0f172a;font-size:14px;line-height:1.6}}
+.page{{max-width:760px;margin:0 auto}} h1{{font-size:17px;text-align:center;margin:24px 0}}
+.assin{{display:grid;grid-template-columns:1fr 1fr;gap:48px;margin-top:64px}}
+.assin div{{border-top:1px solid #0f172a;padding-top:6px;text-align:center;font-size:12px}}
+.no-print{{text-align:right}} @media print{{.no-print{{display:none}} body{{margin:0}}}}</style></head>
+<body><div class="no-print"><button onclick="window.print()" style="padding:8px 16px;font-weight:bold;cursor:pointer">Imprimir / Salvar PDF</button></div>
+<div class="page"><div style="font-size:12px"><b>{empresa}</b><br>CNPJ {_esc(co.get('cnpj') or '')}</div>
+<h1>{titulo}</h1>{corpo}<p style="margin-top:32px">{_esc(co.get('cidade') or '')}, {dt(a['data_aviso'])}.</p>
+<div class="assin"><div>{assin_a}</div><div>{assin_b}</div></div></div></body></html>"""
+    return HTMLResponse(content=html)
+
+
+# ── Rescisão em grupo ────────────────────────────────────────────────────────
+
+def _rescisao_grupo(conn, company_id: int, data: Dict[str, Any], gravar: bool) -> Dict[str, Any]:
+    tipo = str(data.get("tipo") or "sem_justa_causa")
+    deslig = _data_iso(data.get("data_desligamento"), "Data de desligamento").isoformat()
+    ok, ignorados = [], []
+    for emp in _funcionarios_selecionados(conn, company_id, data):
+        item = {"employee_id": emp["id"], "data_desligamento": deslig, "tipo": tipo,
+                "aviso_modo": data.get("aviso_modo"), "desligar": data.get("desligar", True), "ignorar_aviso": True}
+        try:
+            if gravar:
+                conn.execute("SAVEPOINT resc_grupo")
+                res = _gravar_rescisao(conn, company_id, item)
+                conn.execute("RELEASE SAVEPOINT resc_grupo")
+            else:
+                res = _calc_rescisao(conn, company_id, item)
+        except HTTPException as e:
+            if gravar:
+                conn.execute("ROLLBACK TO SAVEPOINT resc_grupo")
+                conn.execute("RELEASE SAVEPOINT resc_grupo")
+            ignorados.append({"employee_id": emp["id"], "employee_name": emp["name"], "motivo": str(e.detail)})
+            continue
+        ok.append({"id": res.get("id"), "employee_id": emp["id"], "employee_name": emp["name"],
+                   "aviso_dias": res["plano"]["aviso_indenizado_dias"], "data_projetada": res["plano"]["data_projetada"],
+                   "bruto": res["total_proventos"], "liquido": res["liquido"], "fgts": res["fgts"],
+                   "multa_fgts": res["multa_fgts"], "avisos": res.get("avisos", [])})
+    avisos = []
+    if len(ok) >= 2 and tipo == "sem_justa_causa":
+        avisos.append("Dispensa coletiva: não depende de autorização do sindicato (CLT art. 477-A), mas o STF "
+                      "(Tema 638) exige diálogo prévio com o sindicato. Confira também a convenção coletiva.")
+    return {"tipo": tipo, "data_desligamento": deslig, "funcionarios": ok, "ignorados": ignorados, "avisos": avisos,
+            "total_bruto": round(sum(o["bruto"] for o in ok), 2), "total_liquido": round(sum(o["liquido"] for o in ok), 2),
+            "total_multa_fgts": round(sum(o["multa_fgts"] for o in ok), 2)}
+
+
+@router.post("/rescisao/grupo/preview")
+def rescisao_grupo_preview(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Simula a rescisão de vários funcionários com a mesma data e o mesmo tipo."""
+    conn = get_conn()
+    try:
+        return _rescisao_grupo(conn, current_user.get("company_id", 1), data, gravar=False)
+    finally:
+        conn.close()
+
+
+@router.post("/rescisao/grupo", status_code=201)
+def rescisao_grupo_create(data: Dict[str, Any] = Body(...), current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    try:
+        payroll_engine.ensure_system_rubrics(conn, company_id)
+        out = _rescisao_grupo(conn, company_id, data, gravar=True)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        conn.close()
+        raise
+    conn.close()
+    return out
+
+
+# ── Rescisão complementar ────────────────────────────────────────────────────
+
+_MOTIVOS_COMPL = {"dissidio": "Dissídio / reajuste retroativo", "convencao": "Convenção coletiva",
+                  "multa_477": "Multa do art. 477 da CLT", "comissoes": "Comissões e variáveis", "outros": "Outros"}
+
+
+def _calc_rescisao_compl(conn, company_id: int, special_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
+    regs = _list_special(conn, company_id, ["rescisao"], special_id=special_id)
+    if not regs:
+        raise HTTPException(status_code=404, detail="Rescisão não encontrada.")
+    orig = regs[0]
+    try:
+        params = _json.loads(orig.get("params") or "{}")
+    except ValueError:
+        params = {}
+    plano = params.get("plano")
+    if not plano:
+        raise HTTPException(status_code=400, detail="Rescisão antiga sem o plano de cálculo gravado; refaça-a para complementar.")
+    motivo = str(data.get("motivo") or "dissidio")
+    if motivo not in _MOTIVOS_COMPL:
+        raise HTTPException(status_code=422, detail=f"Motivo inválido. Use: {', '.join(_MOTIVOS_COMPL)}.")
+    emp = _emp_or_404(conn, company_id, orig["employee_id"])
+    salario_antigo = float(params.get("salario") or emp.get("salary") or 0)
+    novo = data.get("novo_salario")
+    if data.get("percentual_reajuste") not in (None, "") and novo in (None, ""):
+        try:
+            novo = round(salario_antigo * (1 + float(data["percentual_reajuste"]) / 100), 2)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="Percentual de reajuste: informe um número.")
+    recalculo = None
+    salario_vigente = salario_antigo
+    if novo not in (None, ""):
+        try:
+            novo = float(novo)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="Novo salário: informe um número.")
+        if novo <= salario_antigo:
+            raise HTTPException(status_code=400,
+                                detail=f"O novo salário deve ser maior que o da rescisão ({_fmt_brl(salario_antigo)}).")
+        salario_vigente = novo
+        recalculo = _calc_rescisao(conn, company_id, {
+            "employee_id": emp["id"], "tipo": orig["referencia"], "aviso_modo": params.get("aviso_modo"),
+            "data_desligamento": orig["data_inicio"], "saldo_fgts": params.get("saldo_fgts") or 0,
+            "ignorar_aviso": True, "_plano": plano, "_salario": novo})
+    deslig = date.fromisoformat(orig["data_inicio"][:10])
+    pagto = _data_iso(data.get("data_pagamento") or date.today().isoformat(), "Data de pagamento")
+    tables = load_tables(conn, company_id, deslig.strftime("%Y-%m"))
+    ctx = payroll_special.contexto_funcionario(conn, company_id, emp, deslig)
+    ctx.salario = salario_vigente
+    try:
+        res = rescisao_extra.calc_complementar(
+            ctx, tables, payroll_engine.load_rubrics(conn, company_id), orig["lines"], recalculo,
+            float(plano.get("multa_pct") or 0), multa_477=bool(data.get("multa_477")),
+            indeniz_data_base=bool(data.get("indenizacao_data_base")), verbas=data.get("verbas") or [],
+            motivo=motivo.replace("_", " "))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _especial_view(res, rescisao_id=special_id, motivo=motivo, motivo_nome=_MOTIVOS_COMPL[motivo],
+                          salario_anterior=salario_antigo, salario_novo=salario_vigente if recalculo else None,
+                          data_desligamento=orig["data_inicio"], data_pagamento=pagto.isoformat(),
+                          competencia=pagto.strftime("%Y-%m"))
+
+
+@router.post("/rescisao/{special_id:int}/complementar/preview")
+def rescisao_compl_preview(special_id: int, data: Dict[str, Any] = Body(...),
+                           current_user: Dict[str, Any] = Depends(get_current_user)):
+    conn = get_conn()
+    try:
+        return _calc_rescisao_compl(conn, current_user.get("company_id", 1), special_id, data)
+    finally:
+        conn.close()
+
+
+@router.post("/rescisao/{special_id:int}/complementar", status_code=201)
+def rescisao_compl_create(special_id: int, data: Dict[str, Any] = Body(...),
+                          current_user: Dict[str, Any] = Depends(get_current_user)):
+    """Grava a rescisão complementar (diferenças). Recalcular sobre ela exige excluí-la antes."""
+    conn = get_conn()
+    company_id = current_user.get("company_id", 1)
+    try:
+        payroll_engine.ensure_system_rubrics(conn, company_id)
+        if conn.execute("SELECT COUNT(*) FROM payroll_special WHERE company_id=? AND tipo='rescisao_compl' "
+                        "AND referencia=? AND status != 'cancelado'", (company_id, str(special_id))).fetchone()[0] \
+                and any(data.get(k) not in (None, "", 0) for k in ("novo_salario", "percentual_reajuste")):
+            raise HTTPException(status_code=400, detail="Já existe complementar desta rescisão. Exclua-a para recalcular "
+                                                        "com o novo salário (as diferenças seriam pagas em dobro).")
+        res = _calc_rescisao_compl(conn, company_id, special_id, data)
+        if data.get("multa_477") and conn.execute(
+                """SELECT COUNT(*) FROM payroll_special_lines l JOIN payroll_special ps ON ps.id=l.special_id
+                   WHERE ps.company_id=? AND ps.tipo='rescisao_compl' AND ps.referencia=? AND l.codigo='0048'""",
+                (company_id, str(special_id))).fetchone()[0]:
+            raise HTTPException(status_code=400, detail="A multa do art. 477 já foi paga em outra complementar desta rescisão.")
+        new_id = _save_special(conn, company_id, "rescisao_compl", res, referencia=str(special_id),
+                               competencia=res["competencia"], data_pagamento=res["data_pagamento"],
+                               data_inicio=res["data_desligamento"],
+                               params={"motivo": res["motivo"], "motivo_nome": res["motivo_nome"],
+                                       "salario_anterior": res["salario_anterior"], "salario_novo": res["salario_novo"]})
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        conn.close()
+        raise
+    conn.close()
+    return {"id": new_id, "ok": True, **res}
+
+
 @router.get("/especiais/{special_id}")
 def especial_get(special_id: int, current_user: Dict[str, Any] = Depends(get_current_user)):
     conn = get_conn()
     rows = _list_special(conn, current_user.get("company_id", 1),
-                         ["decimo_1", "decimo_2", "ferias", "rescisao"], special_id=special_id)
+                         ["decimo_1", "decimo_2", "ferias", "rescisao", "rescisao_compl"], special_id=special_id)
     conn.close()
     if not rows:
         raise HTTPException(status_code=404, detail="Registro não encontrado.")
@@ -1888,7 +2431,8 @@ def especial_documento_html(special_id: int, current_user: Dict[str, Any] = Depe
     """Gera documento trabalhista imprimível (TRCT, Recibo de Férias ou Recibo de 13º)."""
     conn = get_conn()
     company_id = current_user.get("company_id", 1)
-    rows = _list_special(conn, company_id, ["decimo_1", "decimo_2", "ferias", "rescisao"], special_id=special_id)
+    rows = _list_special(conn, company_id, ["decimo_1", "decimo_2", "ferias", "rescisao", "rescisao_compl"],
+                         special_id=special_id)
     if not rows:
         conn.close()
         raise HTTPException(status_code=404, detail="Registro não encontrado.")
@@ -1917,7 +2461,23 @@ def especial_documento_html(special_id: int, current_user: Dict[str, Any] = Depe
             for l in items
         )
 
-    if tipo == "rescisao":
+    if tipo == "rescisao_compl":
+        titulo = "TERMO DE RESCISÃO COMPLEMENTAR (TRCT)"
+        bloco_extra = f"""
+        <div class="grid">
+          <div><span class="lbl">Rescisão Original</span><div>Registro #{reg.get('referencia')}</div></div>
+          <div><span class="lbl">Motivo</span><div>{params.get('motivo_nome', '-')}</div></div>
+          <div><span class="lbl">Data de Desligamento</span><div>{_fmt_dt(reg.get('data_inicio'))}</div></div>
+          <div><span class="lbl">Data de Pagamento</span><div>{_fmt_dt(reg.get('data_pagamento'))}</div></div>
+        </div>
+        <div class="box">
+          <strong>FGTS sobre as diferenças</strong>
+          <div style="display:flex;gap:24px;margin-top:6px;font-size:12px">
+            <span>FGTS: <strong>{_fmt_brl(reg.get('fgts'))}</strong></span>
+            <span>Multa Rescisória FGTS: <strong>{_fmt_brl(reg.get('multa_fgts'))}</strong></span>
+          </div>
+        </div>"""
+    elif tipo == "rescisao":
         titulo = "TERMO DE RESCISÃO DO CONTRATO DE TRABALHO (TRCT)"
         tipo_nome = payroll_special.TIPOS_RESCISAO.get(reg.get("referencia") or "", {}).get("nome", reg.get("referencia") or "")
         bloco_extra = f"""
@@ -2046,7 +2606,14 @@ def especial_delete(special_id: int, current_user: Dict[str, Any] = Depends(get_
         conn.close()
         raise HTTPException(status_code=400, detail="Exclua antes a 2ª parcela deste funcionário, que já descontou este adiantamento.")
     reativado = False
+    if row["tipo"] == "rescisao" and conn.execute(
+            "SELECT COUNT(*) FROM payroll_special WHERE company_id=? AND tipo='rescisao_compl' AND referencia=? AND status != 'cancelado'",
+            (company_id, str(special_id))).fetchone()[0]:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Exclua antes as rescisões complementares desta rescisão.")
     if row["tipo"] == "rescisao":
+        conn.execute("UPDATE avisos_previos SET status='ativo', rescisao_id=NULL WHERE rescisao_id=? AND company_id=?",
+                     (special_id, company_id))
         try:
             desligou = bool(_json.loads(row.get("params") or "{}").get("desligou"))
         except ValueError:
@@ -6043,6 +6610,61 @@ def relatorio_provisoes(
             "total": round(tot_decimo + tot_ferias + tot_inss_ferias + tot_fgts_ferias + tot_fgts_decimo, 2),
         },
     }
+
+
+# ── Relatórios da folha (impressão HTML ou CSV) ──────────────────────────────
+
+def _agora_local() -> str:
+    try:
+        from zoneinfo import ZoneInfo
+        agora = datetime.now(ZoneInfo("America/Cuiaba"))
+    except Exception:
+        agora = datetime.now()
+    return agora.strftime("%d/%m/%Y %H:%M")
+
+
+@router.get("/relatorios-folha/{nome}")
+def relatorio_folha(nome: str, formato: str = Query(default="html"), run_id: Optional[int] = None,
+                    employee_id: Optional[int] = None, ano: Optional[int] = None, competencia: str = "",
+                    codigo: str = "", inicio: str = "", fim: str = "",
+                    current_user: Dict[str, Any] = Depends(get_current_user)):
+    """liquidos (run_id) · ficha-financeira (employee_id, ano) · lancamentos (competencia, codigo?) ·
+    ferias (inicio, fim) · rescisoes (inicio, fim). formato=html|csv."""
+    company_id = current_user.get("company_id", 1)
+    if formato not in ("html", "csv"):
+        raise HTTPException(status_code=422, detail="Formato deve ser html ou csv.")
+    conn = get_conn()
+    try:
+        if nome == "liquidos":
+            if not run_id:
+                raise HTTPException(status_code=422, detail="Informe a folha (run_id).")
+            rel = relatorios_folha.liquidos(conn, company_id, run_id)
+        elif nome == "ficha-financeira":
+            if not employee_id:
+                raise HTTPException(status_code=422, detail="Informe o funcionário.")
+            rel = relatorios_folha.ficha_financeira(conn, company_id, employee_id, ano or date.today().year)
+        elif nome == "lancamentos":
+            if not _re.fullmatch(r"\d{4}-\d{2}", competencia or ""):
+                raise HTTPException(status_code=422, detail="Competência no formato AAAA-MM.")
+            rel = relatorios_folha.lancamentos(conn, company_id, competencia, codigo.strip())
+        elif nome in ("ferias", "rescisoes"):
+            ini = _data_iso(inicio, "Data inicial").isoformat()
+            fi = _data_iso(fim, "Data final").isoformat()
+            if ini > fi:
+                raise HTTPException(status_code=422, detail="A data inicial é posterior à final.")
+            fn = relatorios_folha.resumo_ferias if nome == "ferias" else relatorios_folha.rescisoes
+            rel = fn(conn, company_id, ini, fi)
+        else:
+            raise HTTPException(status_code=404, detail="Relatório não encontrado.")
+        if rel is None:
+            raise HTTPException(status_code=404, detail="Registro não encontrado.")
+        empresa = dict(conn.execute("SELECT * FROM companies WHERE id=?", (company_id,)).fetchone() or {})
+    finally:
+        conn.close()
+    if formato == "csv":
+        return Response(content=relatorios_folha.para_csv(rel), media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="{nome}.csv"'})
+    return HTMLResponse(content=relatorios_folha.para_html(rel, empresa, _agora_local()))
 
 
 @router.get("/relatorios/folha-analitica")
