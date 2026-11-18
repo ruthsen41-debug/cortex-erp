@@ -34,6 +34,7 @@ from .open_finance import router as open_finance_router
 from .bb import router as bb_router
 from .accounting import router as accounting_router
 from .dp import router as dp_router
+from .esocial import router as esocial_router
 from .patrimony import router as patrimony_router
 from .simples import router as simples_router
 from .audit import router as audit_router
@@ -84,6 +85,7 @@ all_routers = [
     bb_router,
     accounting_router,
     dp_router,
+    esocial_router,
     patrimony_router,
     simples_router,
     audit_router,

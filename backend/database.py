@@ -2805,6 +2805,8 @@ def migrate_db(conn: sqlite3.Connection) -> None:
 
     _migrate_superadmin(cur)
     _migrate_ficha_funcionario(cur)
+    _migrate_esocial_central(cur)
+    _migrate_esocial_complementos(cur)
     conn.commit()
 
 
@@ -2850,6 +2852,150 @@ EMPLOYEE_FICHA_COLUMNS = [
     ("aso_admissional_data", "TEXT DEFAULT ''"), ("aso_resultado", "TEXT DEFAULT ''"),
     ("fgts_opcao_data", "TEXT DEFAULT ''"),
 ]
+
+
+def _migrate_esocial_central(cur) -> None:
+    """Central do eSocial: configuração por empresa, fila de eventos (S-1.3) e lotes transmitidos."""
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS esocial_config (
+        company_id INTEGER PRIMARY KEY,
+        ambiente INTEGER DEFAULT 2,
+        class_trib TEXT DEFAULT '',
+        ind_des_folha TEXT DEFAULT '0',
+        ind_opt_reg_eletron TEXT DEFAULT '0',
+        cnae TEXT DEFAULT '',
+        fpas TEXT DEFAULT '515',
+        cod_tercs TEXT DEFAULT '',
+        aliq_rat TEXT DEFAULT '',
+        fap TEXT DEFAULT '',
+        cod_lotacao TEXT DEFAULT 'LOTACAO01',
+        ide_tab_rubr TEXT DEFAULT 'CORTEX',
+        ini_valid TEXT DEFAULT '',
+        transmissor_tp_insc TEXT DEFAULT '1',
+        transmissor_nr_insc TEXT DEFAULT '',
+        envio_automatico INTEGER DEFAULT 0,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS esocial_eventos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL,
+        tipo TEXT NOT NULL,
+        grupo INTEGER NOT NULL,
+        descricao TEXT DEFAULT '',
+        referencia_tipo TEXT DEFAULT '',
+        referencia_id INTEGER DEFAULT 0,
+        employee_id INTEGER DEFAULT 0,
+        per_apur TEXT DEFAULT '',
+        evento_id TEXT DEFAULT '',
+        xml TEXT DEFAULT '',
+        status TEXT DEFAULT 'pendente',
+        erros TEXT DEFAULT '',
+        ind_retif INTEGER DEFAULT 1,
+        nr_recibo_orig TEXT DEFAULT '',
+        nr_recibo TEXT DEFAULT '',
+        lote_id INTEGER DEFAULT 0,
+        cd_resposta TEXT DEFAULT '',
+        desc_resposta TEXT DEFAULT '',
+        ocorrencias TEXT DEFAULT '',
+        retorno_xml TEXT DEFAULT '',
+        ambiente INTEGER DEFAULT 2,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
+    cur.execute("CREATE INDEX IF NOT EXISTS ix_esocial_eventos_emp ON esocial_eventos (company_id, status)")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS esocial_lotes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL,
+        grupo INTEGER NOT NULL,
+        ambiente INTEGER DEFAULT 2,
+        protocolo TEXT DEFAULT '',
+        status TEXT DEFAULT 'enviado',
+        cd_resposta TEXT DEFAULT '',
+        desc_resposta TEXT DEFAULT '',
+        ocorrencias TEXT DEFAULT '',
+        qtd_eventos INTEGER DEFAULT 0,
+        xml_retorno_envio TEXT DEFAULT '',
+        xml_retorno_proc TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS esocial_totalizadores (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL,
+        evento_origem_id INTEGER DEFAULT 0,
+        tipo TEXT NOT NULL,
+        per_apur TEXT DEFAULT '',
+        employee_id INTEGER DEFAULT 0,
+        xml TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
+
+
+# Campos complementares exigidos pelo eSocial em cadastros que já existiam
+ESOCIAL_COLUNAS_EXTRAS = {
+    "work_accidents": [  # S-2210 CAT
+        ("tp_acid", "TEXT DEFAULT '1'"), ("tp_cat", "TEXT DEFAULT '1'"), ("iniciat_cat", "TEXT DEFAULT '1'"),
+        ("ind_comun_policia", "TEXT DEFAULT 'N'"), ("cod_sit_geradora", "TEXT DEFAULT ''"),
+        ("cod_parte_ating", "TEXT DEFAULT ''"), ("lateralidade", "TEXT DEFAULT '0'"),
+        ("cod_agnt_causador", "TEXT DEFAULT ''"), ("tp_local", "TEXT DEFAULT '1'"),
+        ("local_logradouro", "TEXT DEFAULT ''"), ("local_numero", "TEXT DEFAULT ''"), ("local_bairro", "TEXT DEFAULT ''"),
+        ("local_cep", "TEXT DEFAULT ''"), ("local_cod_municipio", "TEXT DEFAULT ''"), ("local_uf", "TEXT DEFAULT ''"),
+        ("hrs_trab_antes", "TEXT DEFAULT ''"), ("ult_dia_trab", "TEXT DEFAULT ''"),
+        ("dt_atendimento", "TEXT DEFAULT ''"), ("hr_atendimento", "TEXT DEFAULT ''"),
+        ("ind_internacao", "TEXT DEFAULT 'N'"), ("dur_trat", "INTEGER DEFAULT 0"),
+        ("cod_natureza_lesao", "TEXT DEFAULT ''"), ("cod_cid", "TEXT DEFAULT ''"), ("diag_provavel", "TEXT DEFAULT ''"),
+        ("nm_emit", "TEXT DEFAULT ''"), ("ide_oc", "TEXT DEFAULT '1'"), ("nr_oc", "TEXT DEFAULT ''"),
+        ("uf_oc", "TEXT DEFAULT ''"), ("dt_obito", "TEXT DEFAULT ''"), ("nr_rec_cat_orig", "TEXT DEFAULT ''"),
+    ],
+    "medical_exams": [  # S-2220 ASO
+        ("procedimentos", "TEXT DEFAULT ''"), ("crm_uf", "TEXT DEFAULT ''"),
+    ],
+    "pcmso_programas": [("responsavel_uf", "TEXT DEFAULT ''"), ("responsavel_cpf", "TEXT DEFAULT ''")],
+    "reintegracoes": [("tp_reint", "TEXT DEFAULT ''"), ("dt_efeito", "TEXT DEFAULT ''")],  # S-2298
+    "interns": [  # S-2300 / S-2399 estagiário
+        ("matricula", "TEXT DEFAULT ''"), ("sexo", "TEXT DEFAULT ''"), ("raca_cor", "TEXT DEFAULT ''"),
+        ("grau_instrucao", "TEXT DEFAULT ''"), ("logradouro", "TEXT DEFAULT ''"), ("numero", "TEXT DEFAULT ''"),
+        ("bairro", "TEXT DEFAULT ''"), ("cep", "TEXT DEFAULT ''"), ("cod_municipio", "TEXT DEFAULT ''"),
+        ("uf", "TEXT DEFAULT ''"), ("nivel_esocial", "TEXT DEFAULT ''"), ("nat_estagio", "TEXT DEFAULT 'N'"),
+        ("area_atuacao", "TEXT DEFAULT ''"), ("nr_apolice", "TEXT DEFAULT ''"), ("cnpj_inst_ensino", "TEXT DEFAULT ''"),
+        ("cnpj_agente_integracao", "TEXT DEFAULT ''"), ("cpf_supervisor", "TEXT DEFAULT ''"),
+        ("data_termino_real", "TEXT DEFAULT ''"),
+    ],
+    "autonomous_workers": [("data_nascimento", "TEXT DEFAULT ''")],  # S-1200 do contribuinte individual
+    "payroll_runs": [("data_pagamento", "TEXT DEFAULT ''")],  # S-1210
+}
+
+
+def _migrate_esocial_complementos(cur) -> None:
+    for tabela, colunas in ESOCIAL_COLUNAS_EXTRAS.items():
+        existentes = [c["name"] for c in cur.execute(f"PRAGMA table_info({tabela})").fetchall()]
+        if not existentes:
+            continue
+        for col, ddl in colunas:
+            if col not in existentes:
+                cur.execute(f"ALTER TABLE {tabela} ADD COLUMN {col} {ddl}")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS esocial_exposicoes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER NOT NULL,
+        employee_id INTEGER NOT NULL,
+        dt_inicio TEXT NOT NULL,
+        local_amb TEXT DEFAULT '1',
+        dsc_setor TEXT DEFAULT '',
+        dsc_ativ TEXT DEFAULT '',
+        agentes TEXT DEFAULT '',
+        resp_cpf TEXT DEFAULT '',
+        resp_nome TEXT DEFAULT '',
+        resp_ide_oc TEXT DEFAULT '',
+        resp_dsc_oc TEXT DEFAULT '',
+        resp_nr_oc TEXT DEFAULT '',
+        resp_uf_oc TEXT DEFAULT '',
+        observacao TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
 
 
 def _migrate_ficha_funcionario(cur) -> None:

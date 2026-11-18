@@ -40,7 +40,7 @@ function dpTabs() {
     { id: 'decimo',       icon: 'gift',           label: '13º Salário' },
     { id: 'ferias',       icon: 'umbrella',       label: 'Férias' },
     { id: 'rescisao',     icon: 'user-x',         label: 'Rescisão' },
-    { id: 'esocial',      icon: 'file-code',      label: 'eSocial' },
+    { id: 'esocial',      icon: 'send',           label: 'Central eSocial' },
     { id: 'afastamentos', icon: 'calendar-x',     label: 'Afastamentos' },
     { id: 'atestados',    icon: 'file-heart',      label: 'Atestados' },
     { id: 'cat',          icon: 'triangle-alert',  label: 'CAT' },
@@ -51,8 +51,7 @@ function dpTabs() {
     { id: 'obrigacoes',   icon: 'file-check',      label: 'Obrigações' },
     { id: 'tabelas_fiscais',   icon: 'percent',      label: 'Tabelas Fiscais' },
     { id: 'rubricas',          icon: 'list-checks',  label: 'Rubricas' },
-    { id: 'esocial_periodico', icon: 'send',         label: 'eSocial Periódico' },
-    { id: 'sefip',             icon: 'building-2',   label: 'SEFIP/GFIP' },
+    { id: 'sefip',             icon: 'building-2',   label: 'FGTS Digital' },
     { id: 'efd_reinf',         icon: 'file-code-2',  label: 'EFD-Reinf' },
     { id: 'beneficios',        icon: 'heart',         label: 'Benefícios' },
     { id: 'adiantamentos',     icon: 'banknote',      label: 'Adiantamentos' },
@@ -66,7 +65,6 @@ function dpTabs() {
     { id: 'fgts',              icon: 'piggy-bank',    label: 'Extrato FGTS' },
     { id: 'employee_portal',   icon: 'circle-user',   label: 'Portal' },
     { id: 'documentos',        icon: 'file-text',     label: 'Documentos' },
-    { id: 'esocial_tabelas',   icon: 'database',      label: 'eSocial Tabelas' },
     { id: 'dctfweb',           icon: 'landmark',      label: 'DCTFWeb' },
     { id: 'compliance',        icon: 'shield-check',  label: 'Compliance' },
     { id: 'rel_custo',         icon: 'calculator',    label: 'Custo CLT' },
@@ -127,7 +125,7 @@ async function switchDpTab(tab, noRebuildTabs = false) {
     case 'decimo':       await renderDecimo(body); break;
     case 'ferias':       await renderFerias(body); break;
     case 'rescisao':     await renderRescisao(body); break;
-    case 'esocial':      renderEsocial(body); break;
+    case 'esocial':      await renderCentralEsocial(body); break;
     case 'afastamentos': await renderAfastamentos(body); break;
     case 'atestados':    await renderAtestados(body); break;
     case 'cat':          await renderCat(body); break;
@@ -553,8 +551,6 @@ async function openFolhaDetail(runId) {
           <button onclick="event.stopPropagation();openAuthDoc('/api/dp/payroll/${runId}/recibos?employee_id=${item.employee_id}')"
             class="inline-flex items-center gap-1 text-xs text-violet-600 hover:underline mr-3" title="Imprimir recibo de pagamento">
             <i data-lucide="printer" class="w-3.5 h-3.5"></i>Holerite</button>
-          <button onclick="event.stopPropagation();downloadS1200(${runId},${item.employee_id})"
-            class="text-xs text-indigo-500 hover:underline">S-1200</button>
         </td>
       </tr>
       <tr id="folha-lines-${item.id}" class="hidden bg-slate-50/60 dark:bg-slate-900/40">
@@ -574,6 +570,9 @@ async function openFolhaDetail(runId) {
           <button onclick="openAuthDoc('/api/dp/payroll/${run.id}/folha-impressa')"
             class="inline-flex items-center gap-1.5 text-xs text-violet-700 bg-violet-50 border border-violet-200 hover:bg-violet-100 px-3 py-1.5 rounded-lg">
             <i data-lucide="file-text" class="w-3.5 h-3.5"></i> Imprimir folha</button>
+          <button onclick="esFolhaParaCentral(${run.id})"
+            class="inline-flex items-center gap-1.5 text-xs text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 px-3 py-1.5 rounded-lg">
+            <i data-lucide="send" class="w-3.5 h-3.5"></i> eSocial (S-1200/S-1210)</button>
           <button onclick="downloadCnab240(${run.id},'${run.competence}')"
             class="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 px-3 py-1.5 rounded-lg">
             CNAB 240 (.REM)
@@ -1088,8 +1087,8 @@ async function renderRescisao(el) {
       <td class="px-4 py-2.5 text-right whitespace-nowrap">
         <button onclick="event.stopPropagation();openEspecialDocumento(${r.id})"
           class="text-xs text-violet-600 hover:underline mr-2">TRCT</button>
-        <button onclick="event.stopPropagation();downloadEspecialS2299(${r.id},${r.employee_id},'${_dpEsc(r.data_inicio)}')"
-          class="text-xs text-indigo-500 hover:underline mr-2">S-2299</button>
+        <button onclick="event.stopPropagation();esEnviarCentral('/api/esocial/gerar/desligamento/${r.id}')"
+          class="text-xs text-indigo-500 hover:underline mr-2" title="Gera o S-2299 na Central do eSocial">eSocial</button>
         <button onclick="event.stopPropagation();deleteEspecial(${r.id}, 'esta rescisão', 'rescisao')"
           class="text-xs text-rose-500 hover:underline">Excluir</button>
       </td>
@@ -1231,10 +1230,7 @@ async function previewRescisao() {
       </div>
       ${_dpHoleriteTable(d)}
       <div class="mt-4">
-        <button onclick="downloadS2299(${d.employee_id},'${_dpEsc(d.data_desligamento)}','${_dpEsc(d.tipo)}')"
-          class="text-xs text-indigo-500 hover:underline flex items-center gap-1">
-          <i data-lucide="file-down" class="w-3.5 h-3.5"></i> Baixar S-2299 (eSocial Desligamento)
-        </button>
+        <p class="text-xs text-slate-400">Depois de gravar a rescisão, gere o S-2299 no botão "eSocial" da lista de rescisões ou pela Central eSocial.</p>
       </div>`;
     if (window.lucide) lucide.createIcons();
   } catch { res.innerHTML = '<div class="text-xs text-rose-500">Erro de conexão.</div>'; }
@@ -3296,8 +3292,8 @@ async function renderSefip(el) {
   el.innerHTML = `
     <div class="page-header">
       <div>
-        <h2 style="font-family:var(--font-display);font-size:1.4rem;font-weight:700;color:var(--text);margin:0">FGTS / GFIP</h2>
-        <p style="font-size:.8rem;color:var(--muted);margin:.25rem 0 0">SEFIP/GRF para competências até fev/2024 · FGTS Digital (XML) a partir de mar/2024</p>
+        <h2 style="font-family:var(--font-display);font-size:1.4rem;font-weight:700;color:var(--text);margin:0">FGTS Digital / SEFIP</h2>
+        <p style="font-size:.8rem;color:var(--muted);margin:.25rem 0 0">A partir de mar/2024 o FGTS é apurado pelo FGTS Digital com os dados enviados ao eSocial · SEFIP/GRF só para competências até fev/2024</p>
       </div>
       <div class="d-flex gap-2 align-items-center">
         <input type="month" id="sefipComp" class="form-control" style="width:150px" value="${comp}" onchange="window.sefipUpdateBadge()">
@@ -3313,7 +3309,7 @@ async function renderSefip(el) {
     if (_sefipIsFgtsDigital(c)) {
       badge.innerHTML = `<div class="alert alert-info d-flex align-items-center gap-2 py-2 mb-0" style="font-size:.85rem">
         <i data-lucide="info" style="width:16px;height:16px;flex-shrink:0"></i>
-        <span><strong>FGTS Digital</strong> — Competência a partir de mar/2024. O arquivo gerado é XML para importação no portal <strong>fgts.digital.caixa.gov.br</strong>.</span>
+        <span><strong>FGTS Digital</strong> — Não existe arquivo para enviar: o FGTS Digital lê a folha (S-1200) e as rescisões (S-2299) enviadas ao eSocial e calcula a guia. Confira abaixo o valor esperado e emita a GFD no portal <strong>fgtsdigital.sistema.gov.br</strong>.</span>
       </div>`;
     } else {
       badge.innerHTML = `<div class="alert alert-warning d-flex align-items-center gap-2 py-2 mb-0" style="font-size:.85rem">
@@ -3330,6 +3326,7 @@ async function renderSefip(el) {
     const res = document.getElementById('sefipResult');
     const isFgts = _sefipIsFgtsDigital(c);
     res.innerHTML = '<p class="text-muted text-center py-4">Calculando...</p>';
+    if (isFgts) { await window.renderConferenciaFgts(res, c); return; }
     try {
       const d = await apiFetch(`/api/dp/sefip/${c}`);
       const rows = [
@@ -3342,12 +3339,7 @@ async function renderSefip(el) {
         ['Terceiros (5,8%)', 'R$ '+Number(d.total_terceiros).toFixed(2)],
       ];
 
-      const btnDownload = isFgts
-        ? `<button class="btn btn-success" onclick="triggerDownload('/api/dp/fgts-digital/${c}/xml')">
-             <i data-lucide="download" style="width:15px;height:15px;margin-right:6px"></i>Baixar XML — FGTS Digital
-           </button>
-           <span class="text-muted small ms-2">Importar em fgts.digital.caixa.gov.br</span>`
-        : `<button class="btn btn-primary" onclick="triggerDownload('/api/dp/sefip/${c}/arquivo')">
+      const btnDownload = `<button class="btn btn-primary" onclick="triggerDownload('/api/dp/sefip/${c}/arquivo')">
              <i data-lucide="download" style="width:15px;height:15px;margin-right:6px"></i>Baixar Arquivo SEFIP (GRF)
            </button>
            <span class="text-muted small ms-2">Válido para fiscalizações e retificações até fev/2024</span>`;
@@ -6850,7 +6842,7 @@ async function renderReintegracoes(el) {
               <td class="p-3 border border-slate-100 text-center">${fDate2(r.data_reintegracao)}</td>
               <td class="p-3 border border-slate-100">${r.nr_processo||'-'}</td>
               <td class="p-3 border border-slate-100 text-center">
-                <button onclick="triggerDownload('/api/dp/reintegracoes/${r.id}/s2298')" class="text-violet-600 text-xs hover:underline">S-2298</button>
+                <button onclick="esEnviarCentral('/api/esocial/gerar/reintegracao/${r.id}')" class="text-violet-600 text-xs hover:underline" title="Gera o S-2298 na Central do eSocial">eSocial</button>
               </td>
             </tr>`).join('') || '<tr><td colspan="5" class="text-center text-slate-400 p-6">Nenhuma reintegração registrada.</td></tr>'}
           </tbody>

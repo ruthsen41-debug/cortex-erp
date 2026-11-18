@@ -313,7 +313,7 @@
             <button onclick="openAuthDoc('/api/dp/employees/${id}/documento/ficha-registro')"
               class="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800">
               <i data-lucide="printer" class="w-3.5 h-3.5"></i> Imprimir ficha</button>
-            <button onclick="triggerDownload('/api/dp/employees/${id}/esocial/s2200')" class="text-indigo-500 hover:underline">Gerar XML S-2200</button>` : ''}</div>
+            <button onclick="esEnviarCentral('/api/esocial/gerar/admissao/${id}')" class="text-indigo-500 hover:underline" title="Gera o S-2200 na Central do eSocial">Enviar admissão ao eSocial</button>` : ''}</div>
           <div class="flex gap-3">
             <button onclick="closeModal()" class="px-4 py-2 text-sm text-slate-500 hover:text-slate-700">Cancelar</button>
             <button onclick="efSalvar(${id || 0})" class="bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold px-5 py-2 rounded-xl flex items-center gap-2">
