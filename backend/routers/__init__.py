@@ -49,6 +49,7 @@ from .conventions import router as conventions_router
 from .dirbi import router as dirbi_router
 from .fiscal_books import router as fiscal_books_router
 from .superadmin import router as superadmin_router, support_router
+from .atualizacao import router as atualizacao_router
 
 all_routers = [
     auth_router,
@@ -102,5 +103,6 @@ all_routers = [
     dirbi_router,
     fiscal_books_router,
     superadmin_router,
+    atualizacao_router,
     support_router,
 ]

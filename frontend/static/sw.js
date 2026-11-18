@@ -1,4 +1,6 @@
-﻿const CACHE_NAME = 'cortex-erp-v24';
+// O servidor troca __CORTEX_BUILD__ pelo build atual (backend/main.py): cada
+// alteração no frontend gera um cache novo e o antigo é apagado no activate.
+const CACHE_NAME = 'cortex-erp-__CORTEX_BUILD__';
 const STATIC_ASSETS = [
   '/',
   '/static/auth.js',
@@ -30,6 +32,11 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+// Botão "Atualizar agora": a página pede para o worker novo assumir na hora
+self.addEventListener('message', (event) => {
+  if (event.data === 'CORTEX_SKIP_WAITING') self.skipWaiting();
+});
+
 self.addEventListener('fetch', (event) => {
   // Ignora requisições de API para manter dados sempre em tempo real
   if (event.request.url.includes('/api/')) {
@@ -41,13 +48,20 @@ self.addEventListener('fetch', (event) => {
       if (cachedResponse) {
         // Stale-while-revalidate
         fetch(event.request).then((networkResponse) => {
-          if (networkResponse.status === 200) {
+          if (networkResponse.status === 200 && event.request.method === 'GET') {
             caches.open(CACHE_NAME).then((cache) => cache.put(event.request, networkResponse));
           }
         }).catch(() => {});
         return cachedResponse;
       }
-      return fetch(event.request);
+      return fetch(event.request).then((networkResponse) => {
+        if (networkResponse.status === 200 && event.request.method === 'GET' &&
+            event.request.url.startsWith(self.location.origin)) {
+          const copia = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copia));
+        }
+        return networkResponse;
+      });
     })
   );
 });

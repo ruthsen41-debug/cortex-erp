@@ -12,6 +12,7 @@ os.environ.setdefault("RATE_LIMIT_LOGIN", "0")
 os.environ.setdefault("RATE_LIMIT_API", "0")
 # Sem o agendador das rotinas do DP em segundo plano durante os testes
 os.environ.setdefault("CORTEX_ROTINAS", "0")
+os.environ.setdefault("CORTEX_ATUALIZACAO", "0")
 
 
 @pytest.fixture(scope="session", autouse=True)

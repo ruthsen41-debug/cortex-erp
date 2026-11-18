@@ -11,11 +11,13 @@ try:
     from ..database import get_conn, is_postgres
     from ..auth import get_current_user, log_audit
     from ..utils import rows_to_dicts
+    from ..version import APP_VERSION
 except ImportError:
     from config import DB_PATH
     from database import get_conn, is_postgres
     from auth import get_current_user
     from utils import rows_to_dicts
+    from version import APP_VERSION
 
 router = APIRouter(prefix="/api/system", tags=["Sistema, Backup & Monitoramento"])
 
@@ -49,7 +51,7 @@ def get_system_metrics(current_user: Dict[str, Any] = Depends(get_current_user))
             "counts": counts
         },
         "system": {
-            "version": "4.5.0-pro+",
+            "version": APP_VERSION,
             "engine": "FastAPI + SQLite (ACID)",
             "environment": os.getenv("ENVIRONMENT", "production")
         }

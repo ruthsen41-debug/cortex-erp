@@ -1,4 +1,4 @@
-<#
+﻿<#
   Monta o instalador único do Cortex ERP. Na instalação ele pergunta o tipo:
   Servidor (multiusuário), Monousuário ou Estação.
 
@@ -22,6 +22,12 @@ $Cache  = Join-Path $Here "cache"
 $Build  = Join-Path $Here "build\CortexServidor"
 $PyDir  = Join-Path $Build "python"
 $AppDir = Join-Path $Build "app"
+
+# Versão: fonte única em backend/version.py
+$VersaoLinha = Select-String -Path (Join-Path $Repo "backend\version.py") -Pattern '^APP_VERSION\s*=\s*"([^"]+)"' | Select-Object -First 1
+if (-not $VersaoLinha) { throw "APP_VERSION não encontrado em backend\version.py" }
+$AppVersion = $VersaoLinha.Matches[0].Groups[1].Value
+Write-Host "Versão do Cortex: $AppVersion"
 
 function Get-Arquivo($Url, $Destino) {
     if (-not (Test-Path $Destino)) {
@@ -66,7 +72,7 @@ Get-ChildItem $Build -Recurse -Include *.pfx, *.p12, *.pem, *.key, *.db, .env, .
 
 Write-Host "Copiando arquivos do servidor"
 $Srv = Join-Path $Here "servidor"
-Copy-Item (Join-Path $Srv "cortex_servidor.py"), (Join-Path $Srv "configurar.py"), (Join-Path $Srv "backup_agora.cmd") $Build
+Copy-Item (Join-Path $Srv "cortex_servidor.py"), (Join-Path $Srv "configurar.py"), (Join-Path $Srv "backup_agora.cmd"), (Join-Path $Srv "atualizador.ps1") $Build
 Copy-Item (Join-Path $Srv "CortexServico.xml") (Join-Path $Build "CortexServico.xml")
 Copy-Item $WinSW (Join-Path $Build "CortexServico.exe")
 
@@ -88,7 +94,7 @@ if ($Iscc) {
     Write-Host "Compilando instalador com Inno Setup"
     # os instaladores separados da versão anterior foram substituídos pelo único
     Remove-Item (Join-Path $Here "Output\CortexERP-Servidor-Setup.exe"), (Join-Path $Here "Output\CortexERP-Estacao-Setup.exe") -ErrorAction SilentlyContinue
-    & $Iscc /Q (Join-Path $Here "CortexERP.iss")
+    & $Iscc /Q "/DAppVersion=$AppVersion" (Join-Path $Here "CortexERP.iss")
     if ($LASTEXITCODE -ne 0) { throw "Inno Setup falhou" }
     Write-Host "Pronto: $(Join-Path $Here 'Output\CortexERP-Setup.exe')"
 } else {

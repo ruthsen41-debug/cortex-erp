@@ -12,7 +12,10 @@
 ;   CortexERP-Setup.exe /VERYSILENT /TIPO=estacao [/SERVIDOR=NOME-DO-SERVIDOR]
 
 #define AppName "Cortex ERP"
-#define AppVersion "4.5.0"
+; a versão vem de backend/version.py (build_instalador.ps1 passa /DAppVersion=...)
+#ifndef AppVersion
+  #define AppVersion "0.0.0"
+#endif
 #define ServiceExe "CortexServico.exe"
 #define RegChave "Software\CortexERP"
 
@@ -86,6 +89,7 @@ Filename: "{app}\{#ServiceExe}"; Parameters: "uninstall"; Flags: runhidden; RunO
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Cortex ERP"""; Flags: runhidden; RunOnceId: "DelFw"; Check: TemServidor
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Cortex ERP - Busca na rede"""; Flags: runhidden; RunOnceId: "DelFwUdp"; Check: TemServidor
 Filename: "{sys}\schtasks.exe"; Parameters: "/Delete /F /TN ""CortexERP_Backup"""; Flags: runhidden; RunOnceId: "DelTask"; Check: TemServidor
+Filename: "{sys}\schtasks.exe"; Parameters: "/Delete /F /TN ""CortexERP_Atualizacao"""; Flags: runhidden; RunOnceId: "DelTaskUpd"; Check: TemServidor
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\python"
@@ -95,6 +99,7 @@ Type: filesandordirs; Name: "{app}\app\frontend"
 Type: filesandordirs; Name: "{app}\app\scripts"
 Type: filesandordirs; Name: "{app}\app\alembic"
 Type: filesandordirs; Name: "{app}\logs"
+Type: filesandordirs; Name: "{app}\Atualizacoes"
 Type: files; Name: "{app}\ENDERECO_DAS_ESTACOES.txt"
 
 [Registry]
@@ -418,6 +423,7 @@ begin
   DelTree(App + '\app\scripts', True, True, True);
   DelTree(App + '\app\alembic', True, True, True);
   DeleteFile(App + '\{#ServiceExe}');
+  DeleteFile(App + '\atualizador.ps1');
   DeleteFile(App + '\ENDERECO_DAS_ESTACOES.txt');
 end;
 

@@ -63,7 +63,7 @@
   let saTab = 'overview';
   const TABS = [
     ['overview', 'Visão geral'], ['companies', 'Empresas clientes'], ['tables', 'Tabelas legais'],
-    ['rubrics', 'Rubricas globais'], ['support', 'Solicitações'],
+    ['rubrics', 'Rubricas globais'], ['support', 'Solicitações'], ['updates', 'Atualizações'],
   ];
 
   window.renderSuperadmin = async function (container) {
@@ -98,11 +98,154 @@
       else if (saTab === 'tables') await renderTables(body);
       else if (saTab === 'rubrics') await renderRubrics(body);
       else if (saTab === 'support') await renderSupportQueue(body);
+      else if (saTab === 'updates') await renderUpdates(body);
     } catch (e) {
       body.innerHTML = `<div class="alert alert-danger">${esc(e.message)}</div>`;
     }
     if (window.lucide) lucide.createIcons();
   }
+
+  // ── ATUALIZAÇÕES ("Verificar atualizações", como no celular) ────────────────
+  const FASES = {
+    baixando: 'Baixando', verificando: 'Conferindo o arquivo', agendada: 'Iniciando a instalação',
+    preparando: 'Backup e cópia de segurança', instalando: 'Instalando', conferindo: 'Conferindo a versão nova',
+    revertendo: 'Voltando a versão anterior', concluida: 'Concluída', revertida: 'Revertida', erro: 'Não concluída',
+  };
+  let updTimer = null;
+  let updVerificacao = null;
+
+  function fmtBytes(n) { return n ? (n / 1048576).toFixed(0) + ' MB' : ''; }
+  function updAgendar(body, ms) {
+    clearTimeout(updTimer);
+    updTimer = setTimeout(() => { if (saTab === 'updates' && document.getElementById('sa-body')) renderUpdates(body); }, ms);
+  }
+
+  async function renderUpdates(body) {
+    clearTimeout(updTimer);
+    let st;
+    try {
+      st = await api('/api/system/update/status');
+    } catch (e) {
+      // durante a instalação o servidor fica fora do ar por alguns instantes
+      body.innerHTML = `<div class="card"><div class="card-body" style="display:flex;gap:.75rem;align-items:center">
+        <i data-lucide="loader" class="sa-gira"></i><div><strong>O servidor está reiniciando com a versão nova…</strong>
+        <div class="text-muted" style="font-size:.85rem">Esta tela continua sozinha quando ele voltar.</div></div></div></div>`;
+      if (window.lucide) lucide.createIcons();
+      updAgendar(body, 4000);
+      return;
+    }
+    const v = updVerificacao || st.verificacao;
+    const and = st.andamento;
+    const disp = v && v.ok ? v.disponivel : null;
+    const paginaVelha = !!(window.cortexVersao && window.cortexVersao.versaoAberta && window.cortexVersao.versaoAberta !== st.versao_atual);
+
+    let andamentoHtml = '';
+    if (and && and.fase) {
+      const ativo = st.em_andamento;
+      const ok = and.fase === 'concluida';
+      const cls = ativo ? 'alert-info' : ok ? 'alert-success' : and.fase === 'revertida' ? 'alert-warning' : 'alert-danger';
+      const pct = typeof and.progresso === 'number' ? and.progresso : null;
+      andamentoHtml = `<div class="alert ${cls}" style="margin-bottom:1rem">
+        <div style="display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap">
+          <strong>${ativo ? '<i data-lucide="loader" class="sa-gira" style="width:16px;height:16px;vertical-align:-3px"></i> ' : ''}${esc(FASES[and.fase] || and.fase)}
+            ${and.versao_destino ? '— versão ' + esc(and.versao_destino) : ''}</strong>
+          <span style="font-size:.8rem;opacity:.8">${esc(fmtDate(and.concluido_em || and.atualizado_em))}${and.origem === 'automatica' ? ' · automática' : ''}</span>
+        </div>
+        <div style="margin-top:.35rem">${esc(and.mensagem || '')}</div>
+        ${ativo && pct !== null ? `<div style="height:6px;border-radius:99px;background:rgba(127,127,127,.25);margin-top:.6rem;overflow:hidden">
+          <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#6366f1,#22d3ee);transition:width .4s"></div></div>` : ''}
+        ${and.erro && !ativo ? `<details style="margin-top:.5rem;font-size:.8rem"><summary>Detalhe técnico</summary>${esc(and.erro)}</details>` : ''}
+        ${ok && paginaVelha ? `<div style="margin-top:.6rem"><button class="btn btn-sm btn-primary" onclick="cortexVersao.atualizar()">Recarregar o sistema na versão nova</button></div>` : ''}
+      </div>`;
+    }
+
+    let dispHtml;
+    if (!v) {
+      dispHtml = `<p class="text-muted" style="margin:0">Clique em <strong>Verificar atualizações</strong> para procurar uma versão nova.</p>`;
+    } else if (!v.ok) {
+      dispHtml = `<div class="alert alert-warning" style="margin:0">${esc(v.erro)}</div>`;
+    } else if (disp && disp.nova) {
+      const botao = st.modo === 'instalado'
+        ? `<button class="btn btn-primary" data-versao="${esc(disp.versao)}" onclick="saAplicarAtualizacao(this.dataset.versao)" ${st.em_andamento ? 'disabled' : ''}>
+            <i data-lucide="download" style="width:16px;height:16px"></i> Baixar e instalar</button>`
+        : '';
+      dispHtml = `<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap">
+          <div><div style="font-size:1.1rem;font-weight:700">Versão ${esc(disp.versao)} disponível</div>
+            <div class="text-muted" style="font-size:.8rem">${disp.publicada_em ? 'Publicada em ' + esc(fmtDate(disp.publicada_em)) : ''} ${disp.tamanho ? '· ' + fmtBytes(disp.tamanho) : ''}</div></div>
+          ${botao}
+        </div>
+        ${disp.notas ? `<div style="margin-top:.75rem"><div style="font-weight:600;font-size:.85rem;margin-bottom:.25rem">O que mudou</div>
+          <div style="white-space:pre-line;font-size:.875rem;color:var(--text-2)">${esc(disp.notas)}</div></div>` : ''}
+        ${st.modo === 'instalado' ? `<p class="text-muted" style="font-size:.8rem;margin:.75rem 0 0">Antes de instalar, o Cortex faz backup do banco e guarda uma cópia da versão atual.
+          O sistema fica fora do ar por 1 a 3 minutos. Se a versão nova não subir, ele volta sozinho para a anterior.</p>` : ''}`;
+    } else {
+      dispHtml = `<div style="display:flex;gap:.6rem;align-items:center"><i data-lucide="check-circle-2" style="color:#22c55e"></i>
+        <div><strong>O sistema está atualizado.</strong><div class="text-muted" style="font-size:.8rem">Última versão publicada: ${esc(disp ? disp.versao : '—')} · verificado em ${esc(fmtDate(v.em))}</div></div></div>`;
+    }
+
+    const auto = st.auto || {};
+    const autoHtml = st.modo === 'instalado'
+      ? `<div class="card"><div class="card-body">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
+          <label style="display:flex;gap:.6rem;align-items:center;margin:0;cursor:pointer">
+            <input type="checkbox" id="sa-upd-auto" ${auto.auto ? 'checked' : ''} onchange="saSalvarAuto()">
+            <span><strong>Atualizar automaticamente de madrugada</strong><br>
+            <span class="text-muted" style="font-size:.8rem">Quando sair versão nova, o servidor instala sozinho no horário escolhido.</span></span>
+          </label>
+          <div style="display:flex;gap:.5rem;align-items:center"><span class="text-muted" style="font-size:.85rem">Horário</span>
+            <input type="time" class="form-control" id="sa-upd-hora" value="${esc(auto.hora || '03:00')}" style="width:120px" onchange="saSalvarAuto()"></div>
+        </div></div></div>`
+      : `<div class="alert alert-info">Na nuvem a atualização é automática: cada versão publicada entra no ar sozinha,
+        e quem estiver com o sistema aberto vê o aviso <strong>"Nova versão disponível"</strong>.</div>`;
+
+    body.innerHTML = `
+      <style>@keyframes sa-gira{to{transform:rotate(360deg)}}.sa-gira{animation:sa-gira 1s linear infinite}</style>
+      ${andamentoHtml}
+      <div class="card" style="margin-bottom:1rem"><div class="card-body">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1rem">
+          <div><div class="text-muted" style="font-size:.8rem">Versão instalada</div>
+            <div style="font-size:1.6rem;font-weight:800;line-height:1.1">${esc(st.versao_atual)}</div>
+            <div class="text-muted" style="font-size:.75rem">build ${esc(st.build)} · ${st.modo === 'instalado' ? 'servidor instalado' : 'nuvem'}</div></div>
+          <button class="btn btn-secondary" id="sa-upd-check" onclick="saVerificarAtualizacao()" ${st.em_andamento ? 'disabled' : ''}>
+            <i data-lucide="refresh-cw" style="width:16px;height:16px"></i> Verificar atualizações</button>
+        </div>
+        ${dispHtml}
+      </div></div>
+      ${autoHtml}`;
+    if (window.lucide) lucide.createIcons();
+    if (st.em_andamento) updAgendar(body, 2500);
+  }
+
+  window.saVerificarAtualizacao = async function () {
+    const bt = document.getElementById('sa-upd-check');
+    if (bt) { bt.disabled = true; bt.textContent = 'Verificando…'; }
+    try {
+      updVerificacao = await api('/api/system/update/check', { method: 'POST' });
+      if (window.cortexVersao) window.cortexVersao.verificar();
+    } catch (e) { toast(e.message, 'error'); }
+    const body = document.getElementById('sa-body');
+    if (body) renderUpdates(body);
+  };
+
+  window.saAplicarAtualizacao = async function (versao) {
+    if (!confirm(`Instalar a versão ${versao} agora?\n\nO sistema fica fora do ar por 1 a 3 minutos para todos os usuários. ` +
+      'Peça para salvarem o que estiverem fazendo. Antes de instalar é feito backup do banco.')) return;
+    try {
+      await api('/api/system/update/apply', { method: 'POST' });
+      toast('Atualização iniciada.', 'success');
+    } catch (e) { toast(e.message, 'error'); }
+    const body = document.getElementById('sa-body');
+    if (body) renderUpdates(body);
+  };
+
+  window.saSalvarAuto = async function () {
+    const ativo = document.getElementById('sa-upd-auto').checked;
+    const hora = document.getElementById('sa-upd-hora').value || '03:00';
+    try {
+      await api('/api/system/update/auto', { method: 'PUT', body: { ativo, hora } });
+      toast(ativo ? `Atualização automática ligada (${hora}).` : 'Atualização automática desligada.', 'success');
+    } catch (e) { toast(e.message, 'error'); }
+  };
 
   async function renderOverview(body) {
     const d = await api('/api/superadmin/overview');
