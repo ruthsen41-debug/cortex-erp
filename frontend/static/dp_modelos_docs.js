@@ -161,7 +161,7 @@ async function _mdEditar(codigo) {
       <div class="flex flex-col gap-2">
         <div class="text-[11px] font-bold uppercase tracking-wide text-violet-600">Clique para inserir</div>
         <div class="border border-slate-200 dark:border-slate-700 rounded-lg max-h-[520px] overflow-y-auto p-1">
-          ${calc.length ? `<div class="text-[10px] font-semibold text-slate-500 px-2 pt-1">Deste modelo</div>${calc.map(k => chip(k, 'campo do modelo')).join('')}
+          ${calc.length ? `<div class="text-[10px] font-semibold text-slate-500 px-2 pt-1">Deste modelo</div>${calc.map(k => chip(k, (m.rotulos_calculadas || {})[k] || 'campo do modelo')).join('')}
             <div class="text-[10px] font-semibold text-slate-500 px-2 pt-2">Cadastro</div>` : ''}
           ${vars.map(([k, t]) => chip(k, t)).join('')}
         </div>

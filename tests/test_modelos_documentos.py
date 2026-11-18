@@ -94,6 +94,7 @@ def test_personalizar_restaurar_e_modelo_proprio():
     assert r.status_code == 200 and r.json()["personalizado"]
     doc = client.get(f"/api/dp/employees/{eid}/modelo/carta_recomendacao", headers=h).text
     assert "Termo da Casa" in doc and "<b>Lia Custom</b>" in doc
+    assert client.get(f"{BASE}/aviso_ferias", headers=h).json()["rotulos_calculadas"]["retorno"] == "Retorno ao trabalho"
 
     ruim = client.put(f"{BASE}/carta_recomendacao", headers=h, json={"titulo": "x", "texto": "{{empregado.salario_mensal}}"})
     assert ruim.status_code == 422 and "salario_mensal" in ruim.json()["detail"]
@@ -104,7 +105,8 @@ def test_personalizar_restaurar_e_modelo_proprio():
     assert not client.get(f"{BASE}/carta_recomendacao", headers=h2).json()["personalizado"]
 
     assert client.delete(f"{BASE}/carta_recomendacao", headers=h).json()["restaurado"] is True
-    assert "Carta de Recomendação" in client.get(f"/api/dp/employees/{eid}/modelo/carta_recomendacao", headers=h).text
+    carta = client.get(f"/api/dp/employees/{eid}/modelo/carta_recomendacao", headers=h).text
+    assert "Carta de Recomendação" in carta and "vazio" not in carta.split("<body>")[1]   # complemento em branco some
 
     novo = client.post(BASE, headers=h, json={"titulo": "Termo de uniforme",
                                               "texto": "# Uniforme\n\nRecebi, {{empregado.nome}}, em {{data.hoje}}."})

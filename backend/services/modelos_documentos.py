@@ -894,6 +894,7 @@ th{background:#eee}.sig{margin-top:56px;display:grid;grid-template-columns:1fr 1
 
 _RE_VAR = re.compile(r"\{\{\s*([\w.]+)\s*\}\}")
 _RE_BLOCO = re.compile(r"^\[\[\s*([\w]+)\s*(?::\s*(.*?))?\s*\]\]$")
+OPCIONAIS = {"complemento"}                     # campos que podem ficar em branco sem linha para preencher
 BLOCOS = {"assinaturas", "dependentes_salario_familia", "dependentes_ir", "vale_transporte"}
 ASSINANTES = {"empregador", "empregado", "testemunhas", "recebido"}
 
@@ -941,6 +942,27 @@ _CALCULADAS = {
     "carta_recomendacao": ["periodo_ate"],
     "abandono_emprego": ["ultimo_dia_br", "dia_seguinte"],
 }
+
+
+ROTULOS_CALCULADAS = {
+    "fim_periodo": "Término do 1º período", "fim_prorrogacao": "Término da prorrogação",
+    "data_termino_br": "Data de término", "duracao_dias": "Duração em dias", "justificativa_texto": "Texto da justificativa",
+    "valor_hora_brl": "Valor da hora (R$)", "valor_hora_extenso": "Valor da hora por extenso", "termino_br": "Data de término",
+    "modalidade_texto": "Texto da modalidade", "periodo_aquisitivo": "Período aquisitivo", "gozo_inicio": "Início do gozo",
+    "gozo_fim": "Fim do gozo", "retorno": "Retorno ao trabalho", "data_pagamento": "Data-limite do pagamento",
+    "abono_texto": "Abono (texto)", "prazo_requerimento": "Prazo para requerer", "opcao_texto": "Texto da opção",
+    "valor_brl": "Valor (R$)", "valor_extenso": "Valor por extenso", "valor_parcela": "Valor da parcela",
+    "periodo_ate": "Fim do período (texto)", "ultimo_dia_br": "Último dia trabalhado", "dia_seguinte": "Primeiro dia de falta",
+}
+
+
+def rotulos_calculados(codigo: Optional[str]) -> Dict[str, str]:
+    m = MODELOS.get(codigo or "")
+    if not m:
+        return {}
+    out = {c["nome"]: c["rotulo"] for c in m.get("campos", [])}
+    out.update({k: ROTULOS_CALCULADAS.get(k, k) for k in _CALCULADAS.get(codigo, [])})
+    return out
 
 
 def campos_calculados(codigo: Optional[str]) -> List[str]:
@@ -1032,6 +1054,11 @@ def renderizar(texto: str, var: Dict[str, str], titulo: str = "Documento",
     lista: List[str] = []
 
     def fecha_par():
+        # parágrafo feito só de uma variável opcional vazia (ex.: {{complemento}}) não aparece
+        if len(paragrafo) == 1:
+            m = _RE_VAR.fullmatch(paragrafo[0])
+            if m and not var.get(m.group(1)) and m.group(1) in OPCIONAIS:
+                paragrafo.clear()
         if paragrafo:
             corpo.append("<p>" + "<br>".join(_inline(l, var) for l in paragrafo) + "</p>")
             paragrafo.clear()
@@ -1113,7 +1140,8 @@ def obter(conn, company_id: int, codigo: str) -> Dict[str, Any]:
             "base_legal": m["base_legal"] if m else "", "descricao": m["descricao"] if m else "Modelo criado pela empresa.",
             "campos": m["campos"] if m else [], "proprio": not m,
             "titulo_padrao": m["titulo"] if m else "", "texto_padrao": m["texto"] if m else "",
-            "variaveis": VARIAVEIS, "calculadas": campos_calculados(codigo)}
+            "variaveis": VARIAVEIS, "calculadas": campos_calculados(codigo),
+            "rotulos_calculadas": rotulos_calculados(codigo)}
     if p:
         base.update(titulo=p["titulo"] or (m or {}).get("titulo", ""), texto=p["texto"], personalizado=True,
                     atualizado_em=p["atualizado_em"], atualizado_por=p["atualizado_por"])
