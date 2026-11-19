@@ -81,9 +81,10 @@ def test_status_na_nuvem_e_apply_recusado(monkeypatch):
 
 
 def test_check_sem_internet_nao_quebra(instalado, monkeypatch):
-    def falha(url):
+    def falha(req, timeout=0):
         raise urllib.error.URLError("offline")
-    monkeypatch.setattr(atu, "_baixar_json", falha)
+    atu.gravar_config(licenca="CTX-AAAA-BBBB-CCCC")
+    monkeypatch.setattr(atu.urllib.request, "urlopen", falha)
     r = client.post("/api/system/update/check", headers=_super())
     assert r.status_code == 200
     assert r.json()["ok"] is False and "conexão" in r.json()["erro"]
@@ -124,9 +125,11 @@ def test_admin_da_empresa_verifica_e_usuario_comum_nao(monkeypatch):
 
 
 # ── leitura da versão publicada ──────────────────────────────────────────────
+GH = "https://api.github.com/repos/ruthsen41-debug/cortex-erp/releases/latest"
+
 def test_consulta_release_do_github_com_manifesto(monkeypatch):
     respostas = {
-        atu.URL_PADRAO: {
+        GH: {
             "tag_name": "v99.0.0", "body": "notas da release", "published_at": "2026-11-18T10:00:00Z",
             "assets": [
                 {"name": atu.NOME_SETUP, "browser_download_url": "https://x/setup.exe", "size": 123},
@@ -135,7 +138,7 @@ def test_consulta_release_do_github_com_manifesto(monkeypatch):
         },
         "https://x/manifesto.json": {"versao": "99.0.0", "sha256": "ABC123", "notas": "o que mudou"},
     }
-    monkeypatch.delenv("CORTEX_UPDATE_URL", raising=False)
+    monkeypatch.setenv("CORTEX_UPDATE_URL", GH)  # modo legado (Release do GitHub)
     monkeypatch.setattr(atu, "_baixar_json", lambda url: respostas[url])
     info = atu.consultar_ultima_versao()
     assert info["versao"] == "99.0.0" and info["nova"] is True
@@ -146,7 +149,7 @@ def test_consulta_release_do_github_com_manifesto(monkeypatch):
 def test_consulta_release_sem_manifesto_usa_digest_e_sem_setup_falha(monkeypatch):
     rel = {"tag_name": "v1.0.0", "assets": [
         {"name": atu.NOME_SETUP, "browser_download_url": "u", "size": 1, "digest": "sha256:FFEE"}]}
-    monkeypatch.delenv("CORTEX_UPDATE_URL", raising=False)
+    monkeypatch.setenv("CORTEX_UPDATE_URL", GH)
     monkeypatch.setattr(atu, "_baixar_json", lambda url: rel)
     info = atu.consultar_ultima_versao()
     assert info["sha256"] == "ffee" and info["nova"] is False

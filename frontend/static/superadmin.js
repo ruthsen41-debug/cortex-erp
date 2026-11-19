@@ -63,7 +63,8 @@
   let saTab = 'overview';
   const TABS = [
     ['overview', 'Visão geral'], ['companies', 'Empresas clientes'], ['tables', 'Tabelas legais'],
-    ['rubrics', 'Rubricas globais'], ['support', 'Solicitações'], ['updates', 'Atualizações'],
+    ['rubrics', 'Rubricas globais'], ['support', 'Solicitações'], ['licencas', 'Licenças'],
+    ['updates', 'Atualizações'],
   ];
 
   window.renderSuperadmin = async function (container) {
@@ -98,6 +99,7 @@
       else if (saTab === 'tables') await renderTables(body);
       else if (saTab === 'rubrics') await renderRubrics(body);
       else if (saTab === 'support') await renderSupportQueue(body);
+      else if (saTab === 'licencas') await renderLicencas(body);
       else if (saTab === 'updates') await renderUpdates(body);
     } catch (e) {
       body.innerHTML = `<div class="alert alert-danger">${esc(e.message)}</div>`;
@@ -196,6 +198,20 @@
         <div><strong>Você está na versão mais recente.</strong><div class="text-muted" style="font-size:.8rem">${nuvem ? 'Versão no ar' : 'Última versão publicada'}: ${esc(disp ? disp.versao : '—')} · verificado em ${esc(fmtDate(v.em))}</div></div></div>`;
     }
 
+    const licencaHtml = st.modo === 'instalado'
+      ? `<div class="card" style="margin-bottom:1rem"><div class="card-body">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
+          <div><strong>Chave de licença</strong><br>
+            <span class="text-muted" style="font-size:.8rem">${st.licenca
+              ? 'Em uso: <code>' + esc(st.licenca) + '</code>'
+              : 'Nenhuma chave informada. Ela vem no contrato (formato CTX-XXXX-XXXX-XXXX).'}</span></div>
+          <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+            <input class="form-control" id="sa-upd-chave" placeholder="CTX-XXXX-XXXX-XXXX" maxlength="40"
+              style="width:220px;text-transform:uppercase;font-family:monospace">
+            <button class="btn btn-secondary" onclick="saSalvarLicenca()">${st.licenca ? 'Trocar chave' : 'Salvar chave'}</button>
+          </div>
+        </div></div></div>`
+      : '';
     const auto = st.auto || {};
     const autoHtml = st.modo === 'instalado'
       ? `<div class="card"><div class="card-body">
@@ -224,6 +240,7 @@
         </div>
         ${dispHtml}
       </div></div>
+      ${licencaHtml}
       ${autoHtml}`;
     if (window.lucide) lucide.createIcons();
     if (st.em_andamento) updAgendar(body, 2500);
@@ -248,6 +265,17 @@
     if (updBody && updBody.isConnected) renderUpdates(updBody);
   };
 
+  window.saSalvarLicenca = async function () {
+    const chave = (document.getElementById('sa-upd-chave').value || '').trim();
+    if (!chave) { toast('Digite a chave de licença.', 'error'); return; }
+    try {
+      const r = await api('/api/system/update/licenca', { method: 'PUT', body: { chave } });
+      updVerificacao = r.verificacao;
+      toast('Chave salva.', 'success');
+    } catch (e) { toast(e.message, 'error'); }
+    if (updBody && updBody.isConnected) renderUpdates(updBody);
+  };
+
   window.saSalvarAuto = async function () {
     const ativo = document.getElementById('sa-upd-auto').checked;
     const hora = document.getElementById('sa-upd-hora').value || '03:00';
@@ -268,6 +296,107 @@
     const body = container.querySelector('#upd-body');
     try { await renderUpdates(body); }
     catch (e) { body.innerHTML = `<div class="alert alert-danger">${esc(e.message)}</div>`; }
+  };
+
+  // ── LICENÇAS (escritórios que compraram o Cortex instalado) ───────────────
+  const hojeISO = () => new Date().toISOString().slice(0, 10);
+  const fmtDia = (s) => (s ? String(s).slice(0, 10).split('-').reverse().join('/') : '—');
+
+  function situacaoLicenca(l) {
+    if (!l.ativa) return '<span class="badge badge-danger">Suspensa</span>';
+    if (l.expira_em && l.expira_em < hojeISO()) return '<span class="badge badge-warning">Vencida</span>';
+    return '<span class="badge badge-success">Ativa</span>';
+  }
+
+  async function renderLicencas(body) {
+    const [d, v] = await Promise.all([
+      api('/api/superadmin/licencas'),
+      api('/api/superadmin/licencas/versoes').catch(() => null),
+    ]);
+    const lic = d.licencas || [];
+    body.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1rem">
+        <p class="text-muted" style="margin:0;font-size:.85rem;max-width:640px">
+          Cada escritório que tem o Cortex instalado recebe uma chave. O servidor dele só baixa atualizações
+          enquanto a chave estiver ativa e dentro do vencimento. Suspender não desliga o sistema do cliente:
+          só bloqueia as versões novas.
+          ${v && v.atual ? `<br>Versão publicada agora: <strong>${esc(v.atual)}</strong>.` : ''}
+        </p>
+        <button class="btn btn-primary" onclick="saNovaLicenca()"><i data-lucide="key-round" style="width:16px;height:16px"></i> Nova licença</button>
+      </div>
+      <div class="card"><div class="card-body">
+      ${lic.length ? `<div class="table-responsive"><table class="table"><thead><tr>
+        <th>Escritório</th><th>Chave</th><th>Situação</th><th>Vence</th><th>Versão instalada</th><th>Último contato</th><th></th></tr></thead><tbody>
+        ${lic.map((l) => `<tr>
+          <td><strong>${esc(l.cliente)}</strong>${l.cnpj ? `<div class="text-muted" style="font-size:.75rem">${esc(l.cnpj)}</div>` : ''}</td>
+          <td style="white-space:nowrap"><code>${esc(l.chave)}</code>
+            <button class="btn btn-sm btn-secondary" title="Copiar" data-chave="${esc(l.chave)}" onclick="saCopiarChave(this.dataset.chave)"><i data-lucide="copy" style="width:14px;height:14px"></i></button></td>
+          <td>${situacaoLicenca(l)}</td>
+          <td>${l.expira_em ? fmtDia(l.expira_em) : 'Sem vencimento'}</td>
+          <td>${esc(l.versao_instalada || '—')}</td>
+          <td>${l.ultimo_acesso ? esc(fmtDate(l.ultimo_acesso)) : '<span class="text-muted">nunca</span>'}</td>
+          <td style="white-space:nowrap">
+            <button class="btn btn-sm btn-secondary" data-chave="${esc(l.chave)}" onclick="saEditarLicenca(this.dataset.chave)">Editar</button>
+            ${l.ativa
+              ? `<button class="btn btn-sm btn-danger" data-chave="${esc(l.chave)}" onclick="saAtivarLicenca(this.dataset.chave, false)">Suspender</button>`
+              : `<button class="btn btn-sm btn-success" data-chave="${esc(l.chave)}" onclick="saAtivarLicenca(this.dataset.chave, true)">Reativar</button>`}
+          </td></tr>`).join('')}
+        </tbody></table></div>` : '<p class="text-muted" style="margin:0">Nenhuma licença ainda. Crie uma quando vender o Cortex para um escritório.</p>'}
+      </div></div>`;
+    window._saLicencas = lic;
+    if (window.lucide) lucide.createIcons();
+  }
+
+  function formLicenca(l) {
+    l = l || {};
+    return `
+      <div class="form-group"><label>Escritório (cliente) *</label><input class="form-control" id="lic-cliente" value="${esc(l.cliente || '')}"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
+        <div class="form-group"><label>CNPJ</label><input class="form-control" id="lic-cnpj" value="${esc(l.cnpj || '')}"></div>
+        <div class="form-group"><label>E-mail</label><input class="form-control" id="lic-email" value="${esc(l.email || '')}"></div>
+      </div>
+      <div class="form-group"><label>Vence em</label><input type="date" class="form-control" id="lic-expira" value="${esc(l.expira_em || '')}">
+        <small class="text-muted">Deixe em branco para não vencer. Depois do vencimento o cliente para de receber atualizações.</small></div>
+      <div class="form-group"><label>Observação</label><input class="form-control" id="lic-obs" value="${esc(l.observacao || '')}"></div>`;
+  }
+
+  function lerFormLicenca(w) {
+    const g = (id) => w.querySelector('#' + id).value.trim();
+    return { cliente: g('lic-cliente'), cnpj: g('lic-cnpj'), email: g('lic-email'), expira_em: g('lic-expira') || null, observacao: g('lic-obs') };
+  }
+
+  window.saNovaLicenca = function () {
+    modal('Nova licença', formLicenca(), async (w) => {
+      const r = await api('/api/superadmin/licencas', { method: 'POST', body: lerFormLicenca(w) });
+      const chave = r.licenca && r.licenca.chave;
+      loadTab();
+      if (chave) modal('Licença criada', `<p>Envie esta chave ao escritório. Ela é digitada no servidor dele em
+        <strong>Administração › Atualizações</strong>:</p>
+        <div style="font-family:monospace;font-size:1.4rem;font-weight:700;text-align:center;padding:1rem;border:1px dashed var(--border);border-radius:8px">${esc(chave)}</div>`,
+        async () => { await saCopiarChave(chave); }, 'Copiar chave');
+    }, 'Criar');
+  };
+
+  window.saEditarLicenca = function (chave) {
+    const l = (window._saLicencas || []).find((x) => x.chave === chave);
+    modal('Editar licença ' + chave, formLicenca(l), async (w) => {
+      await api('/api/superadmin/licencas/' + encodeURIComponent(chave), { method: 'PATCH', body: lerFormLicenca(w) });
+      loadTab();
+    });
+  };
+
+  window.saAtivarLicenca = async function (chave, ativa) {
+    if (!ativa && !confirm('Suspender esta licença?\n\nO sistema do escritório continua funcionando, mas ele deixa de receber atualizações.')) return;
+    try {
+      await api('/api/superadmin/licencas/' + encodeURIComponent(chave), { method: 'PATCH', body: { ativa } });
+      toast(ativa ? 'Licença reativada.' : 'Licença suspensa.', 'success');
+      loadTab();
+    } catch (e) { toast(e.message, 'error'); }
+  };
+
+  window.saCopiarChave = async function (chave) {
+    try { await navigator.clipboard.writeText(chave); toast('Chave copiada.', 'success'); }
+    catch (e) { prompt('Copie a chave:', chave); }
   };
 
   async function renderOverview(body) {

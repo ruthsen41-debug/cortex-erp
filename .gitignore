@@ -38,3 +38,6 @@ data/.jwt_secret
 installer/build/
 installer/cache/
 installer/Output/
+
+# Cloudflare (wrangler)
+.wrangler/

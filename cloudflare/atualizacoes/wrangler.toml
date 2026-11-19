@@ -1,0 +1,16 @@
+name = "cortex-atualizacoes"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "cortex-atualizacoes"
+
+[[d1_databases]]
+binding = "LICENCAS"
+database_name = "cortex-licencas"
+database_id = "PREENCHER_APOS_CRIAR"   # wrangler d1 create cortex-licencas
+
+# Segredos (não ficam neste arquivo):
+#   wrangler secret put ADMIN_TOKEN   -> token do dono (Painel do Sistema e script de lançamento)
+#   wrangler secret put LINK_SECRET   -> assina os links de download

@@ -13,8 +13,13 @@
     4. gera o instalador (installer\build_instalador.ps1)
     5. calcula o SHA-256 e gera installer\Output\cortex-update.json
     6. commit + tag vX.Y.Z + push   -> a nuvem (Render) atualiza sozinha
-    7. cria a Release no GitHub com o instalador -> os servidores dos clientes
-       veem "Nova versão disponível" em Painel do Sistema > Atualizações
+    7. envia o instalador ao servidor de atualizações (Cloudflare, depósito privado)
+       e publica a versão -> os servidores dos clientes com licença ativa veem
+       "Nova versão disponível" em Administração > Atualizações
+
+  Servidor de atualizações (cloudflare/atualizacoes): endereço e token do dono em
+      %USERPROFILE%\.cortex\atualizacoes.json   {"url": "https://...workers.dev", "token": "..."}
+  ou nas variáveis CORTEX_ATUALIZACOES_URL e CORTEX_ATUALIZACOES_ADMIN_TOKEN.
 #>
 param(
     [string]$Versao = "",
@@ -40,6 +45,20 @@ $Atual = "$($m.Groups[1].Value).$($m.Groups[2].Value).$($m.Groups[3].Value)"
 if (-not $Versao) { $Versao = "$($m.Groups[1].Value).$($m.Groups[2].Value).$([int]$m.Groups[3].Value + 1)" }
 if ($Versao -notmatch '^\d+\.\d+\.\d+$') { throw "Versão inválida: $Versao (use o formato 4.6.0)" }
 if ([version]$Versao -le [version]$Atual) { throw "A versão nova ($Versao) precisa ser maior que a atual ($Atual)." }
+
+# servidor de atualizações (confere antes de gastar tempo com testes e instalador)
+$AtuUrl = $env:CORTEX_ATUALIZACOES_URL
+$AtuToken = $env:CORTEX_ATUALIZACOES_ADMIN_TOKEN
+$ArqAtu = Join-Path $env:USERPROFILE ".cortex\atualizacoes.json"
+if ((-not $AtuUrl -or -not $AtuToken) -and (Test-Path $ArqAtu)) {
+    $cfgAtu = Get-Content $ArqAtu -Raw | ConvertFrom-Json
+    if (-not $AtuUrl) { $AtuUrl = $cfgAtu.url }
+    if (-not $AtuToken) { $AtuToken = $cfgAtu.token }
+}
+if (-not $SemPublicar -and (-not $AtuUrl -or -not $AtuToken)) {
+    throw "Servidor de atualizações não configurado. Crie $ArqAtu com o endereço (url) e o token do Worker."
+}
+if ($AtuUrl) { $AtuUrl = $AtuUrl.TrimEnd("/") }
 
 if ($ArquivoNotas) { $Notas = [IO.File]::ReadAllText((Resolve-Path $ArquivoNotas)) }
 if (-not $Notas) { $Notas = "Melhorias e correções." }
@@ -102,14 +121,24 @@ Checar "git push"
 git push origin "v$Versao"
 Checar "git push da tag"
 
-Passo "Publicando a Release no GitHub"
-$ArqNotas = Join-Path $env:TEMP "cortex-notas-$Versao.md"
-[IO.File]::WriteAllText($ArqNotas, $Notas, (New-Object System.Text.UTF8Encoding($false)))
-gh release create "v$Versao" $Setup $ArqManifesto --title "Cortex ERP $Versao" --notes-file $ArqNotas
-Checar "gh release create"
-Remove-Item $ArqNotas -ErrorAction SilentlyContinue
+$curl = (Get-Command curl.exe -ErrorAction Stop).Source
+
+Passo "Enviando o instalador ao servidor de atualizações"
+# -T envia o arquivo aos poucos (não carrega os ~50 MB na memória)
+$up = & $curl -sS --fail-with-body -X PUT -T $Setup -H "Authorization: Bearer $AtuToken" -H "X-Sha256: $hash" "$AtuUrl/v1/admin/versoes/$Versao/arquivo"
+Checar "Envio do instalador ($up)"
+Write-Host $up
+
+Passo "Publicando a versão $Versao"
+$pub = [ordered]@{ sha256 = $hash; notas = $Notas; publicada_em = $manifesto.publicada_em }
+$ArqPub = Join-Path $env:TEMP "cortex-publicar-$Versao.json"
+[IO.File]::WriteAllText($ArqPub, ($pub | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
+$res = & $curl -sS --fail-with-body -X PUT -H "Authorization: Bearer $AtuToken" -H "Content-Type: application/json" --data-binary "@$ArqPub" "$AtuUrl/v1/admin/versoes/$Versao/publicar"
+Checar "Publicação da versão ($res)"
+Remove-Item $ArqPub -ErrorAction SilentlyContinue
+Write-Host $res
 
 Write-Host ""
 Write-Host "Versão $Versao lançada." -ForegroundColor Green
 Write-Host " - Nuvem: o Render publica sozinho em alguns minutos (o navegador avisa quem estiver com o sistema aberto)."
-Write-Host " - Servidores instalados: aparece em Painel do Sistema > Atualizações (ou instala de madrugada, se ligado)."
+Write-Host " - Servidores instalados (licença ativa): aparece em Administração > Atualizações (ou instala de madrugada, se ligado)."
