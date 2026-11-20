@@ -13,7 +13,7 @@ import hashlib
 from functools import lru_cache
 from pathlib import Path
 
-APP_VERSION = "4.5.0"
+APP_VERSION = "4.6.0"
 
 _FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
