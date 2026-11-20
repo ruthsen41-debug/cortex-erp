@@ -53,7 +53,7 @@ router = APIRouter(prefix="/api/system/update", tags=["Sistema, Backup & Monitor
 
 # Servidor de atualizações e licenças (Cloudflare Worker). Pode ser trocado por
 # CORTEX_ATUALIZACOES_URL no .env da instalação.
-SERVIDOR_PADRAO = "https://cortex-atualizacoes.PREENCHER.workers.dev"
+SERVIDOR_PADRAO = "https://cortex-atualizacoes.ruthsen41.workers.dev"
 RE_CHAVE = re.compile(r"^CTX(-[A-Z0-9]{4}){3}$")
 NOME_SETUP = "CortexERP-Setup.exe"
 NOME_MANIFESTO = "cortex-update.json"

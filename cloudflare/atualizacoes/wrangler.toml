@@ -9,7 +9,7 @@ bucket_name = "cortex-atualizacoes"
 [[d1_databases]]
 binding = "LICENCAS"
 database_name = "cortex-licencas"
-database_id = "PREENCHER_APOS_CRIAR"   # wrangler d1 create cortex-licencas
+database_id = "015afc15-13f4-4de9-989d-af3d312094e9"
 
 # Segredos (não ficam neste arquivo):
 #   wrangler secret put ADMIN_TOKEN   -> token do dono (Painel do Sistema e script de lançamento)
